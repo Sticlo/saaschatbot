@@ -33,6 +33,24 @@ services:
       timeout: 5s
       retries: 5
 
+  evolution:
+    image: evoapicloud/evolution-api:v2.2.3
+    container_name: saaschatbot_evolution
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-change-me-evolution-key}
+      SERVER_URL: http://localhost:8080
+      DEL_INSTANCE: "false"
+      DATABASE_ENABLED: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/1
+      WEBHOOK_GLOBAL_ENABLED: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

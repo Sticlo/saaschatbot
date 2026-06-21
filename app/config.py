@@ -28,5 +28,11 @@ class Settings(BaseSettings):
     paid_daily_bait_limit: int = 100
     default_plan_slug: str = "pro"
 
+    evolution_api_url: str = "http://localhost:8080"
+    evolution_api_key: str = "change-me-evolution-key"
+    evolution_database_url: str = ""
+    app_public_url: str = "http://host.docker.internal:8000"
+    evolution_webhook_secret: str = "change-me-webhook-secret"
+
 
 settings = Settings()

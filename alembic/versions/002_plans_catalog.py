@@ -60,7 +60,7 @@ def upgrade() -> None:
                 trial_bait_limit, daily_bait_limit, max_team_members,
                 features, is_active, is_public, sort_order
             ) VALUES (
-                :id, 'pro', 'Plan Pro',
+                CAST(:id AS uuid), 'pro', 'Plan Pro',
                 'Prospecta por WhatsApp con IA, extractor de Google Maps y panel en tiempo real.',
                 80000, 2000, 10, 100, 3,
                 '{"ai_on_reply": true, "maps_scraper": true, "realtime_panel": true}'::jsonb,
@@ -76,7 +76,7 @@ def upgrade() -> None:
     )
     op.execute(
         sa.text(
-            "UPDATE subscriptions SET plan_id = :plan_id WHERE plan_id IS NULL"
+            "UPDATE subscriptions SET plan_id = CAST(:plan_id AS uuid) WHERE plan_id IS NULL"
         ).bindparams(plan_id=DEFAULT_PLAN_ID)
     )
     op.alter_column("subscriptions", "plan_id", nullable=False)

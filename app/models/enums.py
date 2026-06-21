@@ -28,3 +28,36 @@ class SubscriptionStatus(str, enum.Enum):
     ACTIVE = "active"
     PAST_DUE = "past_due"
     CANCELLED = "cancelled"
+
+
+class ConversationMode(str, enum.Enum):
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
+class ConversationStatus(str, enum.Enum):
+    ACTIVE = "active"
+    EXCLUDED = "excluded"
+    CLOSED = "closed"
+
+
+class MessageDirection(str, enum.Enum):
+    IN = "in"
+    OUT = "out"
+
+
+class MessageSource(str, enum.Enum):
+    CONTACT = "contact"
+    AGENT = "agent"
+    BOT = "bot"
+    SYSTEM = "system"
+    BAIT = "bait"
+
+
+class MessageStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+    RECEIVED = "received"
+    FAILED = "failed"

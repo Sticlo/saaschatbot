@@ -10,7 +10,8 @@ venv/
 *.db-wal
 logs/
 media_files/
-mockups/
+services/
+.evolution/
 *.csv
 *.xlsx
 ~$*.xlsx

@@ -7,11 +7,14 @@ from app.config import settings
 from app.database import Base
 from app.models import (  # noqa: F401 — register models
     AuditLog,
+    Conversation,
+    Message,
     Plan,
     Subscription,
     Tenant,
     TenantProfile,
     User,
+    WhatsAppSession,
 )
 
 config = context.config

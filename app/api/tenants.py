@@ -15,6 +15,7 @@ from app.schemas.auth import (
     TenantResponse,
     TenantSettingsUpdate,
 )
+from app.services.realtime_service import publish_tenant_settings
 from app.services.tenant_service import log_audit
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -55,6 +56,7 @@ def update_my_tenant(
     )
     db.commit()
     db.refresh(tenant)
+    publish_tenant_settings(tenant)
     return tenant
 
 

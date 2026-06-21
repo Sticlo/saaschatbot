@@ -52,6 +52,9 @@ class Tenant(Base):
     subscription: Mapped[Optional["Subscription"]] = relationship(  # noqa: F821
         back_populates="tenant", uselist=False, cascade="all, delete-orphan"
     )
+    whatsapp_session: Mapped[Optional["WhatsAppSession"]] = relationship(  # noqa: F821
+        back_populates="tenant", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class TenantProfile(Base):

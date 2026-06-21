@@ -14,6 +14,8 @@ if command -v docker >/dev/null 2>&1; then
   echo "→ Postgres + Redis levantados"
 else
   echo "⚠ Docker no encontrado. Asegúrate de tener Postgres y Redis corriendo."
+  echo "  brew services start postgresql@16 redis"
+  echo "  Evolution (Mac sin Docker): ./scripts/evolution-mac.sh start"
 fi
 
 if [ ! -d .venv ]; then
@@ -25,4 +27,9 @@ fi
 echo "→ Migraciones aplicadas"
 
 echo "→ API en http://localhost:8000/docs"
-exec .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+echo "→ Panel en http://localhost:8000/panel"
+exec .venv/bin/uvicorn app.main:app --reload \
+  --host 0.0.0.0 --port 8000 \
+  --reload-exclude 'alembic/*' \
+  --reload-exclude 'services/*' \
+  --reload-exclude '.venv/*'
