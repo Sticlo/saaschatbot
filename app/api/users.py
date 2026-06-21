@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas.auth import InviteUserRequest, UpdateUserRoleRequest, UserResponse
+from app.services.subscription_service import get_tenant_subscription
 from app.services.tenant_service import log_audit
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -34,6 +35,24 @@ def invite_user(
     current: RequireOwner,
     db: Session = Depends(get_db),
 ):
+    subscription = get_tenant_subscription(db, current.tenant_id)
+    if subscription is None or subscription.plan is None:
+        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+
+    active_count = (
+        db.query(User)
+        .filter(User.tenant_id == current.tenant_id, User.is_active.is_(True))
+        .count()
+    )
+    if active_count >= subscription.plan.max_team_members:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Límite de usuarios alcanzado ({subscription.plan.max_team_members} "
+                f"en plan {subscription.plan.name})"
+            ),
+        )
+
     user = User(
         tenant_id=current.tenant_id,
         email=body.email.lower().strip(),

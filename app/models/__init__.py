@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from app.models.audit_log import AuditLog
 from app.models.enums import SubscriptionStatus, TenantPlan, UserRole, WhatsAppStatus
+from app.models.plan import DEFAULT_PLAN_ID, Plan
 from app.models.subscription import Subscription
 from app.models.tenant import Tenant, TenantProfile
 from app.models.user import User
 
 __all__ = [
     "AuditLog",
+    "DEFAULT_PLAN_ID",
+    "Plan",
     "Subscription",
     "SubscriptionStatus",
     "Tenant",

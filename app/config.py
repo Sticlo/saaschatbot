@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     trial_bait_limit: int = 10
     paid_daily_bait_limit: int = 100
+    default_plan_slug: str = "pro"
 
 
 settings = Settings()

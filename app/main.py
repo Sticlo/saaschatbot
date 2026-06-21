@@ -10,10 +10,16 @@ from app.api.router import api_router
 from app.config import settings
 from app.database import SessionLocal
 from app.redis_client import get_redis, redis_ping
+from app.services.plan_service import ensure_default_plan
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        with SessionLocal() as db:
+            ensure_default_plan(db)
+    except Exception:
+        pass
     yield
     try:
         get_redis().close()

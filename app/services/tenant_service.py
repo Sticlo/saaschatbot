@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import (
     AuditLog,
     Subscription,
@@ -17,6 +16,7 @@ from app.models import (
     UserRole,
 )
 from app.core.security import slugify
+from app.services.plan_service import get_default_plan
 
 
 def _unique_slug(db: Session, business_name: str) -> str:
@@ -38,11 +38,12 @@ def register_tenant_with_owner(
     hashed_password: str,
 ) -> Tuple[Tenant, User]:
     slug = _unique_slug(db, business_name)
+    plan = get_default_plan(db)
     tenant = Tenant(
         business_name=business_name,
         slug=slug,
         plan=TenantPlan.TRIAL.value,
-        daily_bait_limit=settings.trial_bait_limit,
+        daily_bait_limit=plan.trial_bait_limit,
     )
     db.add(tenant)
     db.flush()
@@ -50,9 +51,8 @@ def register_tenant_with_owner(
     profile = TenantProfile(tenant_id=tenant.id, onboarding_answers={})
     subscription = Subscription(
         tenant_id=tenant.id,
+        plan_id=plan.id,
         status=SubscriptionStatus.TRIAL.value,
-        trial_bait_limit=settings.trial_bait_limit,
-        paid_daily_bait_limit=settings.paid_daily_bait_limit,
     )
     owner = User(
         tenant_id=tenant.id,
