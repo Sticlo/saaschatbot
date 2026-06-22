@@ -131,22 +131,19 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
     session = get_or_create_session(db, tenant)
-    previous_status = session.status
     try:
-        session = refresh_session_status(db, tenant, session)
+        refresh = refresh_session_status(db, tenant, session)
+        session = refresh.session
         db.commit()
         db.refresh(session)
         db.refresh(tenant)
     except EvolutionAPIError:
         db.rollback()
         session = get_or_create_session(db, tenant)
+        refresh = None
 
-    if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
-        just_connected = previous_status != WhatsAppStatus.CONNECTED.value
-        ensure_whatsapp_sync_after_connect(
-            tenant.id,
-            force=just_connected,
-        )
+    if refresh and refresh.should_sync:
+        ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
     return _session_response(session)
 
@@ -221,7 +218,8 @@ def enrich_whatsapp_contacts(
         )
 
     try:
-        refresh_session_status(db, tenant, session)
+        refresh = refresh_session_status(db, tenant, session)
+        session = refresh.session
         db.commit()
     except EvolutionAPIError:
         db.rollback()
@@ -308,6 +306,7 @@ def reset_whatsapp_binding(
     )
     db.commit()
     db.refresh(session)
+    ensure_whatsapp_sync_after_connect(tenant.id, force=True)
     return _session_response(session)
 
 

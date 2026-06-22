@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import RequireAgent, RequireViewer
+from app.core.phone import is_owner_display_name, is_owner_jid, normalize_phone
+from app.config import settings
 from app.database import get_db
 from app.models import Conversation, Message, Tenant, WhatsAppSession
 from app.models.enums import MessageSource
@@ -21,7 +23,7 @@ from app.schemas.whatsapp import (
     serialize_conversation,
 )
 from app.services.realtime_service import publish_conversation_updated
-from app.services.evolution_client import EvolutionAPIError
+from app.services.evolution_client import EvolutionAPIError, evolution_client
 from app.services.tenant_service import log_audit
 from app.services.whatsapp_service import refresh_session_status, send_text_message
 
@@ -66,7 +68,27 @@ def list_conversations(
     rows = query.order_by(
         Conversation.last_message_at.desc().nullslast(), Conversation.created_at.desc()
     ).all()
-    return [_to_conversation_response(row) for row in rows]
+    owner_jid = session.bound_owner_jid or ""
+    owner_phone = normalize_phone(session.phone_number or "")
+    owner_names: set[str] = set()
+    if owner_jid and settings.evolution_database_url:
+        from app.services.evolution_store import fetch_contact_push_name
+
+        push = fetch_contact_push_name(
+            settings.evolution_database_url, session.instance_name, owner_jid
+        )
+        if push:
+            owner_names.add(push)
+    visible = []
+    for row in rows:
+        if owner_phone and normalize_phone(row.contact_phone) == owner_phone:
+            continue
+        if is_owner_jid(row.contact_jid or "", owner_jid=owner_jid, owner_phone=owner_phone):
+            continue
+        if owner_names and is_owner_display_name(row.contact_name, owner_names):
+            continue
+        visible.append(row)
+    return [_to_conversation_response(row) for row in visible]
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
@@ -223,3 +245,124 @@ def update_conversation_ai(
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     return _to_conversation_response(conversation)
+
+
+# ──────────────────────────────────────────────────────────────
+# Media
+# ──────────────────────────────────────────────────────────────
+
+_MEDIA_TYPES = {"image", "video", "audio", "sticker", "document", "ptt"}
+
+MEDIA_MIME = {
+    "image": "image/jpeg",
+    "sticker": "image/webp",
+    "video": "video/mp4",
+    "audio": "audio/ogg",
+    "ptt": "audio/ogg",
+    "document": "application/octet-stream",
+}
+
+
+@router.get("/{conversation_id}/messages/{message_id}/media")
+def get_message_media(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    current: RequireViewer,
+    db: Session = Depends(get_db),
+):
+    """Descarga media de un mensaje desde Evolution API y lo retorna en base64."""
+    from fastapi.responses import JSONResponse
+
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == current.tenant_id,
+        )
+        .first()
+    )
+    message = (
+        db.query(Message)
+        .filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        )
+        .first()
+    )
+    if conversation is None or message is None:
+        raise HTTPException(status_code=404, detail="Mensaje no encontrado")
+
+    if not message.evolution_message_id:
+        raise HTTPException(status_code=404, detail="Este mensaje no tiene media asociada")
+
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
+
+    from app.core.phone import phone_to_evolution_number
+    from app.services.evolution_store import fetch_evolution_message_by_id
+    from app.services.media_cache import get_media_from_cache
+
+    contact_jid = conversation.contact_jid or ""
+    if not contact_jid and conversation.contact_phone:
+        contact_jid = f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
+
+    # Detectar tipo desde el body del mensaje almacenado
+    body_lower = (message.body or "").strip().lower()
+    media_type = "document"
+    for mt in _MEDIA_TYPES:
+        if body_lower.startswith(f"[{mt}"):
+            media_type = mt
+            break
+
+    # 1. Buscar primero en caché local de disco (guardado en el webhook)
+    if message.evolution_message_id:
+        cached = get_media_from_cache(str(current.tenant_id), message.evolution_message_id)
+        if cached:
+            return JSONResponse({
+                "base64": cached["base64"],
+                "media_type": media_type,
+                "mimetype": cached["mimetype"],
+            })
+
+    evo_msg = fetch_evolution_message_by_id(
+        settings.evolution_database_url,
+        session.instance_name,
+        message.evolution_message_id,
+        contact_jid,
+    )
+
+    # Fallback: buscar via Evolution API si no está en DB
+    if (not evo_msg or not evo_msg.get("message")) and contact_jid:
+        found = evolution_client.find_message_by_key(
+            session.instance_name,
+            message_id=message.evolution_message_id,
+            remote_jid=contact_jid,
+        )
+        if found and isinstance(found, dict):
+            key = found.get("key") or {}
+            msg_body = found.get("message") or {}
+            if not isinstance(key, dict):
+                key = {}
+            if not isinstance(msg_body, dict):
+                msg_body = {}
+            evo_msg = {"key": key, "message": msg_body}
+
+    if not evo_msg or not evo_msg.get("message"):
+        raise HTTPException(status_code=404, detail="Media no encontrada en Evolution")
+
+    try:
+        result = evolution_client.get_media_base64(session.instance_name, evo_msg)
+    except EvolutionAPIError as exc:
+        raise HTTPException(status_code=502, detail=f"Evolution no pudo descargar el media: {exc}") from exc
+
+    b64 = result.get("base64") or result.get("data") or ""
+    mime = result.get("mimetype") or MEDIA_MIME.get(media_type, "application/octet-stream")
+    if not b64:
+        raise HTTPException(status_code=502, detail="Evolution no retornó datos de media")
+
+    return JSONResponse({"base64": b64, "media_type": media_type, "mimetype": mime})

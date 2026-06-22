@@ -91,6 +91,32 @@ def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str
     return "Contacto"
 
 
+def is_owner_jid(
+    remote_jid: str,
+    *,
+    owner_jid: str = "",
+    owner_phone: str = "",
+) -> bool:
+    """True si el JID pertenece al dueño de la sesión WA (chat consigo mismo)."""
+    if not remote_jid:
+        return False
+    if owner_jid and remote_jid == owner_jid:
+        return True
+    if remote_jid.endswith("@s.whatsapp.net") and owner_phone:
+        return jid_to_phone(remote_jid) == normalize_phone(owner_phone)
+    return False
+
+
+def is_owner_display_name(name: str, owner_names: set[str]) -> bool:
+    """Evita usar el pushName del dueño como nombre de contacto."""
+    if not name or not owner_names:
+        return False
+    cleaned = name.strip().lower()
+    if not cleaned:
+        return False
+    return cleaned in {n.strip().lower() for n in owner_names if n and n.strip()}
+
+
 def evolution_send_target(conversation) -> str:
     """Número o JID para Evolution sendText."""
     jid = getattr(conversation, "contact_jid", None) or ""

@@ -17,10 +17,14 @@
     chatListTab: "active",
     syncInProgress: false,
     autoSyncRequested: false,
+    syncWatchdog: null,
     searchQuery: "",
     searchPool: null,
     searchTimer: null,
   };
+
+  // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
+  const mediaCache = new Map();
 
   const $ = (id) => document.getElementById(id);
 
@@ -194,10 +198,29 @@
     }, 3000);
   }
 
+  function startSyncWatchdog() {
+    clearTimeout(state.syncWatchdog);
+    state.syncWatchdog = setTimeout(() => {
+      if (!state.syncInProgress) return;
+      state.syncInProgress = false;
+      fetchConversations()
+        .then((rows) => {
+          state.conversations = rows;
+          renderConversationList();
+        })
+        .catch(() => renderConversationList());
+    }, 90000);
+  }
+
+  function clearSyncWatchdog() {
+    clearTimeout(state.syncWatchdog);
+    state.syncWatchdog = null;
+  }
+
   function showSyncingList() {
     state.syncInProgress = true;
-    conversationList.innerHTML =
-      '<li class="conversation-item"><span class="muted">Importando chats de tu celular…</span></li>';
+    startSyncWatchdog();
+    renderConversationList();
   }
 
   async function triggerAutoSync() {
@@ -216,11 +239,19 @@
   function applyWaSession(wa) {
     if (!wa) return;
     const prevStatus = state.wa.status || "disconnected";
+    const prevPhone = state.wa.phone_number;
     const status = wa.status || "disconnected";
+    const nextPhone = status === "connected" ? (wa.phone_number ?? null) : null;
+    const phoneChanged =
+      status === "connected" &&
+      prevStatus === "connected" &&
+      prevPhone &&
+      nextPhone &&
+      prevPhone !== nextPhone;
     state.wa = {
       status,
       qr_base64: wa.qr_base64 ?? null,
-      phone_number: status === "connected" ? (wa.phone_number ?? null) : null,
+      phone_number: nextPhone,
     };
     updateWaBadge(state.wa.status);
     sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
@@ -231,7 +262,10 @@
     if (state.wa.status === "connected") {
       hideQrModal();
       stopWaPoll();
-      if (prevStatus !== "connected") {
+      if (phoneChanged) {
+        prepareForNewDevice();
+        triggerAutoSync();
+      } else if (prevStatus !== "connected") {
         state.autoSyncRequested = false;
         triggerAutoSync();
       } else if (!state.syncInProgress) {
@@ -394,6 +428,12 @@
 
   function renderConversationList() {
     conversationList.innerHTML = "";
+    if (state.syncInProgress) {
+      const syncLi = document.createElement("li");
+      syncLi.className = "conversation-item sync-status";
+      syncLi.innerHTML = '<span class="muted">Importando chats de tu celular…</span>';
+      conversationList.appendChild(syncLi);
+    }
     const emptyLabel =
       state.chatListTab === "archived" ? "Sin chats archivados" : "Sin conversaciones";
 
@@ -447,12 +487,124 @@
     return out;
   }
 
+  const MEDIA_TYPES = ["image", "sticker", "video", "audio", "ptt", "document"];
+
+  function detectMediaType(body) {
+    const b = (body || "").trim().toLowerCase();
+    for (const t of MEDIA_TYPES) {
+      if (b.startsWith(`[${t}`)) return t;
+    }
+    return null;
+  }
+
+  function mediaIcon(type) {
+    return {
+      image: "🖼️", sticker: "🎭", video: "🎬",
+      audio: "🎵", ptt: "🎤", document: "📄",
+    }[type] || "📎";
+  }
+
+  function mediaLabel(type) {
+    return {
+      image: "Ver imagen", sticker: "Ver sticker", video: "Ver video",
+      audio: "Escuchar audio", ptt: "Escuchar nota de voz", document: "Abrir archivo",
+    }[type] || "Ver media";
+  }
+
+  function _renderMediaElement(type, base64, mimetype) {
+    const src = `data:${mimetype};base64,${base64}`;
+    const mt = type;
+    let el;
+    if (mt === "image" || mt === "sticker") {
+      el = document.createElement("img");
+      el.src = src;
+      el.className = "media-img";
+      el.alt = mt;
+      el.addEventListener("click", () => window.open(src));
+    } else if (mt === "video") {
+      el = document.createElement("video");
+      el.src = src;
+      el.controls = true;
+      el.className = "media-video";
+    } else if (mt === "audio" || mt === "ptt") {
+      el = document.createElement("audio");
+      el.src = src;
+      el.controls = true;
+      el.className = "media-audio";
+    } else {
+      el = document.createElement("a");
+      el.href = src;
+      el.download = `archivo.${mimetype.split("/")[1] || "bin"}`;
+      el.textContent = "⬇ Descargar archivo";
+      el.className = "media-download";
+    }
+    return el;
+  }
+
+  function buildMediaBubble(m, type, timeHtml) {
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + (m.direction === "in" ? "in" : "out");
+
+    const inner = document.createElement("div");
+    inner.className = "media-wrap";
+
+    // Si ya tenemos resultado en caché, mostrar directamente sin spinner
+    const cached = mediaCache.get(m.id);
+    if (cached) {
+      if (cached.ok) {
+        const el = _renderMediaElement(cached.media_type || type, cached.base64, cached.mimetype);
+        inner.appendChild(el);
+      } else {
+        // Fallido: mostrar ícono discreto sin texto alarmante
+        const ph = document.createElement("div");
+        ph.className = "media-placeholder failed";
+        ph.innerHTML = `${mediaIcon(type)} <span class="media-type-label">${mediaLabel(type)}</span>`;
+        inner.appendChild(ph);
+      }
+      inner.insertAdjacentHTML("beforeend", timeHtml);
+      wrap.appendChild(inner);
+      return wrap;
+    }
+
+    inner.innerHTML = `<div class="media-placeholder loading">${mediaIcon(type)} <span>${mediaLabel(type)}…</span></div>${timeHtml}`;
+    wrap.appendChild(inner);
+
+    const placeholder = inner.querySelector(".media-placeholder");
+    const mediaUrl = `${API}/conversations/${m.conversation_id}/messages/${m.id}/media`;
+
+    fetch(mediaUrl, { headers: { Authorization: `Bearer ${state.token}` } })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(({ base64, media_type, mimetype }) => {
+        mediaCache.set(m.id, { ok: true, base64, media_type: media_type || type, mimetype });
+        const el = _renderMediaElement(media_type || type, base64, mimetype);
+        placeholder.replaceWith(el);
+      })
+      .catch(() => {
+        mediaCache.set(m.id, { ok: false });
+        placeholder.classList.remove("loading");
+        placeholder.classList.add("failed");
+        // Mostrar solo el ícono y tipo, sin texto de error alarmante
+        placeholder.innerHTML = `${mediaIcon(type)} <span class="media-type-label">${mediaLabel(type)}</span>`;
+      });
+
+    return wrap;
+  }
+
   function renderMessages() {
     messagesEl.innerHTML = "";
     for (const m of dedupeMessages(state.messages)) {
-      const div = document.createElement("div");
-      div.className = "msg " + (m.direction === "in" ? "in" : "out");
-      div.innerHTML = `${escapeHtml(m.body)}<span class="time">${formatTime(m.created_at)} · ${m.source}</span>`;
+      const timeHtml = `<span class="time">${formatTime(m.created_at)} · ${m.source}</span>`;
+      const mediaType = detectMediaType(m.body);
+
+      let div;
+      if (mediaType && m.id) {
+        div = buildMediaBubble(m, mediaType, timeHtml);
+      } else {
+        div = document.createElement("div");
+        div.className = "msg " + (m.direction === "in" ? "in" : "out");
+        const caption = m.body && !detectMediaType(m.body) ? escapeHtml(m.body) : escapeHtml(m.body);
+        div.innerHTML = `${caption}${timeHtml}`;
+      }
       messagesEl.appendChild(div);
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -492,16 +644,14 @@
   async function loadInitial() {
     conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
     try {
-      const [me, tenant, conversations, wa] = await Promise.all([
+      const [me, tenant, wa] = await Promise.all([
         api("/auth/me"),
         api("/tenants/me"),
-        api("/conversations?archived=false"),
         api("/whatsapp/status", {}, 8000),
       ]);
 
       state.user = me;
       state.tenant = tenant;
-      state.conversations = conversations;
       state.canWrite = roleAtLeast(me.role, "agent");
       state.canManageGlobal = me.role === "owner";
       state.canConnectWa = me.role === "owner";
@@ -512,12 +662,15 @@
       $("toggle-ai-global").disabled = !state.canManageGlobal;
 
       applyWaSession(wa);
+      if (state.wa.status === "connected" && !state.syncInProgress) {
+        state.conversations = await fetchConversations();
+      } else {
+        state.conversations = [];
+      }
       sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
       messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
 
-      if (!state.syncInProgress) {
-        renderConversationList();
-      }
+      renderConversationList();
       renderWaUi();
       connectWs();
       startWaHeartbeat();
@@ -564,9 +717,18 @@
     state.conversations = [];
     state.activeId = null;
     state.messages = [];
+    state.searchPool = null;
+    mediaCache.clear();
     renderConversationList();
     emptyChat.classList.remove("hidden");
     activeChat.classList.add("hidden");
+  }
+
+  function prepareForNewDevice() {
+    state.autoSyncRequested = false;
+    state.syncInProgress = false;
+    clearSyncWatchdog();
+    clearConversations();
   }
 
   function handleEvent(event) {
@@ -574,7 +736,10 @@
       case "connected":
         break;
       case "conversations.cleared":
-        clearConversations();
+        prepareForNewDevice();
+        if (state.wa.status === "connected") {
+          triggerAutoSync();
+        }
         break;
       case "message.in":
       case "message.out":
@@ -623,6 +788,7 @@
         showSyncingList();
         break;
       case "sync.completed":
+        clearSyncWatchdog();
         state.syncInProgress = false;
         if (event.status === "completed") {
           fetchConversations()
@@ -636,12 +802,14 @@
                 });
               }
             })
-            .catch(() => {});
+            .catch(() => renderConversationList());
         } else if (event.status === "failed") {
-          const errorMessage =
-            event.message || "No se pudieron importar los chats. Recarga la página.";
-          conversationList.innerHTML =
-            `<li class="conversation-item"><span class="error">${escapeHtml(errorMessage)}</span></li>`;
+          fetchConversations()
+            .then((rows) => {
+              state.conversations = rows;
+              renderConversationList();
+            })
+            .catch(() => renderConversationList());
         }
         break;
       case "contacts.enriched":
@@ -698,8 +866,8 @@
     if (!confirm("¿Borrar chats importados de otro celular y empezar limpio?")) return;
     try {
       await api("/whatsapp/reset-binding", { method: "POST" }, 30000);
-      clearConversations();
-      alert("Chats limpiados. Los chats se importarán solos al reconectar WhatsApp.");
+      prepareForNewDevice();
+      await triggerAutoSync();
     } catch (err) {
       alert(err.message);
     }
