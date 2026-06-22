@@ -92,6 +92,9 @@ class WhatsAppSyncResponse(BaseModel):
     status: str = "completed"
     conversations_imported: int = 0
     messages_imported: int = 0
+    contacts_enriched: int = 0
+    names_fixed: int = 0
+    phones_fixed: int = 0
     evolution_chats: int = 0
     evolution_contacts: int = 0
     evolution_message_chats: int = 0

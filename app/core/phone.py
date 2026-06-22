@@ -86,7 +86,9 @@ def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str
         return display_phone
     if contact_jid and contact_jid.endswith("@lid"):
         return "Contacto"
-    return name or "Contacto"
+    if is_lid_placeholder(phone) or is_lid_placeholder(name):
+        return "Contacto"
+    return "Contacto"
 
 
 def evolution_send_target(conversation) -> str:

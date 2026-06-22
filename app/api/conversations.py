@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -34,7 +36,7 @@ def _to_conversation_response(conversation: Conversation) -> ConversationRespons
 def list_conversations(
     current: RequireViewer,
     db: Session = Depends(get_db),
-    archived: bool | None = None,
+    archived: Optional[bool] = None,
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     session = (
@@ -90,6 +92,21 @@ def list_messages(
         .order_by(Message.created_at.asc())
         .all()
     )
+    deduped: list[Message] = []
+    seen_ids: set[str] = set()
+    seen_bodies: set[str] = set()
+    for msg in messages:
+        if msg.evolution_message_id:
+            if msg.evolution_message_id in seen_ids:
+                continue
+            seen_ids.add(msg.evolution_message_id)
+        else:
+            body_key = f"{msg.body}|{msg.created_at.isoformat()}|{msg.direction}"
+            if body_key in seen_bodies:
+                continue
+            seen_bodies.add(body_key)
+        deduped.append(msg)
+    messages = deduped
     if conversation.unread_count:
         conversation.unread_count = 0
         db.commit()

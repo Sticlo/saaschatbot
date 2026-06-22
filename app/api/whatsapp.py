@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,12 +9,17 @@ from sqlalchemy.orm import Session
 from app.core.deps import RequireAgent, RequireOwner
 from app.database import get_db
 from app.models import Tenant, WhatsAppSession
+from app.models.enums import WhatsAppStatus
 from app.schemas.whatsapp import (
     WhatsAppConnectResponse,
     WhatsAppStatusResponse,
     WhatsAppSyncResponse,
 )
-from app.services.chat_sync_service import sync_whatsapp_chats
+from app.services.sync_scheduler import (
+    ensure_whatsapp_sync_after_connect,
+    schedule_whatsapp_sync,
+)
+from app.services.contact_identity_service import enrich_tenant_conversations
 from app.services.evolution_client import EvolutionAPIError
 from app.services.tenant_service import log_audit
 from app.services.whatsapp_service import (
@@ -28,48 +32,6 @@ from app.services.whatsapp_service import (
 
 log = logging.getLogger(__name__)
 
-
-def _run_sync_job(tenant_id: uuid.UUID, user_id: uuid.UUID, ip_address) -> None:
-    from app.database import SessionLocal
-    from app.redis_client import get_redis
-    from app.services.realtime_service import publish_panel_event
-
-    db = SessionLocal()
-    try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
-        if tenant is None or session is None:
-            return
-        stats = sync_whatsapp_chats(db, tenant=tenant, session=session)
-        log_audit(
-            db,
-            tenant_id=tenant.id,
-            user_id=user_id,
-            action="whatsapp.chats_synced",
-            details=stats,
-            ip_address=ip_address,
-        )
-        db.commit()
-        publish_panel_event(
-            tenant_id,
-            {"type": "sync.completed", **stats, "status": "completed"},
-        )
-    except Exception as exc:
-        log.warning("Sync background falló tenant=%s: %s", tenant_id, exc)
-        db.rollback()
-        try:
-            publish_panel_event(
-                tenant_id,
-                {"type": "sync.completed", "status": "failed", "message": str(exc)},
-            )
-        except Exception:
-            pass
-    finally:
-        db.close()
-        try:
-            get_redis().delete(f"tenant:{tenant_id}:sync_running")
-        except Exception:
-            pass
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -107,12 +69,16 @@ def connect_whatsapp(
         )
         db.commit()
         db.refresh(session)
+        db.refresh(tenant)
     except EvolutionAPIError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+
+    if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
+        ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
     return WhatsAppConnectResponse(
         instance_name=session.instance_name,
@@ -165,13 +131,22 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
     session = get_or_create_session(db, tenant)
+    previous_status = session.status
     try:
         session = refresh_session_status(db, tenant, session)
         db.commit()
         db.refresh(session)
+        db.refresh(tenant)
     except EvolutionAPIError:
         db.rollback()
         session = get_or_create_session(db, tenant)
+
+    if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
+        just_connected = previous_status != WhatsAppStatus.CONNECTED.value
+        ensure_whatsapp_sync_after_connect(
+            tenant.id,
+            force=just_connected,
+        )
 
     return _session_response(session)
 
@@ -201,27 +176,139 @@ def sync_whatsapp_chats_endpoint(
             detail="WhatsApp no conectado — escanea el QR antes de sincronizar",
         )
 
-    lock_key = f"tenant:{tenant.id}:sync_running"
-    redis = get_redis()
-    if not redis.set(lock_key, "1", nx=True, ex=120):
+    started = schedule_whatsapp_sync(
+        tenant.id,
+        user_id=current.id,
+        ip_address=request.client.host if request.client else None,
+        wait_for_history=True,
+        delay_seconds=1,
+    )
+    if not started:
         return WhatsAppSyncResponse(
             status="running",
-            message="Ya hay una sincronización en curso. Espera un momento y pulsa ↻",
+            message="Sincronizando chats del celular…",
         )
-
-    threading.Thread(
-        target=_run_sync_job,
-        args=(tenant.id, current.id, request.client.host if request.client else None),
-        daemon=True,
-    ).start()
 
     return WhatsAppSyncResponse(
         status="started",
+        message="Sincronizando chats del celular…",
+    )
+
+
+@router.post("/enrich-contacts", response_model=WhatsAppSyncResponse)
+def enrich_whatsapp_contacts(
+    request: Request,
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    """Repara nombres lid:… y teléfonos sin reiniciar Evolution (~5 s)."""
+    from app.models.enums import WhatsAppStatus
+    from app.services.realtime_service import publish_panel_event
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if tenant is None or session is None:
+        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
+
+    if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
+        raise HTTPException(
+            status_code=409,
+            detail="WhatsApp no conectado — escanea el QR antes de actualizar contactos",
+        )
+
+    try:
+        refresh_session_status(db, tenant, session)
+        db.commit()
+    except EvolutionAPIError:
+        db.rollback()
+
+    stats = enrich_tenant_conversations(db, tenant=tenant, session=session)
+    log_audit(
+        db,
+        tenant_id=tenant.id,
+        user_id=current.id,
+        action="whatsapp.contacts_enriched",
+        details=stats,
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+
+    from app.models import Conversation
+    from app.services.realtime_service import publish_conversation_updated
+
+    rows = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant.id,
+            Conversation.whatsapp_connection_id == session.active_connection_id,
+        )
+        .all()
+    )
+    for row in rows:
+        publish_conversation_updated(tenant.id, row)
+
+    publish_panel_event(
+        tenant.id,
+        {"type": "contacts.enriched", **stats, "status": "completed"},
+    )
+
+    return WhatsAppSyncResponse(
+        status="completed",
+        contacts_enriched=stats["enriched"],
+        names_fixed=stats["names_fixed"],
+        phones_fixed=stats["phones_fixed"],
         message=(
-            "Sincronizando chats del celular… reinicia Evolution y espera hasta 90 s "
-            "mientras WhatsApp envía el historial. Te avisamos cuando termine."
+            f"Contactos actualizados: {stats['names_fixed']} nombres, "
+            f"{stats['phones_fixed']} teléfonos reparados."
         ),
     )
+
+
+@router.post("/reset-binding", response_model=WhatsAppStatusResponse)
+def reset_whatsapp_binding(
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    """Borra chats de otro celular y empieza vinculación limpia (sin desconectar Evolution)."""
+    from app.models.enums import WhatsAppStatus
+    from app.services.whatsapp_conversation_service import start_new_whatsapp_binding
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if tenant is None or session is None:
+        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
+
+    if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
+        raise HTTPException(
+            status_code=409,
+            detail="WhatsApp no conectado — escanea el QR primero",
+        )
+
+    start_new_whatsapp_binding(
+        db,
+        tenant=tenant,
+        session=session,
+        instance_name=session.instance_name,
+    )
+    log_audit(
+        db,
+        tenant_id=tenant.id,
+        user_id=current.id,
+        action="whatsapp.binding_reset",
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    db.refresh(session)
+    return _session_response(session)
 
 
 @router.post("/disconnect", status_code=status.HTTP_204_NO_CONTENT)

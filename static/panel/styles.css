@@ -167,6 +167,31 @@ textarea { resize: vertical; min-height: 44px; }
   border-bottom: 1px solid var(--border);
 }
 
+.search-box {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.search-box input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.search-box input:focus {
+  border-color: var(--accent);
+}
+
+.search-box input::placeholder {
+  color: var(--muted);
+}
+
 .sidebar-header h2 { margin: 0; font-size: 1rem; }
 
 .chat-tabs {

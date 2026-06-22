@@ -86,7 +86,7 @@ class Message(Base):
     )
     direction: Mapped[str] = mapped_column(String(10), nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    body: Mapped[str] = mapped_column(String(4096), nullable=False, default="")
+    body: Mapped[str] = mapped_column(String(65535), nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     evolution_message_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True, index=True

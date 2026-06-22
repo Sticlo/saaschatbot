@@ -36,6 +36,8 @@
           <span id="ws-status" class="badge offline">Sin tiempo real</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
           <button id="wa-connect-btn" class="btn primary small hidden">Conectar WhatsApp</button>
+          <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
+          <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
         </div>
         <div class="topbar-right">
           <label class="toggle-row" title="Activa/desactiva IA en todos los chats">
@@ -51,8 +53,10 @@
         <aside class="sidebar">
           <div class="sidebar-header">
             <h2>Chats</h2>
-            <button id="refresh-chats" class="btn ghost small" title="Actualizar">↻</button>
-            <button id="sync-chats" class="btn ghost small" title="Importar chats del celular">⇅</button>
+            <button id="refresh-chats" class="btn ghost small" title="Reparar nombres">↻</button>
+          </div>
+          <div class="search-box">
+            <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
           </div>
           <div class="chat-tabs">
             <button type="button" id="tab-chats-active" class="chat-tab active">Chats</button>
@@ -116,6 +120,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=11"></script>
+  <script src="/static/panel/app.js?v=19"></script>
 </body>
 </html>

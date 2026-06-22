@@ -31,5 +31,4 @@ echo "→ Panel en http://localhost:8000/panel"
 exec .venv/bin/uvicorn app.main:app --reload \
   --host 0.0.0.0 --port 8000 \
   --reload-exclude 'alembic/*' \
-  --reload-exclude 'services/*' \
   --reload-exclude '.venv/*'

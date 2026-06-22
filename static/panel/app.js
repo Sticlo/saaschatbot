@@ -15,6 +15,11 @@
     canConnectWa: false,
     wa: { status: "disconnected", qr_base64: null, phone_number: null },
     chatListTab: "active",
+    syncInProgress: false,
+    autoSyncRequested: false,
+    searchQuery: "",
+    searchPool: null,
+    searchTimer: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -189,8 +194,28 @@
     }, 3000);
   }
 
+  function showSyncingList() {
+    state.syncInProgress = true;
+    conversationList.innerHTML =
+      '<li class="conversation-item"><span class="muted">Importando chats de tu celular…</span></li>';
+  }
+
+  async function triggerAutoSync() {
+    if (state.autoSyncRequested || state.wa.status !== "connected") return;
+    state.autoSyncRequested = true;
+    showSyncingList();
+    try {
+      await api("/whatsapp/sync", { method: "POST" }, 15000);
+    } catch (err) {
+      if (!String(err.message).includes("409")) {
+        console.warn("Auto-sync:", err.message);
+      }
+    }
+  }
+
   function applyWaSession(wa) {
     if (!wa) return;
+    const prevStatus = state.wa.status || "disconnected";
     const status = wa.status || "disconnected";
     state.wa = {
       status,
@@ -206,11 +231,24 @@
     if (state.wa.status === "connected") {
       hideQrModal();
       stopWaPoll();
+      if (prevStatus !== "connected") {
+        state.autoSyncRequested = false;
+        triggerAutoSync();
+      } else if (!state.syncInProgress) {
+        fetchConversations()
+          .then((rows) => {
+            state.conversations = rows;
+            renderConversationList();
+          })
+          .catch(() => {});
+      }
     } else if (state.wa.status === "connecting") {
       startWaPoll();
     } else {
       hideQrModal();
       stopWaPoll();
+      state.syncInProgress = false;
+      state.autoSyncRequested = false;
       clearConversations();
     }
   }
@@ -218,8 +256,11 @@
   function renderWaUi() {
     const connected = state.wa.status === "connected";
     const needsConnect = !connected && state.canConnectWa;
+    const canManageWa = state.canConnectWa;
 
     $("wa-connect-btn").classList.toggle("hidden", !needsConnect);
+    $("wa-disconnect-btn").classList.toggle("hidden", !connected || !canManageWa);
+    $("wa-reset-chats-btn").classList.toggle("hidden", !connected || !canManageWa);
     $("wa-setup").classList.toggle("hidden", !needsConnect);
     $("empty-chat-label").classList.toggle("hidden", needsConnect && !state.conversations.length);
   }
@@ -282,9 +323,41 @@
     return c.display_phone || "";
   }
 
+  function normalizeForSearch(str) {
+    return String(str || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function matchesSearch(conv, query) {
+    const hay = normalizeForSearch(`${conv.contact_name || ""} ${conv.contact_phone || ""} ${conv.display_phone || ""}`);
+    const tokens = normalizeForSearch(query).split(/\s+/).filter(Boolean);
+    if (!tokens.length) return true;
+    const words = hay.split(/\s+/).filter(Boolean);
+    return tokens.every((token) =>
+      hay.includes(token) || words.some((w) => w.includes(token) || token.includes(w))
+    );
+  }
+
   async function fetchConversations() {
     const archived = state.chatListTab === "archived";
     return api(`/conversations?archived=${archived}`);
+  }
+
+  async function fetchAllConversationsForSearch() {
+    const [active, archived] = await Promise.all([
+      api("/conversations?archived=false"),
+      api("/conversations?archived=true"),
+    ]);
+    const seen = new Set();
+    const merged = [];
+    for (const row of active.concat(archived)) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      merged.push(row);
+    }
+    return merged;
   }
 
   function setChatListTab(tab) {
@@ -323,11 +396,18 @@
     conversationList.innerHTML = "";
     const emptyLabel =
       state.chatListTab === "archived" ? "Sin chats archivados" : "Sin conversaciones";
-    if (!state.conversations.length) {
-      conversationList.innerHTML = `<li class="conversation-item"><span class="muted">${emptyLabel}</span></li>`;
+
+    let list = state.searchQuery && state.searchPool ? state.searchPool : state.conversations;
+    if (state.searchQuery) {
+      list = list.filter((c) => matchesSearch(c, state.searchQuery));
+    }
+
+    if (!list.length) {
+      const msg = state.searchQuery ? "Sin resultados" : emptyLabel;
+      conversationList.innerHTML = `<li class="conversation-item"><span class="muted">${msg}</span></li>`;
       return;
     }
-    for (const c of state.conversations) {
+    for (const c of list) {
       const li = document.createElement("li");
       li.className = "conversation-item" + (c.id === state.activeId ? " active" : "");
       li.dataset.id = c.id;
@@ -355,9 +435,21 @@
       .replace(/"/g, "&quot;");
   }
 
+  function dedupeMessages(messages) {
+    const seen = new Set();
+    const out = [];
+    for (const m of messages) {
+      const key = m.id || `${m.body}|${m.created_at}|${m.direction}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+    return out;
+  }
+
   function renderMessages() {
     messagesEl.innerHTML = "";
-    for (const m of state.messages) {
+    for (const m of dedupeMessages(state.messages)) {
       const div = document.createElement("div");
       div.className = "msg " + (m.direction === "in" ? "in" : "out");
       div.innerHTML = `${escapeHtml(m.body)}<span class="time">${formatTime(m.created_at)} · ${m.source}</span>`;
@@ -386,7 +478,7 @@
     renderConversationList();
 
     try {
-      state.messages = await api(`/conversations/${id}/messages`);
+      state.messages = dedupeMessages(await api(`/conversations/${id}/messages`));
       renderMessages();
       if (conv.unread_count) {
         conv.unread_count = 0;
@@ -423,7 +515,9 @@
       sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
       messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
 
-      renderConversationList();
+      if (!state.syncInProgress) {
+        renderConversationList();
+      }
       renderWaUi();
       connectWs();
       startWaHeartbeat();
@@ -486,7 +580,10 @@
       case "message.out":
         if (event.conversation) upsertConversation(event.conversation);
         if (event.message && event.conversation?.id === state.activeId) {
-          const exists = state.messages.some((m) => m.id === event.message.id);
+          const key = event.message.id || `${event.message.body}|${event.message.created_at}`;
+          const exists = state.messages.some(
+            (m) => m.id === event.message.id || `${m.body}|${m.created_at}` === `${event.message.body}|${event.message.created_at}`
+          );
           if (!exists) {
             state.messages.push(event.message);
             renderMessages();
@@ -522,27 +619,38 @@
           });
         }
         break;
+      case "sync.started":
+        showSyncingList();
+        break;
       case "sync.completed":
+        state.syncInProgress = false;
         if (event.status === "completed") {
           fetchConversations()
             .then((rows) => {
               state.conversations = rows;
               renderConversationList();
-              const n = event.conversations_imported ?? 0;
-              const m = event.messages_imported ?? 0;
-              if (n > 0 || m > 0) {
-                alert(`Sync lista: ${n} chats, ${m} mensajes importados.`);
-              } else {
-                alert(
-                  "Sync terminada pero no llegaron chats del celular. " +
-                    "Espera 1 min con WhatsApp conectado y vuelve a pulsar ⇅."
-                );
+              if (state.activeId) {
+                return api(`/conversations/${state.activeId}/messages`).then((msgs) => {
+                  state.messages = dedupeMessages(msgs);
+                  renderMessages();
+                });
               }
             })
             .catch(() => {});
         } else if (event.status === "failed") {
-          alert(event.message || "Error al sincronizar chats");
+          const errorMessage =
+            event.message || "No se pudieron importar los chats. Recarga la página.";
+          conversationList.innerHTML =
+            `<li class="conversation-item"><span class="error">${escapeHtml(errorMessage)}</span></li>`;
         }
+        break;
+      case "contacts.enriched":
+        fetchConversations()
+          .then((rows) => {
+            state.conversations = rows;
+            renderConversationList();
+          })
+          .catch(() => {});
         break;
       default:
         break;
@@ -576,11 +684,45 @@
   $("logout-btn").addEventListener("click", logout);
   $("wa-connect-btn").addEventListener("click", connectWhatsApp);
   $("wa-setup-btn").addEventListener("click", connectWhatsApp);
+  $("wa-disconnect-btn").addEventListener("click", async () => {
+    if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel.")) return;
+    try {
+      await api("/whatsapp/disconnect", { method: "POST" }, 15000);
+      clearConversations();
+      await refreshWaStatus();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+  $("wa-reset-chats-btn").addEventListener("click", async () => {
+    if (!confirm("¿Borrar chats importados de otro celular y empezar limpio?")) return;
+    try {
+      await api("/whatsapp/reset-binding", { method: "POST" }, 30000);
+      clearConversations();
+      alert("Chats limpiados. Los chats se importarán solos al reconectar WhatsApp.");
+    } catch (err) {
+      alert(err.message);
+    }
+  });
   $("qr-modal-close").addEventListener("click", hideQrModal);
   $("qr-modal-backdrop").addEventListener("click", hideQrModal);
   $("refresh-chats").addEventListener("click", async () => {
-    state.conversations = await fetchConversations();
-    renderConversationList();
+    const btn = $("refresh-chats");
+    btn.disabled = true;
+    try {
+      const stats = await api("/whatsapp/enrich-contacts", { method: "POST" }, 30000);
+      state.conversations = await fetchConversations();
+      renderConversationList();
+      if (stats.names_fixed || stats.phones_fixed) {
+        alert(stats.message || `Actualizados: ${stats.names_fixed} nombres`);
+      }
+    } catch (err) {
+      state.conversations = await fetchConversations();
+      renderConversationList();
+      if (!String(err.message).includes("409")) alert(err.message);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   async function switchChatTab(tab) {
@@ -600,30 +742,23 @@
   $("tab-chats-active").addEventListener("click", () => switchChatTab("active"));
   $("tab-chats-archived").addEventListener("click", () => switchChatTab("archived"));
 
-  $("sync-chats").addEventListener("click", async () => {
-    const btn = $("sync-chats");
-    btn.disabled = true;
-    btn.textContent = "…";
-    try {
-      const stats = await api("/whatsapp/sync", { method: "POST" }, 15000);
-      if (stats.status === "started" || stats.status === "running") {
-        alert(
-          stats.message ||
-            "Sincronizando… puede tardar hasta 1 min. Te avisamos cuando termine."
-        );
+  $("chat-search").addEventListener("input", (e) => {
+    state.searchQuery = e.target.value.trim();
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(async () => {
+      if (state.searchQuery) {
+        try {
+          state.searchPool = await fetchAllConversationsForSearch();
+        } catch (err) {
+          console.warn("search fetch failed", err);
+          state.searchPool = state.conversations;
+        }
       } else {
-        state.conversations = await fetchConversations();
-        renderConversationList();
-        alert(
-          `Listo: ${stats.conversations_imported} chats, ${stats.messages_imported} mensajes.`
-        );
+        state.searchPool = null;
       }
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "⇅";
-    }
+      renderConversationList();
+    }, 200);
+    renderConversationList();
   });
 
   sendForm.addEventListener("submit", async (e) => {
