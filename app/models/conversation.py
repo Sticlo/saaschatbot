@@ -46,6 +46,7 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ConversationStatus.ACTIVE.value
     )
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -14,6 +14,7 @@
     canManageGlobal: false,
     canConnectWa: false,
     wa: { status: "disconnected", qr_base64: null, phone_number: null },
+    chatListTab: "active",
   };
 
   const $ = (id) => document.getElementById(id);
@@ -273,8 +274,41 @@
     wsStatus.className = "badge " + (online ? "online" : "offline");
   }
 
+  function convTitle(c) {
+    return c.display_name || c.contact_name || c.display_phone || c.contact_phone || "Contacto";
+  }
+
+  function convSubtitle(c) {
+    return c.display_phone || "";
+  }
+
+  async function fetchConversations() {
+    const archived = state.chatListTab === "archived";
+    return api(`/conversations?archived=${archived}`);
+  }
+
+  function setChatListTab(tab) {
+    state.chatListTab = tab;
+    $("tab-chats-active").classList.toggle("active", tab === "active");
+    $("tab-chats-archived").classList.toggle("active", tab === "archived");
+  }
+
   function upsertConversation(conv) {
+    const inArchivedTab = state.chatListTab === "archived";
+    const belongsHere = !!conv.is_archived === inArchivedTab;
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
+    if (!belongsHere) {
+      if (idx >= 0) {
+        state.conversations.splice(idx, 1);
+        if (state.activeId === conv.id) {
+          state.activeId = null;
+          emptyChat.classList.remove("hidden");
+          activeChat.classList.add("hidden");
+        }
+        renderConversationList();
+      }
+      return;
+    }
     if (idx >= 0) state.conversations[idx] = { ...state.conversations[idx], ...conv };
     else state.conversations.unshift(conv);
     state.conversations.sort((a, b) => {
@@ -287,8 +321,10 @@
 
   function renderConversationList() {
     conversationList.innerHTML = "";
+    const emptyLabel =
+      state.chatListTab === "archived" ? "Sin chats archivados" : "Sin conversaciones";
     if (!state.conversations.length) {
-      conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Sin conversaciones</span></li>';
+      conversationList.innerHTML = `<li class="conversation-item"><span class="muted">${emptyLabel}</span></li>`;
       return;
     }
     for (const c of state.conversations) {
@@ -298,12 +334,13 @@
       const tags = [];
       if (c.mode === "manual") tags.push('<span class="mode-tag">manual</span>');
       if (c.ai_active) tags.push('<span class="ai-tag">IA</span>');
+      const subtitle = convSubtitle(c);
       li.innerHTML = `
         <div class="row">
-          <span class="name">${escapeHtml(c.contact_name || c.contact_phone)}</span>
+          <span class="name">${escapeHtml(convTitle(c))}</span>
           ${c.unread_count ? `<span class="unread">${c.unread_count}</span>` : ""}
         </div>
-        <div class="meta">${escapeHtml(c.contact_phone)} ${tags.join("")}</div>
+        <div class="meta">${subtitle ? escapeHtml(subtitle) + " " : ""}${tags.join("")}</div>
       `;
       li.addEventListener("click", () => selectConversation(c.id));
       conversationList.appendChild(li);
@@ -343,8 +380,8 @@
 
     emptyChat.classList.add("hidden");
     activeChat.classList.remove("hidden");
-    $("chat-title").textContent = conv.contact_name || conv.contact_phone;
-    $("chat-phone").textContent = conv.contact_phone;
+    $("chat-title").textContent = convTitle(conv);
+    $("chat-phone").textContent = convSubtitle(conv);
     syncChatToggles(conv);
     renderConversationList();
 
@@ -366,7 +403,7 @@
       const [me, tenant, conversations, wa] = await Promise.all([
         api("/auth/me"),
         api("/tenants/me"),
-        api("/conversations"),
+        api("/conversations?archived=false"),
         api("/whatsapp/status", {}, 8000),
       ]);
 
@@ -487,12 +524,24 @@
         break;
       case "sync.completed":
         if (event.status === "completed") {
-          api("/conversations")
+          fetchConversations()
             .then((rows) => {
               state.conversations = rows;
               renderConversationList();
+              const n = event.conversations_imported ?? 0;
+              const m = event.messages_imported ?? 0;
+              if (n > 0 || m > 0) {
+                alert(`Sync lista: ${n} chats, ${m} mensajes importados.`);
+              } else {
+                alert(
+                  "Sync terminada pero no llegaron chats del celular. " +
+                    "Espera 1 min con WhatsApp conectado y vuelve a pulsar ⇅."
+                );
+              }
             })
             .catch(() => {});
+        } else if (event.status === "failed") {
+          alert(event.message || "Error al sincronizar chats");
         }
         break;
       default:
@@ -530,9 +579,26 @@
   $("qr-modal-close").addEventListener("click", hideQrModal);
   $("qr-modal-backdrop").addEventListener("click", hideQrModal);
   $("refresh-chats").addEventListener("click", async () => {
-    state.conversations = await api("/conversations");
+    state.conversations = await fetchConversations();
     renderConversationList();
   });
+
+  async function switchChatTab(tab) {
+    setChatListTab(tab);
+    state.activeId = null;
+    emptyChat.classList.remove("hidden");
+    activeChat.classList.add("hidden");
+    conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
+    try {
+      state.conversations = await fetchConversations();
+      renderConversationList();
+    } catch (err) {
+      conversationList.innerHTML = `<li class="conversation-item"><span class="error">${err.message}</span></li>`;
+    }
+  }
+
+  $("tab-chats-active").addEventListener("click", () => switchChatTab("active"));
+  $("tab-chats-archived").addEventListener("click", () => switchChatTab("archived"));
 
   $("sync-chats").addEventListener("click", async () => {
     const btn = $("sync-chats");
@@ -541,9 +607,12 @@
     try {
       const stats = await api("/whatsapp/sync", { method: "POST" }, 15000);
       if (stats.status === "started" || stats.status === "running") {
-        alert(stats.message || "Sincronizando… pulsa ↻ cuando termine.");
+        alert(
+          stats.message ||
+            "Sincronizando… puede tardar hasta 1 min. Te avisamos cuando termine."
+        );
       } else {
-        state.conversations = await api("/conversations");
+        state.conversations = await fetchConversations();
         renderConversationList();
         alert(
           `Listo: ${stats.conversations_imported} chats, ${stats.messages_imported} mensajes.`

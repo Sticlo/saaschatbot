@@ -217,7 +217,10 @@ def sync_whatsapp_chats_endpoint(
 
     return WhatsAppSyncResponse(
         status="started",
-        message="Sincronizando chats del celular… te avisamos cuando termine.",
+        message=(
+            "Sincronizando chats del celular… reinicia Evolution y espera hasta 90 s "
+            "mientras WhatsApp envía el historial. Te avisamos cuando termine."
+        ),
     )
 
 

@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.phone import format_display_phone, resolve_display_name
+
 
 class WhatsAppConnectResponse(BaseModel):
     instance_name: str
@@ -41,9 +43,27 @@ class ConversationResponse(BaseModel):
     ai_active: bool
     bait_sent: bool
     status: str
+    is_archived: bool = False
     unread_count: int
     last_message_at: Optional[datetime]
     created_at: datetime
+    display_name: str = ""
+    display_phone: str = ""
+
+
+def serialize_conversation(conversation) -> dict:
+    jid = getattr(conversation, "contact_jid", None) or ""
+    response = ConversationResponse.model_validate(conversation).model_copy(
+        update={
+            "display_name": resolve_display_name(
+                conversation.contact_name,
+                conversation.contact_phone,
+                contact_jid=jid,
+            ),
+            "display_phone": format_display_phone(conversation.contact_phone),
+        }
+    )
+    return response.model_dump(mode="json")
 
 
 class MessageResponse(BaseModel):
@@ -74,4 +94,5 @@ class WhatsAppSyncResponse(BaseModel):
     messages_imported: int = 0
     evolution_chats: int = 0
     evolution_contacts: int = 0
+    evolution_message_chats: int = 0
     message: Optional[str] = None

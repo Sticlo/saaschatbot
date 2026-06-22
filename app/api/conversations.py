@@ -16,6 +16,7 @@ from app.schemas.whatsapp import (
     ConversationResponse,
     MessageResponse,
     SendMessageRequest,
+    serialize_conversation,
 )
 from app.services.realtime_service import publish_conversation_updated
 from app.services.evolution_client import EvolutionAPIError
@@ -25,8 +26,16 @@ from app.services.whatsapp_service import refresh_session_status, send_text_mess
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
+def _to_conversation_response(conversation: Conversation) -> ConversationResponse:
+    return ConversationResponse.model_validate(serialize_conversation(conversation))
+
+
 @router.get("", response_model=list[ConversationResponse])
-def list_conversations(current: RequireViewer, db: Session = Depends(get_db)):
+def list_conversations(
+    current: RequireViewer,
+    db: Session = Depends(get_db),
+    archived: bool | None = None,
+):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     session = (
         db.query(WhatsAppSession)
@@ -40,16 +49,22 @@ def list_conversations(current: RequireViewer, db: Session = Depends(get_db)):
     ):
         return []
 
-    rows = (
+    query = (
         db.query(Conversation)
         .filter(
             Conversation.tenant_id == current.tenant_id,
             Conversation.whatsapp_connection_id == session.active_connection_id,
         )
-        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.created_at.desc())
-        .all()
     )
-    return rows
+    if archived is True:
+        query = query.filter(Conversation.is_archived.is_(True))
+    elif archived is False:
+        query = query.filter(Conversation.is_archived.is_(False))
+
+    rows = query.order_by(
+        Conversation.last_message_at.desc().nullslast(), Conversation.created_at.desc()
+    ).all()
+    return [_to_conversation_response(row) for row in rows]
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
@@ -165,7 +180,7 @@ def update_conversation_mode(
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
-    return conversation
+    return _to_conversation_response(conversation)
 
 
 @router.patch("/{conversation_id}/ai", response_model=ConversationResponse)
@@ -190,4 +205,4 @@ def update_conversation_ai(
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
-    return conversation
+    return _to_conversation_response(conversation)

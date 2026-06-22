@@ -55,6 +55,40 @@ def is_valid_whatsapp_phone(phone_e164: str) -> bool:
     return True
 
 
+def is_lid_placeholder(phone: str) -> bool:
+    return bool(phone) and phone.startswith("lid:")
+
+
+def is_placeholder_contact_name(name: str, phone: str) -> bool:
+    if not name:
+        return True
+    if name == phone:
+        return True
+    if is_lid_placeholder(name):
+        return True
+    lid_digits = phone[4:] if is_lid_placeholder(phone) else ""
+    if lid_digits and name in {lid_digits, f"+{lid_digits}"}:
+        return True
+    return False
+
+
+def format_display_phone(phone: str) -> str:
+    if not phone or is_lid_placeholder(phone):
+        return ""
+    return phone
+
+
+def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str:
+    if name and not is_placeholder_contact_name(name, phone):
+        return name
+    display_phone = format_display_phone(phone)
+    if display_phone:
+        return display_phone
+    if contact_jid and contact_jid.endswith("@lid"):
+        return "Contacto"
+    return name or "Contacto"
+
+
 def evolution_send_target(conversation) -> str:
     """Número o JID para Evolution sendText."""
     jid = getattr(conversation, "contact_jid", None) or ""

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SaasChatbot — Panel</title>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=3" />
 </head>
 <body>
   <div id="app">
@@ -53,6 +53,10 @@
             <h2>Chats</h2>
             <button id="refresh-chats" class="btn ghost small" title="Actualizar">↻</button>
             <button id="sync-chats" class="btn ghost small" title="Importar chats del celular">⇅</button>
+          </div>
+          <div class="chat-tabs">
+            <button type="button" id="tab-chats-active" class="chat-tab active">Chats</button>
+            <button type="button" id="tab-chats-archived" class="chat-tab">Archivados</button>
           </div>
           <ul id="conversation-list" class="conversation-list"></ul>
         </aside>
@@ -112,6 +116,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=9"></script>
+  <script src="/static/panel/app.js?v=11"></script>
 </body>
 </html>
