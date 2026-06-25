@@ -51,15 +51,18 @@ class ConversationResponse(BaseModel):
     display_phone: str = ""
 
 
-def serialize_conversation(conversation) -> dict:
+def serialize_conversation(conversation, *, display_name_override: str | None = None) -> dict:
     jid = getattr(conversation, "contact_jid", None) or ""
+    resolved_name = display_name_override
+    if not resolved_name:
+        resolved_name = resolve_display_name(
+            conversation.contact_name,
+            conversation.contact_phone,
+            contact_jid=jid,
+        )
     response = ConversationResponse.model_validate(conversation).model_copy(
         update={
-            "display_name": resolve_display_name(
-                conversation.contact_name,
-                conversation.contact_phone,
-                contact_jid=jid,
-            ),
+            "display_name": resolved_name,
             "display_phone": format_display_phone(conversation.contact_phone),
         }
     )
@@ -98,4 +101,20 @@ class WhatsAppSyncResponse(BaseModel):
     evolution_chats: int = 0
     evolution_contacts: int = 0
     evolution_message_chats: int = 0
+    profile_names_fixed: int = 0
+    profile_fetched: int = 0
     message: Optional[str] = None
+
+
+class WhatsAppChatsDebugResponse(BaseModel):
+    generated_at: str
+    timing_ms: dict[str, int]
+    errors: list[str]
+    session: dict
+    evolution_api: dict
+    evolution_db: dict
+    names_lookup: dict
+    app_db: dict
+    sync_queue: dict
+    sample_missing_names: list[dict]
+    hints: list[str]

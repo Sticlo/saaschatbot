@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.shared.core.deps import RequireAgent, RequireViewer
-from app.shared.core.phone import is_owner_display_name, is_owner_jid, normalize_phone
+from app.shared.core.phone import is_owner_display_name, is_owner_jid, is_placeholder_contact_name, normalize_phone
 from app.config import settings
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
@@ -30,8 +30,14 @@ from app.application.whatsapp.whatsapp_service import refresh_session_status, se
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-def _to_conversation_response(conversation: Conversation) -> ConversationResponse:
-    return ConversationResponse.model_validate(serialize_conversation(conversation))
+def _to_conversation_response(
+    conversation: Conversation,
+    *,
+    display_name_override: str | None = None,
+) -> ConversationResponse:
+    return ConversationResponse.model_validate(
+        serialize_conversation(conversation, display_name_override=display_name_override)
+    )
 
 
 @router.get("", response_model=list[ConversationResponse])
@@ -77,15 +83,9 @@ def list_conversations(
     ).all()
     owner_jid = session.bound_owner_jid or ""
     owner_phone = normalize_phone(session.phone_number or "")
-    owner_names: set[str] = set()
-    if owner_jid and settings.evolution_database_url:
-        from app.infrastructure.evolution.evolution_store import fetch_contact_push_name
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
 
-        push = fetch_contact_push_name(
-            settings.evolution_database_url, session.instance_name, owner_jid
-        )
-        if push:
-            owner_names.add(push)
+    owner_names = build_owner_display_names(session)
     visible = []
     for row in rows:
         if owner_phone and normalize_phone(row.contact_phone) == owner_phone:
@@ -95,7 +95,47 @@ def list_conversations(
         if owner_names and is_owner_display_name(row.contact_name, owner_names):
             continue
         visible.append(row)
-    return [_to_conversation_response(row) for row in visible]
+
+    names_lookup = None
+    placeholders = [
+        row
+        for row in visible
+        if is_placeholder_contact_name(row.contact_name, row.contact_phone)
+    ]
+    if placeholders and session.instance_name and settings.evolution_database_url:
+        from app.application.sync.contact_identity_service import (
+            apply_names_lookup_to_conversations,
+            build_contact_names_lookup,
+        )
+        from app.infrastructure.cache.redis_client import cache_get, cache_set
+
+        try:
+            cache_key = f"wa:names:{session.instance_name}"
+            use_api = cache_get(cache_key) != "ready"
+            names_lookup = build_contact_names_lookup(session.instance_name, use_api=use_api)
+            if use_api:
+                cache_set(cache_key, "ready", ttl_seconds=45)
+            names_fixed = apply_names_lookup_to_conversations(
+                placeholders,
+                names_lookup,
+                owner_names=owner_names,
+            )
+            if names_fixed:
+                db.commit()
+        except Exception:
+            names_lookup = None
+
+    responses = []
+    for row in visible:
+        override = None
+        if names_lookup is not None and is_placeholder_contact_name(
+            row.contact_name, row.contact_phone
+        ):
+            resolved = names_lookup.resolve_for_conversation(row, owner_names=owner_names)
+            if resolved and not is_placeholder_contact_name(resolved, row.contact_phone):
+                override = resolved
+        responses.append(_to_conversation_response(row, display_name_override=override))
+    return responses
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])

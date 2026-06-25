@@ -175,6 +175,7 @@
   }
 
   let waPollTimer = null;
+  let syncPollTimer = null;
   let waHeartbeatTimer = null;
 
   function stopWaPoll() {
@@ -222,28 +223,56 @@
     }, 3000);
   }
 
+  function stopSyncPoll() {
+    if (syncPollTimer) {
+      clearInterval(syncPollTimer);
+      syncPollTimer = null;
+    }
+  }
+
+  function startSyncPoll() {
+    stopSyncPoll();
+    syncPollTimer = setInterval(() => {
+      if (!state.syncInProgress) {
+        stopSyncPoll();
+        return;
+      }
+      fetchConversations()
+        .then((rows) => {
+          if (rows.length) {
+            state.conversations = rows;
+            renderConversationList();
+          }
+        })
+        .catch(() => {});
+    }, 4000);
+  }
+
   function startSyncWatchdog() {
     clearTimeout(state.syncWatchdog);
     state.syncWatchdog = setTimeout(() => {
       if (!state.syncInProgress) return;
       state.syncInProgress = false;
+      stopSyncPoll();
       fetchConversations()
         .then((rows) => {
           state.conversations = rows;
           renderConversationList();
         })
         .catch(() => renderConversationList());
-    }, 90000);
+    }, 30000);
   }
 
   function clearSyncWatchdog() {
     clearTimeout(state.syncWatchdog);
     state.syncWatchdog = null;
+    stopSyncPoll();
   }
 
   function showSyncingList() {
     state.syncInProgress = true;
     startSyncWatchdog();
+    startSyncPoll();
     renderConversationList();
   }
 
@@ -381,6 +410,24 @@
     return c.display_phone || "";
   }
 
+  function phoneTailDigits(phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    if (!digits) return "";
+    return digits.length >= 10 ? digits.slice(-10) : digits;
+  }
+
+  function convSamePerson(a, b) {
+    if (!a || !b) return false;
+    if (a.id === b.id) return true;
+    const jidA = String(a.contact_jid || "");
+    const jidB = String(b.contact_jid || "");
+    if (jidA && jidB && jidA === jidB) return true;
+    const tailA = phoneTailDigits(a.contact_phone);
+    const tailB = phoneTailDigits(b.contact_phone);
+    if (tailA && tailB && tailA === tailB) return true;
+    return false;
+  }
+
   function normalizeForSearch(str) {
     return String(str || "")
       .toLowerCase()
@@ -455,7 +502,7 @@
     if (state.syncInProgress) {
       const syncLi = document.createElement("li");
       syncLi.className = "conversation-item sync-status";
-      syncLi.innerHTML = '<span class="muted">Importando chats de tu celular…</span>';
+      syncLi.innerHTML = '<span class="muted">Importando chats y contactos de tu celular…</span>';
       conversationList.appendChild(syncLi);
     }
     const emptyLabel =
@@ -467,6 +514,7 @@
     }
 
     if (!list.length) {
+      if (state.syncInProgress) return;
       const msg = state.searchQuery ? "Sin resultados" : emptyLabel;
       conversationList.innerHTML = `<li class="conversation-item"><span class="muted">${msg}</span></li>`;
       return;
@@ -958,14 +1006,28 @@
       case "message.in":
       case "message.out":
         if (event.conversation) upsertConversation(event.conversation);
-        if (event.message && event.conversation?.id === state.activeId) {
-          const key = event.message.id || `${event.message.body}|${event.message.created_at}`;
-          const exists = state.messages.some(
-            (m) => m.id === event.message.id || `${m.body}|${m.created_at}` === `${event.message.body}|${event.message.created_at}`
-          );
-          if (!exists) {
-            state.messages.push(event.message);
-            renderMessages();
+        if (event.message) {
+          const active = state.conversations.find((c) => c.id === state.activeId);
+          const sameChat =
+            event.conversation?.id === state.activeId ||
+            (active && event.conversation && convSamePerson(active, event.conversation));
+          if (sameChat && event.conversation?.id && event.conversation.id !== state.activeId) {
+            state.activeId = event.conversation.id;
+            const conv = state.conversations.find((c) => c.id === state.activeId);
+            if (conv) {
+              $("chat-title").textContent = convTitle(conv);
+              $("chat-phone").textContent = convSubtitle(conv);
+            }
+          }
+          if (sameChat) {
+            const key = event.message.id || `${event.message.body}|${event.message.created_at}`;
+            const exists = state.messages.some(
+              (m) => m.id === event.message.id || `${m.body}|${m.created_at}` === `${event.message.body}|${event.message.created_at}`
+            );
+            if (!exists) {
+              state.messages.push(event.message);
+              renderMessages();
+            }
           }
         }
         break;
@@ -1004,7 +1066,7 @@
         }
         break;
       case "sync.started":
-        showSyncingList();
+        if (!state.syncInProgress) showSyncingList();
         break;
       case "sync.completed":
         clearSyncWatchdog();
@@ -1131,7 +1193,7 @@
     const btn = $("refresh-chats");
     btn.disabled = true;
     try {
-      const stats = await api("/whatsapp/enrich-contacts", { method: "POST" }, 30000);
+      const stats = await api("/whatsapp/enrich-contacts", { method: "POST" }, 120000);
       state.conversations = await fetchConversations();
       renderConversationList();
       if (stats.names_fixed || stats.phones_fixed) {
@@ -1143,6 +1205,124 @@
       if (!String(err.message).includes("409")) alert(err.message);
     } finally {
       btn.disabled = false;
+    }
+  });
+
+  let debugReport = null;
+
+  function showDebugModal() {
+    $("debug-modal").classList.remove("hidden");
+  }
+
+  function hideDebugModal() {
+    $("debug-modal").classList.add("hidden");
+  }
+
+  function renderDebugSummary(report) {
+    const t = report.timing_ms || {};
+    const api = report.evolution_api || {};
+    const app = report.app_db || {};
+    const sync = report.sync_queue || {};
+    const cards = [
+      { label: "Tiempo total", value: `${t.total ?? "—"} ms` },
+      { label: "findChats API", value: `${t.find_chats_api ?? "—"} ms · ${api.find_chats_count ?? 0} chats` },
+      { label: "findContacts API", value: `${t.find_contacts_api ?? "—"} ms · ${api.find_contacts_count ?? 0} contactos` },
+      { label: "Evolution DB", value: `${t.evolution_db ?? "—"} ms` },
+      { label: "Conversaciones app", value: `${app.total_conversations ?? 0} (${app.with_real_name ?? 0} con nombre)` },
+      { label: "Sin nombre", value: `${app.placeholder_names ?? 0} chats` },
+      { label: "Cola sync", value: sync.pending_jobs ? `${sync.pending_jobs} pendiente(s)` : "vacía" },
+    ];
+    $("debug-summary").innerHTML = cards.map((c) => (
+      `<div class="debug-stat"><strong>${escapeHtml(String(c.value))}</strong><span>${escapeHtml(c.label)}</span></div>`
+    )).join("");
+    $("debug-summary").classList.remove("hidden");
+  }
+
+  function renderDebugSample(report) {
+    const rows = report.sample_missing_names || [];
+    if (!rows.length) {
+      $("debug-sample").innerHTML = '<p class="muted small">No hay chats sin nombre en la muestra (o todos tienen nombre).</p>';
+      $("debug-sample").classList.remove("hidden");
+      return;
+    }
+    const head = `
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th>Teléfono</th>
+            <th>Nombre guardado</th>
+            <th>findChats</th>
+            <th>findContacts</th>
+            <th>Resuelto</th>
+            <th>Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    const body = rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.contact_phone || "—")}</td>
+        <td>${escapeHtml(row.contact_name || "—")}</td>
+        <td>${row.in_find_chats ? escapeHtml(row.find_chats_push_name || "sí") : "no"}</td>
+        <td>${row.in_find_contacts ? escapeHtml(row.find_contacts_push_name || "sí") : "no"}</td>
+        <td>${escapeHtml(row.resolved_name_api || row.resolved_name_db || "—")}</td>
+        <td class="reason">${escapeHtml(row.reason || "—")}</td>
+      </tr>
+    `).join("");
+    $("debug-sample").innerHTML = `${head}${body}</tbody></table>`;
+    $("debug-sample").classList.remove("hidden");
+  }
+
+  async function runChatsDebug() {
+    const runBtn = $("debug-run-btn");
+    const copyBtn = $("debug-copy-btn");
+    runBtn.disabled = true;
+    copyBtn.disabled = true;
+    $("debug-loading").classList.remove("hidden");
+    $("debug-summary").classList.add("hidden");
+    $("debug-sample").classList.add("hidden");
+    $("debug-json").value = "";
+    try {
+      const report = await api("/whatsapp/debug/chats?sample_limit=25", {}, 120000);
+      debugReport = report;
+      renderDebugSummary(report);
+      renderDebugSample(report);
+      $("debug-json").value = JSON.stringify(report, null, 2);
+      if (report.errors && report.errors.length) {
+        alert(`Diagnóstico con advertencias:\n${report.errors.join("\n")}`);
+      }
+    } catch (err) {
+      $("debug-json").value = JSON.stringify({ error: err.message }, null, 2);
+      alert(err.message);
+    } finally {
+      $("debug-loading").classList.add("hidden");
+      runBtn.disabled = false;
+      copyBtn.disabled = false;
+    }
+  }
+
+  $("debug-chats").addEventListener("click", () => {
+    showDebugModal();
+    if (!debugReport) runChatsDebug();
+  });
+  $("debug-modal-close").addEventListener("click", hideDebugModal);
+  $("debug-modal-backdrop").addEventListener("click", hideDebugModal);
+  $("debug-close-btn").addEventListener("click", hideDebugModal);
+  $("debug-run-btn").addEventListener("click", runChatsDebug);
+  $("debug-copy-btn").addEventListener("click", async () => {
+    const text = $("debug-json").value || (debugReport ? JSON.stringify(debugReport, null, 2) : "");
+    if (!text) {
+      alert("Ejecuta el diagnóstico primero.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      $("debug-copy-btn").textContent = "¡Copiado!";
+      setTimeout(() => { $("debug-copy-btn").textContent = "Copiar reporte"; }, 2000);
+    } catch {
+      $("debug-json").focus();
+      $("debug-json").select();
+      alert("Selecciona el JSON y cópialo manualmente (Cmd+C).");
     }
   });
 

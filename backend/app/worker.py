@@ -62,6 +62,17 @@ def _run_ai(worker_id: str, *, recover: bool) -> None:
     stop_ai_worker()
 
 
+def _run_sync(worker_id: str) -> None:
+    from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
+    from app.application.workers.worker_runtime import start_heartbeat_loop
+
+    start_heartbeat_loop("sync", worker_id, _stop)
+    start_sync_worker()
+    log.info("WhatsApp sync worker activo id=%s", worker_id)
+    _stop.wait()
+    stop_sync_worker()
+
+
 def _run_all(worker_id: str, *, recover_ai: bool) -> None:
     from app.application.ai.ai_queue_service import (
         recover_pending_ai_replies,
@@ -69,6 +80,7 @@ def _run_all(worker_id: str, *, recover_ai: bool) -> None:
         stop_ai_worker,
     )
     from app.application.outbound.bait_scheduler import start_outbound_worker, stop_outbound_worker
+    from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
     from app.application.workers.queue_service import start_webhook_worker, stop_webhook_worker
     from app.application.workers.worker_runtime import start_heartbeat_loop
 
@@ -76,6 +88,7 @@ def _run_all(worker_id: str, *, recover_ai: bool) -> None:
     start_webhook_worker()
     start_outbound_worker()
     start_ai_worker()
+    start_sync_worker()
     if recover_ai:
         recover_pending_ai_replies()
     log.info("Todos los workers activos id=%s", worker_id)
@@ -83,6 +96,7 @@ def _run_all(worker_id: str, *, recover_ai: bool) -> None:
     stop_ai_worker()
     stop_outbound_worker()
     stop_webhook_worker()
+    stop_sync_worker()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "kind",
-        choices=["webhook", "outbound", "ai", "all"],
+        choices=["webhook", "outbound", "ai", "sync", "all"],
         help="Tipo de worker a ejecutar",
     )
     parser.add_argument(
@@ -119,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
             _run_outbound(worker_id)
         elif args.kind == "ai":
             _run_ai(worker_id, recover=args.recover_ai)
+        elif args.kind == "sync":
+            _run_sync(worker_id)
         else:
             _run_all(worker_id, recover_ai=args.recover_ai)
     except Exception:

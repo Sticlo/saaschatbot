@@ -227,3 +227,258 @@ def needs_new_whatsapp_binding(
             if _owner_user_part(owner_str) != _owner_user_part(session.bound_owner_jid):
                 return True
     return False
+
+
+def pick_merge_primary(
+    left: Conversation,
+    right: Conversation,
+    *,
+    owner_names: Optional[set[str]] = None,
+) -> tuple[Conversation, Conversation]:
+    """Elige qué conversación conservar al fusionar (@lid con nombre > número)."""
+    from app.shared.core.phone import (
+        is_lid_placeholder,
+        is_owner_display_name,
+        is_placeholder_contact_name,
+        is_valid_whatsapp_phone,
+    )
+
+    owner_names = owner_names or set()
+
+    def score(conv: Conversation) -> tuple[int, int, int]:
+        name = str(conv.contact_name or "").strip()
+        if name and is_owner_display_name(name, owner_names):
+            return (-1, 0, 0)
+        named = 0
+        if name and not is_placeholder_contact_name(name, conv.contact_phone):
+            named = 2
+        lid_score = 0
+        if (conv.contact_jid or "").endswith("@lid"):
+            lid_score = 2
+        elif is_lid_placeholder(conv.contact_phone):
+            lid_score = 1
+        phone_score = 1 if is_valid_whatsapp_phone(conv.contact_phone) else 0
+        return (named, lid_score, phone_score)
+
+    left_score = score(left)
+    right_score = score(right)
+    if left_score != right_score:
+        return (left, right) if left_score > right_score else (right, left)
+    if left.created_at and right.created_at and left.created_at <= right.created_at:
+        return left, right
+    return right, left
+
+
+def merge_conversations(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    primary: Conversation,
+    secondary: Conversation,
+    owner_names: Optional[set[str]] = None,
+) -> None:
+    """Mueve mensajes de secondary → primary y borra secondary."""
+    from app.application.messaging.message_service import _find_existing_message
+    from app.application.sync.contact_identity_service import apply_identity_to_conversation
+    from app.shared.core.phone import (
+        is_owner_display_name,
+        is_placeholder_contact_name,
+        is_valid_whatsapp_phone,
+    )
+
+    owner_names = owner_names or set()
+
+    if primary.id == secondary.id:
+        return
+
+    for msg in (
+        db.query(Message)
+        .filter(Message.conversation_id == secondary.id)
+        .all()
+    ):
+        dup = _find_existing_message(
+            db,
+            tenant_id=tenant_id,
+            conversation_id=primary.id,
+            evolution_message_id=msg.evolution_message_id or "",
+            body=msg.body,
+            created_at=msg.created_at,
+        )
+        if dup:
+            db.delete(msg)
+        else:
+            msg.conversation_id = primary.id
+
+    if secondary.last_message_at and (
+        not primary.last_message_at or secondary.last_message_at > primary.last_message_at
+    ):
+        primary.last_message_at = secondary.last_message_at
+    if secondary.is_archived:
+        primary.is_archived = True
+    primary.unread_count = (primary.unread_count or 0) + (secondary.unread_count or 0)
+
+    secondary_phone = secondary.contact_phone
+    secondary_name = secondary.contact_name
+    secondary_jid = secondary.contact_jid or ""
+
+    db.delete(secondary)
+    db.flush()
+
+    apply_identity_to_conversation(
+        primary,
+        contact_phone=secondary_phone if is_valid_whatsapp_phone(secondary_phone) else primary.contact_phone,
+        contact_name=(
+            secondary_name
+            if is_placeholder_contact_name(primary.contact_name, primary.contact_phone)
+            and not (
+                owner_names
+                and is_owner_display_name(str(secondary_name or ""), owner_names)
+            )
+            else primary.contact_name
+        ),
+        contact_jid=secondary_jid or primary.contact_jid or "",
+    )
+
+
+def repair_duplicate_conversations(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    connection_id: UUID,
+    instance_name: str = "",
+    owner_names: Optional[set[str]] = None,
+) -> int:
+    """Fusiona chats duplicados (@lid + número, o mismo mensaje saliente duplicado)."""
+    from datetime import timedelta
+
+    from app.application.whatsapp.whatsapp_status import sanitize_leaked_owner_name
+
+    from app.config import settings
+    from app.infrastructure.evolution.evolution_store import fetch_bidirectional_lid_mappings
+    from app.domain.entities.enums import MessageDirection
+    from app.shared.core.phone import (
+        is_lid_placeholder,
+        is_valid_whatsapp_phone,
+        lid_jid_from_lid_phone,
+        normalize_phone,
+    )
+
+    rows = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == connection_id,
+        )
+        .order_by(Conversation.created_at.asc())
+        .all()
+    )
+    if len(rows) < 2:
+        return 0
+
+    owner_names = owner_names or set()
+    for conv in rows:
+        sanitize_leaked_owner_name(conv, owner_names)
+
+    lid_to_phone, phone_to_lid = ({}, {})
+    from app.application.conversations.contact_resolver_service import _load_link_maps
+
+    app_lid, app_phone = _load_link_maps(
+        db, tenant_id=tenant_id, whatsapp_connection_id=connection_id
+    )
+    lid_to_phone.update(app_lid)
+    phone_to_lid.update(app_phone)
+
+    if instance_name and settings.evolution_database_url:
+        evo_lid, evo_phone = fetch_bidirectional_lid_mappings(
+            settings.evolution_database_url, instance_name
+        )
+        lid_to_phone.update(evo_lid)
+        phone_to_lid.update(evo_phone)
+
+    # Mapeos aprendidos en chats que ya tienen @lid y teléfono juntos.
+    for conv in rows:
+        jid = str(conv.contact_jid or "")
+        phone = str(conv.contact_phone or "")
+        if jid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+            norm = normalize_phone(phone)
+            lid_to_phone.setdefault(jid, norm)
+            from app.shared.core.phone import phone_to_evolution_number
+
+            digits = phone_to_evolution_number(norm)
+            phone_to_lid.setdefault(digits, jid)
+            phone_to_lid.setdefault(norm, jid)
+
+    merged = 0
+    alive = {conv.id: conv for conv in rows}
+
+    def _do_merge(a: Conversation, b: Conversation) -> None:
+        nonlocal merged
+        if a.id not in alive or b.id not in alive or a.id == b.id:
+            return
+        primary, secondary = pick_merge_primary(a, b, owner_names=owner_names)
+        merge_conversations(
+            db,
+            tenant_id=tenant_id,
+            primary=primary,
+            secondary=secondary,
+            owner_names=owner_names,
+        )
+        alive.pop(secondary.id, None)
+        merged += 1
+
+    by_phone: dict[str, Conversation] = {}
+    for conv in list(alive.values()):
+        if is_valid_whatsapp_phone(conv.contact_phone):
+            phone = normalize_phone(conv.contact_phone)
+            if phone in by_phone:
+                _do_merge(by_phone[phone], conv)
+            else:
+                by_phone[phone] = alive.get(conv.id, conv)
+
+    for conv in list(alive.values()):
+        if not is_lid_placeholder(conv.contact_phone):
+            continue
+        lid_jid = conv.contact_jid or lid_jid_from_lid_phone(conv.contact_phone)
+        mapped_phone = lid_to_phone.get(lid_jid or "") if lid_jid else None
+        if mapped_phone and is_valid_whatsapp_phone(mapped_phone):
+            phone = normalize_phone(mapped_phone)
+            other = by_phone.get(phone)
+            if other:
+                _do_merge(conv, other)
+
+    since = datetime.now(timezone.utc) - timedelta(seconds=120)
+    recent = (
+        db.query(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(
+            Message.tenant_id == tenant_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.created_at >= since,
+            Conversation.whatsapp_connection_id == connection_id,
+        )
+        .order_by(Message.created_at.desc())
+        .all()
+    )
+    by_body: dict[str, list[Conversation]] = {}
+    for msg in recent:
+        conv = alive.get(msg.conversation_id)
+        if conv is None:
+            continue
+        body = (msg.body or "").strip()
+        if not body:
+            continue
+        by_body.setdefault(body, [])
+        if not any(c.id == conv.id for c in by_body[body]):
+            by_body[body].append(conv)
+
+    for convs in by_body.values():
+        if len(convs) < 2:
+            continue
+        primary = convs[0]
+        for other in convs[1:]:
+            if primary.id in alive and other.id in alive:
+                _do_merge(primary, other)
+                primary = alive.get(primary.id, primary)
+
+    return merged
+

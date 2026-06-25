@@ -15,6 +15,7 @@ from app.shared.core.phone import (
     lid_jid_from_lid_phone,
     normalize_phone,
     phone_match_tail,
+    phone_to_evolution_number,
     resolve_contact_phone,
 )
 from app.domain.entities import (
@@ -145,6 +146,7 @@ def find_conversation_for_contact(
     whatsapp_connection_id: UUID,
     contact_phone: str = "",
     contact_jid: str = "",
+    instance_name: str = "",
 ) -> Optional[Conversation]:
     """Busca conversación existente tolerando @lid, E.164 y prefijos distintos."""
     jids_to_try: list[str] = []
@@ -154,6 +156,80 @@ def find_conversation_for_contact(
         derived = lid_jid_from_lid_phone(contact_phone)
         if derived and derived not in jids_to_try:
             jids_to_try.append(derived)
+
+    phones_to_try: list[str] = []
+    if contact_phone:
+        phones_to_try.append(contact_phone)
+    if is_valid_whatsapp_phone(contact_phone):
+        normalized = normalize_phone(contact_phone)
+        if normalized and normalized not in phones_to_try:
+            phones_to_try.append(normalized)
+
+    lid_to_phone: dict[str, str] = {}
+    phone_to_lid: dict[str, str] = {}
+
+    if instance_name:
+        from app.config import settings
+        from app.infrastructure.evolution.evolution_store import (
+            fetch_bidirectional_lid_mappings,
+            fetch_lid_jid_for_phone,
+        )
+
+        if settings.evolution_database_url:
+            evo_lid, evo_phone = fetch_bidirectional_lid_mappings(
+                settings.evolution_database_url, instance_name
+            )
+            lid_to_phone.update(evo_lid)
+            phone_to_lid.update(evo_phone)
+            for phone in list(phones_to_try):
+                if not is_valid_whatsapp_phone(phone):
+                    continue
+                norm = normalize_phone(phone)
+                lid_jid = phone_to_lid.get(phone_to_evolution_number(norm)) or phone_to_lid.get(norm)
+                if not lid_jid:
+                    lid_jid = fetch_lid_jid_for_phone(
+                        settings.evolution_database_url, instance_name, norm
+                    ) or ""
+                if lid_jid and lid_jid not in jids_to_try:
+                    jids_to_try.append(lid_jid)
+
+    # Mapeos ya aprendidos en conversaciones de la app (@lid + teléfono en el mismo chat).
+    app_rows = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == whatsapp_connection_id,
+        )
+        .all()
+    )
+    for conv in app_rows:
+        jid = str(conv.contact_jid or "")
+        phone = str(conv.contact_phone or "")
+        if jid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+            norm = normalize_phone(phone)
+            lid_to_phone.setdefault(jid, norm)
+            phone_to_lid.setdefault(phone_to_evolution_number(norm), jid)
+            phone_to_lid.setdefault(norm, jid)
+        elif is_lid_placeholder(phone):
+            derived = lid_jid_from_lid_phone(phone)
+            if derived:
+                lid_to_phone.setdefault(derived, "")
+
+    for jid in list(jids_to_try):
+        if jid.endswith("@lid"):
+            mapped = lid_to_phone.get(jid)
+            if mapped and is_valid_whatsapp_phone(mapped):
+                norm = normalize_phone(mapped)
+                if norm not in phones_to_try:
+                    phones_to_try.append(norm)
+    for phone in list(phones_to_try):
+        if not is_valid_whatsapp_phone(phone):
+            continue
+        norm = normalize_phone(phone)
+        digits = phone_to_evolution_number(norm)
+        lid_jid = phone_to_lid.get(digits) or phone_to_lid.get(norm)
+        if lid_jid and lid_jid not in jids_to_try:
+            jids_to_try.append(lid_jid)
 
     for jid in jids_to_try:
         conversation = (
@@ -167,14 +243,6 @@ def find_conversation_for_contact(
         )
         if conversation:
             return conversation
-
-    phones_to_try: list[str] = []
-    if contact_phone:
-        phones_to_try.append(contact_phone)
-    if is_valid_whatsapp_phone(contact_phone):
-        normalized = normalize_phone(contact_phone)
-        if normalized and normalized not in phones_to_try:
-            phones_to_try.append(normalized)
 
     for phone in phones_to_try:
         conversation = (
@@ -196,15 +264,7 @@ def find_conversation_for_contact(
             break
 
     if tail_phone or jids_to_try:
-        candidates = (
-            db.query(Conversation)
-            .filter(
-                Conversation.tenant_id == tenant_id,
-                Conversation.whatsapp_connection_id == whatsapp_connection_id,
-            )
-            .all()
-        )
-        for conversation in candidates:
+        for conversation in app_rows:
             if tail_phone and phone_match_tail(conversation.contact_phone, tail_phone):
                 return conversation
             for jid in jids_to_try:
@@ -225,6 +285,7 @@ def get_or_create_conversation(
     contact_name: str = "",
     contact_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
+    instance_name: str = "",
 ) -> Conversation:
     if whatsapp_connection_id is None:
         raise ValueError("whatsapp_connection_id requerido para conversaciones WA")
@@ -238,6 +299,7 @@ def get_or_create_conversation(
         whatsapp_connection_id=whatsapp_connection_id,
         contact_phone=contact_phone,
         contact_jid=contact_jid,
+        instance_name=instance_name,
     )
     if conversation:
         apply_identity_to_conversation(
@@ -276,6 +338,7 @@ def _save_message(
     evolution_message_id: str,
     increment_unread: bool,
     created_at: Optional[datetime] = None,
+    publish: bool = True,
 ) -> Message:
     ts = created_at or datetime.now(timezone.utc)
     existing = _find_existing_message(
@@ -306,8 +369,9 @@ def _save_message(
     db.add(message)
     db.flush()
 
-    event_type = "message.in" if direction == MessageDirection.IN.value else "message.out"
-    publish_message_event(tenant, conversation, message, event_type=event_type)
+    if publish:
+        event_type = "message.in" if direction == MessageDirection.IN.value else "message.out"
+        publish_message_event(tenant, conversation, message, event_type=event_type)
     return message
 
 
@@ -322,30 +386,54 @@ def save_inbound_message(
     message_key: Optional[dict] = None,
     lid_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
+    instance_name: str = "",
 ) -> Optional[Message]:
     if not body.strip() or whatsapp_connection_id is None:
         return None
 
-    phone = resolve_contact_phone(remote_jid, key=message_key)
-    contact_jid = lid_jid or (remote_jid if remote_jid.endswith("@lid") else "")
-    if contact_jid and not phone:
-        phone = f"lid:{contact_jid.split('@')[0]}"
-    if not phone:
-        return None
+    from app.application.conversations.contact_resolver_service import (
+        resolve_canonical_conversation,
+    )
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
 
-    if is_valid_whatsapp_phone(phone):
-        phone = normalize_phone(phone)
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == tenant.id)
+        .first()
+    )
+    owner_names = build_owner_display_names(session)
+    inst = instance_name or (session.instance_name if session else "")
 
-    conversation = get_or_create_conversation(
+    conversation, phone, contact_jid = resolve_canonical_conversation(
         db,
         tenant_id=tenant.id,
-        contact_phone=phone,
-        contact_name=push_name,
-        contact_jid=contact_jid,
         whatsapp_connection_id=whatsapp_connection_id,
+        remote_jid=remote_jid,
+        lid_jid=lid_jid,
+        message_key=message_key,
+        instance_name=inst,
+        owner_names=owner_names,
     )
-    if push_name and is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone):
-        conversation.contact_name = push_name
+
+    if conversation is None:
+        if not phone and not contact_jid:
+            return None
+        conversation = get_or_create_conversation(
+            db,
+            tenant_id=tenant.id,
+            contact_phone=phone or f"lid:{contact_jid.split('@')[0]}",
+            contact_name=push_name,
+            contact_jid=contact_jid,
+            whatsapp_connection_id=whatsapp_connection_id,
+            instance_name=inst,
+        )
+    elif push_name and is_placeholder_contact_name(
+        conversation.contact_name, conversation.contact_phone
+    ):
+        from app.shared.core.phone import is_owner_display_name
+
+        if not owner_names or not is_owner_display_name(push_name, owner_names):
+            conversation.contact_name = push_name
 
     if conversation.status == ConversationStatus.EXCLUDED.value:
         return None
@@ -379,6 +467,8 @@ def _find_recent_outbound_echo(
     body: str,
     contact_phone: str,
     contact_jid: str = "",
+    evolution_message_id: str = "",
+    owner_names: Optional[set[str]] = None,
     window_seconds: int = 120,
 ) -> Optional[Conversation]:
     """Evita chat duplicado cuando el webhook llega sin evolution_message_id."""
@@ -409,6 +499,35 @@ def _find_recent_outbound_echo(
             return conv
         if contact_phone and phone_match_tail(conv.contact_phone, contact_phone):
             return conv
+        if contact_jid and is_lid_placeholder(conv.contact_phone):
+            if lid_jid_from_lid_phone(conv.contact_phone) == contact_jid:
+                return conv
+
+    if not rows:
+        return None
+
+    seen: dict[UUID, Conversation] = {}
+    for row in rows:
+        seen[row.conversation_id] = row.conversation
+
+    # Caso seguro: el eco no se pudo enlazar por jid/teléfono (típico de @lid sin mapeo),
+    # pero hay exactamente UNA conversación con ese mismo texto saliente reciente. Es el
+    # mismo chat que el panel/IA acaba de usar — reutilízalo en vez de duplicar.
+    if len(seen) == 1:
+        return next(iter(seen.values()))
+
+    # Varias conversaciones con el mismo texto (p.ej. baits masivos): solo el heurístico
+    # antiguo sin evolution_message_id intenta consolidar; con id es ambiguo, no arriesgar.
+    if not evolution_message_id:
+        from app.application.conversations.whatsapp_conversation_service import (
+            pick_merge_primary,
+        )
+
+        primary = next(iter(seen.values()))
+        for other in seen.values():
+            primary, _ = pick_merge_primary(primary, other, owner_names=owner_names)
+        return primary
+
     return None
 
 
@@ -422,10 +541,24 @@ def save_outbound_from_phone(
     message_key: Optional[dict] = None,
     lid_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
+    instance_name: str = "",
 ) -> Optional[Message]:
     """Sincroniza mensajes enviados desde el celular (fromMe=true)."""
     if not body.strip() or whatsapp_connection_id is None:
         return None
+
+    from app.application.conversations.contact_resolver_service import (
+        resolve_canonical_conversation,
+    )
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == tenant.id)
+        .first()
+    )
+    owner_names = build_owner_display_names(session)
+    inst = instance_name or (session.instance_name if session else "")
 
     # El panel ya guardó el mensaje — no duplicar en otro chat por JID distinto.
     if evolution_message_id:
@@ -438,24 +571,32 @@ def save_outbound_from_phone(
             .first()
         )
         if existing:
+            from app.application.realtime.realtime_service import (
+                publish_conversation_updated,
+                publish_message_event,
+            )
+
+            conv = (
+                db.query(Conversation)
+                .filter(Conversation.id == existing.conversation_id)
+                .first()
+            )
+            if conv is not None:
+                publish_message_event(
+                    tenant, conv, existing, event_type="message.out"
+                )
+                publish_conversation_updated(tenant.id, conv)
             return existing
 
-    phone = resolve_contact_phone(remote_jid, key=message_key)
-    contact_jid = lid_jid or (remote_jid if remote_jid.endswith("@lid") else "")
-    if contact_jid and not phone:
-        phone = f"lid:{contact_jid.split('@')[0]}"
-    if not phone and not contact_jid:
-        return None
-
-    if is_valid_whatsapp_phone(phone):
-        phone = normalize_phone(phone)
-
-    conversation = find_conversation_for_contact(
+    conversation, phone, contact_jid = resolve_canonical_conversation(
         db,
         tenant_id=tenant.id,
         whatsapp_connection_id=whatsapp_connection_id,
-        contact_phone=phone,
-        contact_jid=contact_jid,
+        remote_jid=remote_jid,
+        lid_jid=lid_jid,
+        message_key=message_key,
+        instance_name=inst,
+        owner_names=owner_names,
     )
 
     if conversation is None:
@@ -466,6 +607,8 @@ def save_outbound_from_phone(
             body=body,
             contact_phone=phone,
             contact_jid=contact_jid,
+            evolution_message_id=evolution_message_id,
+            owner_names=owner_names,
         )
 
     if conversation is None:
@@ -475,6 +618,7 @@ def save_outbound_from_phone(
             contact_phone=phone or f"lid:{contact_jid.split('@')[0]}",
             contact_jid=contact_jid,
             whatsapp_connection_id=whatsapp_connection_id,
+            instance_name=inst,
         )
     else:
         apply_identity_to_conversation(
@@ -483,8 +627,20 @@ def save_outbound_from_phone(
             contact_name="",
             contact_jid=contact_jid,
         )
+        if contact_jid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+            from app.application.conversations.contact_resolver_service import (
+                record_contact_link,
+            )
 
-    return _save_message(
+            record_contact_link(
+                db,
+                tenant_id=tenant.id,
+                whatsapp_connection_id=whatsapp_connection_id,
+                lid_jid=contact_jid,
+                phone_e164=phone,
+            )
+
+    message = _save_message(
         db,
         tenant=tenant,
         conversation=conversation,
@@ -494,7 +650,25 @@ def save_outbound_from_phone(
         status=MessageStatus.SENT.value,
         evolution_message_id=evolution_message_id,
         increment_unread=False,
+        publish=False,
     )
+
+    db.refresh(message)
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == message.conversation_id)
+        .first()
+    )
+    if conv is not None:
+        from app.application.realtime.realtime_service import (
+            publish_conversation_updated,
+            publish_message_event,
+        )
+
+        publish_message_event(tenant, conv, message, event_type="message.out")
+        publish_conversation_updated(tenant.id, conv)
+
+    return message
 
 
 def import_evolution_chat_or_contact(
@@ -541,6 +715,18 @@ def import_evolution_chat_or_contact(
         or record.get("verifiedName")
         or ""
     )
+    from app.domain.entities import WhatsAppSession
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+    from app.shared.core.phone import is_owner_display_name
+
+    wa_session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == tenant.id)
+        .first()
+    )
+    owner_names = build_owner_display_names(wa_session)
+    if owner_names and is_owner_display_name(str(name), owner_names):
+        name = ""
     archived_raw = record.get("archived")
     conversation = get_or_create_conversation(
         db,
@@ -617,9 +803,20 @@ def parse_messages_upsert(data: Any) -> list[dict]:
         key = item.get("key") or {}
         remote_jid = key.get("remoteJid") or ""
         remote_alt = key.get("remoteJidAlt") or ""
-        if remote_jid.endswith("@lid") and remote_alt:
-            phone_jid = remote_alt
+        lid_jid = ""
+        phone_jid = ""
+        if remote_jid.endswith("@lid"):
             lid_jid = remote_jid
+            if remote_alt.endswith("@s.whatsapp.net"):
+                phone_jid = remote_alt
+        elif remote_jid.endswith("@s.whatsapp.net"):
+            phone_jid = remote_jid
+            if remote_alt.endswith("@lid"):
+                lid_jid = remote_alt
+        elif remote_alt.endswith("@lid"):
+            lid_jid = remote_alt
+            if remote_jid.endswith("@s.whatsapp.net"):
+                phone_jid = remote_jid
         else:
             phone_jid = remote_jid or remote_alt
             lid_jid = remote_jid if remote_jid.endswith("@lid") else ""

@@ -43,6 +43,29 @@ def test_parse_messages_upsert_includes_from_me():
     assert outbound["body"] == "Respuesta desde celular"
 
 
+def test_parse_messages_upsert_extracts_lid_when_phone_is_primary_jid():
+    """Celular envía con remoteJid=teléfono y remoteJidAlt=@lid (caso Baileys reciente)."""
+    payload = {
+        "messages": [
+            {
+                "key": {
+                    "remoteJid": "573219469201@s.whatsapp.net",
+                    "remoteJidAlt": "236429376532542@lid",
+                    "fromMe": True,
+                    "id": "OUT1",
+                },
+                "message": {"conversation": "e"},
+            },
+        ]
+    }
+    parsed = parse_messages_upsert(payload)
+    assert len(parsed) == 1
+    item = parsed[0]
+    assert item["remote_jid"] == "573219469201@s.whatsapp.net"
+    assert item["lid_jid"] == "236429376532542@lid"
+    assert item["from_me"] is True
+
+
 def test_resolve_whatsapp_status_banned():
     assert resolve_whatsapp_status("close", {"statusReason": "blocked"}) == WhatsAppStatus.BANNED.value
     assert resolve_whatsapp_status("open", {}) == WhatsAppStatus.CONNECTED.value

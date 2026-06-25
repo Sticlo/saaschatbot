@@ -47,15 +47,18 @@ async def lifespan(app: FastAPI):
         )
         from app.application.outbound.bait_scheduler import start_outbound_worker, stop_outbound_worker
         from app.application.workers.queue_service import start_webhook_worker, stop_webhook_worker
+        from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
 
         start_webhook_worker()
         start_outbound_worker()
         start_ai_worker()
+        start_sync_worker()
         recover_pending_ai_replies()
         yield
         stop_ai_worker()
         stop_outbound_worker()
         stop_webhook_worker()
+        stop_sync_worker()
     else:
         yield
 

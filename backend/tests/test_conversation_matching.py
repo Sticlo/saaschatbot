@@ -49,6 +49,227 @@ def test_find_conversation_by_phone_tail():
 
 
 @requires_db
+def test_outbound_webhook_reuses_lid_chat_when_panel_sent_first():
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Message, Tenant
+    from app.domain.entities.enums import MessageDirection, MessageSource, MessageStatus
+    from app.application.messaging.message_service import _save_message
+
+    connection_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Lid Echo",
+            slug=f"lid-echo-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(tenant)
+        db.flush()
+
+        girlfriend = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="lid:236429376532542",
+            contact_name="Mi Novia",
+            contact_jid="236429376532542@lid",
+            whatsapp_connection_id=connection_id,
+        )
+        db.add(girlfriend)
+        db.flush()
+
+        _save_message(
+            db,
+            tenant=tenant,
+            conversation=girlfriend,
+            direction=MessageDirection.OUT.value,
+            source=MessageSource.AGENT.value,
+            body="Te amo",
+            status=MessageStatus.SENT.value,
+            evolution_message_id="",
+            increment_unread=False,
+        )
+        db.commit()
+
+        echoed = save_outbound_from_phone(
+            db,
+            tenant=tenant,
+            evolution_message_id="",
+            remote_jid="573219469201@s.whatsapp.net",
+            body="Te amo",
+            lid_jid="",
+            whatsapp_connection_id=connection_id,
+        )
+        assert echoed is not None
+        assert echoed.conversation_id == girlfriend.id
+
+        count = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == connection_id,
+            )
+            .count()
+        )
+        assert count == 1
+
+
+def test_pick_merge_primary_prefers_lid_over_owner_name():
+    from app.application.conversations.whatsapp_conversation_service import pick_merge_primary
+
+    connection_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+
+    lid_chat = Conversation(
+        tenant_id=tenant_id,
+        contact_phone="lid:236429376532542",
+        contact_name="ADRIANA",
+        contact_jid="236429376532542@lid",
+        whatsapp_connection_id=connection_id,
+    )
+    phone_chat = Conversation(
+        tenant_id=tenant_id,
+        contact_phone="+573219469201",
+        contact_name="Juan Aguilar",
+        whatsapp_connection_id=connection_id,
+    )
+
+    primary, secondary = pick_merge_primary(
+        lid_chat,
+        phone_chat,
+        owner_names={"Juan Aguilar"},
+    )
+    assert primary is lid_chat
+    assert secondary is phone_chat
+
+
+@requires_db
+def test_outbound_from_phone_finds_lid_chat_via_remote_jid_alt():
+    """Mensaje desde celular con remoteJidAlt=@lid debe ir al chat @lid existente."""
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Tenant
+
+    connection_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Cell Lid Alt",
+            slug=f"cell-alt-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(tenant)
+        db.flush()
+
+        novia = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="lid:236429376532542",
+            contact_name="ADRIANA",
+            contact_jid="236429376532542@lid",
+            whatsapp_connection_id=connection_id,
+        )
+        db.add(novia)
+        db.commit()
+
+        echoed = save_outbound_from_phone(
+            db,
+            tenant=tenant,
+            evolution_message_id="CELL_E_1",
+            remote_jid="573219469201@s.whatsapp.net",
+            body="e",
+            message_key={
+                "remoteJid": "573219469201@s.whatsapp.net",
+                "remoteJidAlt": "236429376532542@lid",
+                "fromMe": True,
+                "id": "CELL_E_1",
+            },
+            lid_jid="236429376532542@lid",
+            whatsapp_connection_id=connection_id,
+        )
+        assert echoed is not None
+        assert echoed.conversation_id == novia.id
+
+        count = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == connection_id,
+            )
+            .count()
+        )
+        assert count == 1
+
+
+@requires_db
+def test_outbound_lid_echo_reuses_single_recent_chat_with_message_id():
+    """Panel envió 'te quiero' a la novia; el eco vuelve como @lid sin mapeo.
+
+    No debe crear un chat nuevo: hay un único saliente reciente con ese texto.
+    """
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Tenant
+    from app.domain.entities.enums import MessageDirection, MessageSource, MessageStatus
+    from app.application.messaging.message_service import _save_message
+
+    connection_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Lid Echo Id",
+            slug=f"lid-id-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(tenant)
+        db.flush()
+
+        novia = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573219469201",
+            contact_name="+573219469201",
+            contact_jid="",
+            whatsapp_connection_id=connection_id,
+        )
+        db.add(novia)
+        db.flush()
+
+        _save_message(
+            db,
+            tenant=tenant,
+            conversation=novia,
+            direction=MessageDirection.OUT.value,
+            source=MessageSource.AGENT.value,
+            body="te quiero",
+            status=MessageStatus.SENT.value,
+            evolution_message_id="",
+            increment_unread=False,
+        )
+        db.commit()
+
+        echoed = save_outbound_from_phone(
+            db,
+            tenant=tenant,
+            evolution_message_id="WA_ECHO_123",
+            remote_jid="236429376532542@lid",
+            body="te quiero",
+            lid_jid="236429376532542@lid",
+            whatsapp_connection_id=connection_id,
+        )
+        assert echoed is not None
+        assert echoed.conversation_id == novia.id
+        db.commit()
+
+        count = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == connection_id,
+            )
+            .count()
+        )
+        assert count == 1
+
+        db.refresh(novia)
+        # El @lid quedó enlazado al chat de teléfono para futuros ecos.
+        assert novia.contact_jid == "236429376532542@lid"
+        # Nunca se filtró el nombre del dueño.
+        assert novia.contact_name == "+573219469201"
+
+
+@requires_db
 def test_outbound_webhook_reuses_existing_chat_without_message_id():
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Message, Tenant, WhatsAppSession

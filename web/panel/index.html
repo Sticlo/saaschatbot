@@ -7,7 +7,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
   <title>SaasChatbot — Panel</title>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=11" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=12" />
 </head>
 <body>
   <div id="app">
@@ -64,7 +64,10 @@
           <div id="sidebar-chats">
             <div class="sidebar-header">
               <h2>Chats</h2>
-              <button id="refresh-chats" class="btn ghost small" title="Reparar nombres">↻</button>
+              <div class="sidebar-header-actions">
+                <button id="debug-chats" class="btn ghost small" title="Debug nombres">🐛</button>
+                <button id="refresh-chats" class="btn ghost small" title="Reparar nombres">↻</button>
+              </div>
             </div>
             <div class="search-box">
               <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
@@ -192,6 +195,32 @@
       </div>
     </section>
 
+    <!-- Modal debug nombres -->
+    <div id="debug-modal" class="modal hidden">
+      <div class="modal-backdrop" id="debug-modal-backdrop"></div>
+      <div class="modal-card debug-modal-card">
+        <button id="debug-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
+        <div class="debug-modal-header">
+          <h3>Debug — nombres de chats</h3>
+          <p class="muted small">Diagnóstico de importación, tiempos y por qué falta un nombre.</p>
+        </div>
+        <div id="debug-loading" class="debug-loading hidden">
+          <p class="muted">Ejecutando diagnóstico… puede tardar 10–30 s.</p>
+        </div>
+        <div id="debug-summary" class="debug-summary hidden"></div>
+        <div id="debug-sample" class="debug-sample hidden"></div>
+        <label class="debug-json-label">
+          Reporte completo (JSON)
+          <textarea id="debug-json" class="debug-json" rows="10" readonly spellcheck="false"></textarea>
+        </label>
+        <div class="debug-actions">
+          <button type="button" id="debug-run-btn" class="btn primary small">Ejecutar diagnóstico</button>
+          <button type="button" id="debug-copy-btn" class="btn ghost small">Copiar reporte</button>
+          <button type="button" id="debug-close-btn" class="btn ghost small">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Modal QR WhatsApp -->
     <div id="qr-modal" class="modal hidden">
       <div class="modal-backdrop" id="qr-modal-backdrop"></div>
@@ -207,6 +236,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=28"></script>
+  <script src="/static/panel/app.js?v=29"></script>
 </body>
 </html>

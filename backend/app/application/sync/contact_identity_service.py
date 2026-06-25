@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 from app.shared.core.phone import (
@@ -7,10 +8,15 @@ from app.shared.core.phone import (
     is_owner_display_name,
     is_placeholder_contact_name,
     is_valid_whatsapp_phone,
+    lid_jid_from_lid_phone,
+    normalize_phone,
+    phone_to_evolution_number,
     resolve_contact_phone,
 )
 from app.domain.entities import Conversation
 from app.infrastructure.evolution.evolution_store import (
+    fetch_bidirectional_lid_mappings,
+    fetch_comprehensive_names_index,
     fetch_contact_push_name,
     fetch_lid_alt_phone,
     fetch_lid_push_name,
@@ -156,6 +162,126 @@ def lid_jid_from_phone(phone: str) -> str:
     return f"{lid}@lid" if lid and "@" not in lid else lid
 
 
+@dataclass
+class ContactNamesLookup:
+    jid_names: dict[str, str]
+    phone_names: dict[str, str]
+    lid_to_phone: dict[str, str]
+    phone_to_lid: dict[str, str]
+
+    def resolve_for_conversation(
+        self,
+        conversation: Conversation,
+        *,
+        owner_names: Optional[set[str]] = None,
+    ) -> str:
+        phone = conversation.contact_phone or ""
+        contact_jid = conversation.contact_jid or ""
+        owner_names = owner_names or set()
+
+        candidates: list[str] = []
+        if contact_jid:
+            candidates.append(self.jid_names.get(contact_jid, ""))
+        if is_valid_whatsapp_phone(phone):
+            phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
+            candidates.append(self.jid_names.get(phone_jid, ""))
+            candidates.append(self.phone_names.get(phone, ""))
+            candidates.append(self.phone_names.get(normalize_phone(phone), ""))
+            lid_jid = self.phone_to_lid.get(phone_to_evolution_number(phone)) or self.phone_to_lid.get(phone)
+            if lid_jid:
+                candidates.append(self.jid_names.get(lid_jid, ""))
+        elif is_lid_placeholder(phone):
+            lid_jid = contact_jid or lid_jid_from_phone(phone)
+            if lid_jid:
+                candidates.append(self.jid_names.get(lid_jid, ""))
+                mapped_phone = self.lid_to_phone.get(lid_jid)
+                if mapped_phone:
+                    candidates.append(self.phone_names.get(mapped_phone, ""))
+
+        for candidate in candidates:
+            cleaned = str(candidate or "").strip()
+            if not cleaned:
+                continue
+            if owner_names and is_owner_display_name(cleaned, owner_names):
+                continue
+            if not is_placeholder_contact_name(cleaned, phone):
+                return cleaned
+
+        existing = str(conversation.contact_name or "").strip()
+        if existing and not is_placeholder_contact_name(existing, phone):
+            if not owner_names or not is_owner_display_name(existing, owner_names):
+                return existing
+        return ""
+
+
+def build_contact_names_lookup(
+    instance_name: str,
+    *,
+    use_api: bool = True,
+) -> ContactNamesLookup:
+    from app.config import settings
+    from app.infrastructure.evolution.evolution_store import register_contact_name
+
+    dsn = settings.evolution_database_url
+    jid_names, phone_names = fetch_comprehensive_names_index(dsn, instance_name)
+    lid_to_phone, phone_to_lid = fetch_bidirectional_lid_mappings(dsn, instance_name)
+
+    if use_api:
+        try:
+            from app.infrastructure.evolution.evolution_client import evolution_client
+
+            for row in evolution_client.find_contacts(instance_name) + evolution_client.find_chats(
+                instance_name
+            ):
+                if not isinstance(row, dict):
+                    continue
+                jid = str(row.get("remoteJid") or row.get("id") or "")
+                name = (
+                    row.get("name")
+                    or row.get("notify")
+                    or row.get("pushName")
+                    or row.get("verifiedName")
+                    or ""
+                )
+                register_contact_name(jid_names, phone_names, jid, str(name))
+        except Exception:
+            pass
+
+        for lid_jid, phone in lid_to_phone.items():
+            lid_name = jid_names.get(lid_jid)
+            if lid_name and phone and phone not in phone_names:
+                phone_names[phone] = lid_name
+                phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
+                jid_names.setdefault(phone_jid, lid_name)
+
+    return ContactNamesLookup(
+        jid_names=jid_names,
+        phone_names=phone_names,
+        lid_to_phone=lid_to_phone,
+        phone_to_lid=phone_to_lid,
+    )
+
+
+def apply_names_lookup_to_conversations(
+    conversations: list[Conversation],
+    lookup: ContactNamesLookup,
+    *,
+    owner_names: Optional[set[str]] = None,
+) -> int:
+    """Actualiza contact_name en conversaciones con nombres resueltos desde Evolution."""
+    fixed = 0
+    for conversation in conversations:
+        if not is_placeholder_contact_name(
+            conversation.contact_name, conversation.contact_phone
+        ):
+            continue
+        resolved = lookup.resolve_for_conversation(conversation, owner_names=owner_names)
+        if resolved and resolved != conversation.contact_name:
+            conversation.contact_name = resolved
+            fixed += 1
+    return fixed
+
+
 def apply_agenda_name(conversation: Conversation, name: str) -> bool:
     if not name or not name.strip():
         return False
@@ -228,31 +354,33 @@ def enrich_tenant_conversations(
     tenant,
     session,
     contacts_index: Optional[dict[str, dict]] = None,
+    fetch_profiles: bool = True,
+    profile_limit: int = 40,
 ) -> dict[str, int]:
     """Repara nombres/teléfonos @lid en conversaciones ya guardadas."""
     from app.config import settings
     from app.domain.entities import Conversation
     from app.infrastructure.evolution.evolution_store import (
-        fetch_contact_names_index,
-        fetch_stored_chat_names_index,
         fetch_stored_chats,
         fetch_stored_contacts,
     )
 
     connection_id = session.active_connection_id
     if connection_id is None:
-        return {"enriched": 0, "names_fixed": 0, "phones_fixed": 0}
+        return {
+            "enriched": 0,
+            "names_fixed": 0,
+            "phones_fixed": 0,
+            "profile_fetched": 0,
+            "profile_names_fixed": 0,
+        }
 
     dsn = settings.evolution_database_url
     instance_name = session.instance_name
-    chat_names = fetch_stored_chat_names_index(dsn, instance_name)
-    jid_names, phone_names = fetch_contact_names_index(dsn, instance_name)
-    msg_push_names = _build_msg_push_name_index(dsn, instance_name)
-    lid_to_phone = {}
-    if dsn:
-        from app.infrastructure.evolution.evolution_store import fetch_lid_phone_mappings
-
-        lid_to_phone = fetch_lid_phone_mappings(dsn, instance_name)
+    names_lookup = build_contact_names_lookup(instance_name, use_api=True)
+    jid_names = names_lookup.jid_names
+    phone_names = names_lookup.phone_names
+    lid_to_phone = names_lookup.lid_to_phone
     if contacts_index is None:
         stored_contacts = fetch_stored_contacts(dsn, instance_name, limit=10000)
         stored_chats = fetch_stored_chats(dsn, instance_name, limit=10000)
@@ -284,14 +412,16 @@ def enrich_tenant_conversations(
         .all()
     )
 
-    stats = {"enriched": 0, "names_fixed": 0, "phones_fixed": 0}
-    owner_names: set[str] = set()
-    if session.bound_owner_jid and dsn:
-        from app.infrastructure.evolution.evolution_store import fetch_contact_push_name
+    stats = {
+        "enriched": 0,
+        "names_fixed": 0,
+        "phones_fixed": 0,
+        "profile_fetched": 0,
+        "profile_names_fixed": 0,
+    }
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
 
-        push = fetch_contact_push_name(dsn, instance_name, session.bound_owner_jid)
-        if push:
-            owner_names.add(push)
+    owner_names = build_owner_display_names(session)
     for conversation in conversations:
         remote_jid = conversation.contact_jid or lid_jid_from_phone(conversation.contact_phone)
         if (
@@ -336,39 +466,11 @@ def enrich_tenant_conversations(
         old_name = conversation.contact_name
         old_phone = conversation.contact_phone
 
-        from app.shared.core.phone import phone_to_evolution_number
-
-        phone_jid = (
-            f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
-            if is_valid_whatsapp_phone(conversation.contact_phone)
-            else ""
+        lookup_name = names_lookup.resolve_for_conversation(
+            conversation, owner_names=owner_names
         )
-        agenda_name = (
-            chat_names.get(remote_jid)
-            or chat_names.get(conversation.contact_jid or "")
-            or chat_names.get(phone_jid)
-            or jid_names.get(remote_jid)
-            or jid_names.get(conversation.contact_jid or "")
-            or jid_names.get(phone_jid)
-            or (phone_names.get(phone) if is_valid_whatsapp_phone(phone) else "")
-            or msg_push_names.get(remote_jid)
-            or msg_push_names.get(phone_jid)
-            or (msg_push_names.get(conversation.contact_jid or "") if conversation.contact_jid else "")
-            or ""
-        )
-        if not agenda_name and conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
-            alt = lid_to_phone.get(conversation.contact_jid)
-            if alt:
-                alt_jid = f"{phone_to_evolution_number(alt)}@s.whatsapp.net"
-                agenda_name = (
-                    chat_names.get(alt_jid)
-                    or jid_names.get(alt_jid)
-                    or msg_push_names.get(alt_jid)
-                    or ""
-                )
-
-        if agenda_name:
-            name = agenda_name
+        if lookup_name:
+            name = lookup_name
 
         # Si el nombre resuelto es placeholder (número / Contacto) pero la
         # conversación ya tiene un nombre real, lo conservamos.
@@ -389,5 +491,20 @@ def enrich_tenant_conversations(
             stats["names_fixed"] += 1
         if conversation.contact_phone != old_phone and is_valid_whatsapp_phone(conversation.contact_phone):
             stats["phones_fixed"] += 1
+
+    if fetch_profiles:
+        from app.application.sync.profile_name_service import enrich_names_from_whatsapp_profiles
+
+        profile_stats = enrich_names_from_whatsapp_profiles(
+            conversations,
+            instance_name=instance_name,
+            owner_names=owner_names,
+            limit=profile_limit,
+        )
+        stats["profile_fetched"] = profile_stats["fetched"]
+        stats["profile_names_fixed"] = profile_stats["fixed"]
+        if profile_stats["fixed"]:
+            stats["names_fixed"] += profile_stats["fixed"]
+            stats["enriched"] += profile_stats["fixed"]
 
     return stats

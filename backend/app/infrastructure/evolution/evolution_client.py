@@ -249,6 +249,27 @@ class EvolutionClient:
         )
         return result if isinstance(result, list) else []
 
+    def fetch_profile(self, instance_name: str, number: str) -> dict:
+        """Nombre de perfil WhatsApp para un número (pushName / notify del perfil)."""
+        digits = "".join(ch for ch in str(number) if ch.isdigit())
+        result = self._request(
+            "POST",
+            f"/chat/fetchProfile/{instance_name}",
+            json={"number": digits},
+            timeout=20.0,
+        )
+        return result if isinstance(result, dict) else {}
+
+    def fetch_business_profile(self, instance_name: str, number: str) -> dict:
+        digits = "".join(ch for ch in str(number) if ch.isdigit())
+        result = self._request(
+            "POST",
+            f"/chat/fetchBusinessProfile/{instance_name}",
+            json={"number": digits},
+            timeout=20.0,
+        )
+        return result if isinstance(result, dict) else {}
+
     def find_message_by_key(
         self,
         instance_name: str,

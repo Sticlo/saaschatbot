@@ -28,6 +28,7 @@ from app.domain.entities import (
 )
 from app.application.sync.contact_identity_service import (
     apply_identity_to_conversation,
+    build_contact_names_lookup,
     build_contacts_index,
     enrich_tenant_conversations,
     resolve_contact_identity,
@@ -35,10 +36,9 @@ from app.application.sync.contact_identity_service import (
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.infrastructure.evolution.evolution_store import (
     connection_since_unix,
+    fetch_bidirectional_lid_mappings,
     fetch_chat_last_timestamp,
-    fetch_contact_names_index,
     fetch_contact_push_name,
-    fetch_lid_phone_mappings,
     fetch_message_chat_index,
     fetch_stored_chats,
     fetch_stored_contacts,
@@ -51,11 +51,13 @@ from app.application.whatsapp.whatsapp_service import refresh_session_status
 
 log = logging.getLogger(__name__)
 
-_HISTORY_POLL_ATTEMPTS = 18
-_HISTORY_POLL_SECONDS = 5
+_HISTORY_POLL_ATTEMPTS = 8
+_HISTORY_POLL_SECONDS = 3
 _MAX_CHATS_PER_SYNC = 1000
 _BULK_MESSAGE_PAGES = 20
 _BULK_MESSAGE_PAGE_SIZE = 500
+_BATCH_COMMIT_SIZE = 50
+_FAST_SYNC_MIN_POLLS = 1
 
 
 def _fetch_chat_states(instance_name: str) -> dict[str, dict]:
@@ -75,12 +77,9 @@ def _fetch_chat_states(instance_name: str) -> dict[str, dict]:
 
 
 def _owner_display_names(session: WhatsAppSession, *, dsn: str, instance_name: str) -> set[str]:
-    names: set[str] = set()
-    if session.bound_owner_jid and dsn:
-        push = fetch_contact_push_name(dsn, instance_name, session.bound_owner_jid)
-        if push:
-            names.add(push)
-    return names
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+
+    return build_owner_display_names(session)
 
 
 def _contact_identity(
@@ -215,6 +214,7 @@ def _collect_evolution_items(
     tenant_id,
     wait_for_history: bool,
     since_ts: Optional[int] = None,
+    import_agenda: bool = True,
 ) -> tuple[list, list, list, list, list]:
     dsn = settings.evolution_database_url
     chats: list = []
@@ -229,7 +229,15 @@ def _collect_evolution_items(
 
     if wait_for_history:
         baseline = _nudge_history_sync(instance_name, tenant_id=tenant_id)
-        time.sleep(8)
+        already_open = False
+        try:
+            state_payload = evolution_client.connection_state(instance_name)
+            state = str((state_payload.get("instance") or {}).get("state") or "").lower()
+            already_open = state in {"open", "connected"}
+        except EvolutionAPIError:
+            pass
+        if not already_open:
+            time.sleep(5)
 
     for attempt in range(attempts):
         try:
@@ -237,14 +245,17 @@ def _collect_evolution_items(
         except EvolutionAPIError as exc:
             log.warning("find_chats falló: %s", exc)
             chats = []
-        try:
-            contacts = evolution_client.find_contacts(instance_name)
-        except EvolutionAPIError as exc:
-            log.warning("find_contacts falló: %s", exc)
-            contacts = []
+        contacts: list = []
+        stored_contacts: list = []
+        if import_agenda:
+            try:
+                contacts = evolution_client.find_contacts(instance_name)
+            except EvolutionAPIError as exc:
+                log.warning("find_contacts falló: %s", exc)
+                contacts = []
+            stored_contacts = fetch_stored_contacts(dsn, instance_name, limit=_MAX_CHATS_PER_SYNC)
 
         stored_chats = fetch_stored_chats(dsn, instance_name, limit=_MAX_CHATS_PER_SYNC)
-        stored_contacts = fetch_stored_contacts(dsn, instance_name, limit=_MAX_CHATS_PER_SYNC)
         message_index = fetch_message_chat_index(
             dsn, instance_name, limit=_MAX_CHATS_PER_SYNC, since_ts=None
         )
@@ -252,21 +263,33 @@ def _collect_evolution_items(
 
         total = (
             len(chats)
-            + len(contacts)
             + len(stored_chats)
-            + len(stored_contacts)
             + len(message_index)
         )
+        agenda_total = len(contacts) + len(stored_contacts)
         db_total = counts["chats"] + counts["contacts"] + counts["messages"]
         grew = db_total > sum(baseline.values())
+        has_chats = total > 0
+        has_agenda = agenda_total > 0
 
-        if total > 0 and (not wait_for_history or grew):
+        if not wait_for_history:
+            if has_chats or has_agenda:
+                log.info(
+                    "Sync rápido — chats=%s agenda=%s msg_jids=%s",
+                    len(chats) + len(stored_chats),
+                    agenda_total,
+                    len(message_index),
+                )
+                break
+            break
+
+        if has_chats and (grew or attempt >= _FAST_SYNC_MIN_POLLS):
             if total == prev_total:
                 stable_polls += 1
             else:
                 stable_polls = 0
             prev_total = total
-            if stable_polls >= 2 or attempt == attempts - 1:
+            if stable_polls >= 1 or attempt == attempts - 1:
                 log.info(
                     "Historial listo — chats=%s contacts=%s msg_jids=%s db_msgs=%s",
                     len(stored_chats),
@@ -275,8 +298,14 @@ def _collect_evolution_items(
                     counts["messages"],
                 )
                 break
+        elif has_agenda and attempt >= _FAST_SYNC_MIN_POLLS and not grew:
+            log.info(
+                "Historial aún vacío — importando %s contactos de agenda mientras llegan mensajes",
+                agenda_total,
+            )
+            break
 
-        if not wait_for_history or attempt == attempts - 1:
+        if attempt == attempts - 1:
             break
 
         log.info(
@@ -351,6 +380,8 @@ def _merge_items(
     message_index: list,
     api_discovered: list | None = None,
     chat_states: dict | None = None,
+    *,
+    import_agenda: bool = True,
 ) -> list[tuple[str, dict]]:
     by_jid: dict[str, dict] = {}
     chat_states = chat_states or {}
@@ -382,16 +413,32 @@ def _merge_items(
             else:
                 by_jid[jid] = dict(item)
 
-    # Los contactos solo enriquecen chats ya descubiertos (no crean nuevos slots).
-    for source in enrichment_sources:
-        for item in source:
-            if not isinstance(item, dict):
-                continue
-            jid = str(item.get("remoteJid") or "")
-            if not jid or is_group_or_broadcast_jid(jid):
-                continue
-            if jid in by_jid:
-                _merge_item_fields(by_jid[jid], item)
+    if import_agenda:
+        for source in enrichment_sources:
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                jid = str(item.get("remoteJid") or item.get("id") or "")
+                if not jid or is_group_or_broadcast_jid(jid):
+                    continue
+                if jid in by_jid:
+                    _merge_item_fields(by_jid[jid], item)
+                else:
+                    entry = dict(item)
+                    if not entry.get("remoteJid"):
+                        entry["remoteJid"] = jid
+                    entry["_from_agenda"] = True
+                    by_jid[jid] = entry
+    else:
+        for source in enrichment_sources:
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                jid = str(item.get("remoteJid") or item.get("id") or "")
+                if not jid or is_group_or_broadcast_jid(jid):
+                    continue
+                if jid in by_jid:
+                    _merge_item_fields(by_jid[jid], item)
 
     for jid, merged in by_jid.items():
         state = chat_states.get(jid)
@@ -637,9 +684,11 @@ def _dedupe_conversations_by_phone(
     tenant_id,
     connection_id,
     lid_to_phone: Optional[dict[str, str]] = None,
+    owner_names: Optional[set[str]] = None,
 ) -> int:
     """Une conversaciones duplicadas del mismo teléfono (@lid + número real)."""
-    from app.shared.core.phone import is_lid_placeholder, is_placeholder_contact_name, is_valid_whatsapp_phone
+    from app.shared.core.phone import is_lid_placeholder, is_placeholder_contact_name, is_valid_whatsapp_phone, normalize_phone
+    from app.application.conversations.whatsapp_conversation_service import pick_merge_primary
 
     rows = (
         db.query(Conversation)
@@ -651,6 +700,7 @@ def _dedupe_conversations_by_phone(
         .all()
     )
     lid_to_phone = lid_to_phone or {}
+    owner_names = owner_names or set()
     by_phone: dict[str, Conversation] = {}
     merged = 0
 
@@ -678,7 +728,11 @@ def _dedupe_conversations_by_phone(
         if secondary.contact_jid and not primary.contact_jid:
             primary.contact_jid = secondary.contact_jid
         if is_placeholder_contact_name(primary.contact_name, primary.contact_phone):
-            primary.contact_name = secondary.contact_name
+            sec_name = str(secondary.contact_name or "")
+            from app.shared.core.phone import is_owner_display_name
+
+            if not owner_names or not is_owner_display_name(sec_name, owner_names):
+                primary.contact_name = secondary.contact_name
         if secondary.last_message_at and (
             not primary.last_message_at or secondary.last_message_at > primary.last_message_at
         ):
@@ -692,11 +746,14 @@ def _dedupe_conversations_by_phone(
 
     for conv in rows:
         if is_valid_whatsapp_phone(conv.contact_phone):
-            primary = by_phone.get(conv.contact_phone)
+            phone = normalize_phone(conv.contact_phone)
+            primary = by_phone.get(phone)
             if primary is None:
-                by_phone[conv.contact_phone] = conv
+                by_phone[phone] = conv
             elif primary.id != conv.id:
-                _merge_into(primary, conv)
+                winner, loser = pick_merge_primary(primary, conv, owner_names=owner_names)
+                _merge_into(winner, loser)
+                by_phone[phone] = winner
 
     for conv in list(rows):
         if not is_lid_placeholder(conv.contact_phone):
@@ -705,9 +762,10 @@ def _dedupe_conversations_by_phone(
         phone = lid_to_phone.get(lid_jid) if lid_jid else None
         if not phone or not is_valid_whatsapp_phone(phone):
             continue
-        primary = by_phone.get(phone)
-        if primary and primary.id != conv.id:
-            _merge_into(primary, conv)
+        other = by_phone.get(normalize_phone(phone))
+        if other and other.id != conv.id:
+            primary, secondary = pick_merge_primary(conv, other, owner_names=owner_names)
+            _merge_into(primary, secondary)
 
     return merged
 
@@ -719,6 +777,7 @@ def sync_whatsapp_chats(
     session: WhatsAppSession,
     messages_per_chat: int = 50,
     wait_for_history: bool = True,
+    import_agenda: bool = True,
 ) -> dict[str, int]:
     refresh_session_status(db, tenant, session)
     if (
@@ -742,11 +801,16 @@ def sync_whatsapp_chats(
         tenant_id=tenant.id,
         wait_for_history=wait_for_history,
         since_ts=since_ts,
+        import_agenda=import_agenda,
     )
-    api_discovered = _discover_jids_from_api(session.instance_name)
+    api_discovered = (
+        _discover_jids_from_api(session.instance_name)
+        if wait_for_history
+        else []
+    )
     chat_states = _fetch_chat_states(session.instance_name)
     dsn = settings.evolution_database_url
-    lid_to_phone = fetch_lid_phone_mappings(dsn, session.instance_name)
+    lid_to_phone, _ = fetch_bidirectional_lid_mappings(dsn, session.instance_name)
     chat_names = {
         str(item.get("remoteJid")): str(item.get("name"))
         for item in stored_chats
@@ -763,6 +827,7 @@ def sync_whatsapp_chats(
         message_index,
         api_discovered,
         chat_states,
+        import_agenda=import_agenda,
     )
     items = _consolidate_lid_duplicates(items, lid_to_phone, chat_names)
 
@@ -772,11 +837,13 @@ def sync_whatsapp_chats(
     # IDs de mensajes ya insertados en este sync (evita UniqueViolation cross-conv)
     seen_evolution_ids: set = set()
     owner_names = _owner_display_names(session, dsn=dsn, instance_name=session.instance_name)
-    jid_names, phone_names = fetch_contact_names_index(dsn, session.instance_name)
+    names_lookup = build_contact_names_lookup(session.instance_name, use_api=False)
+    jid_names = names_lookup.jid_names
+    phone_names = names_lookup.phone_names
     owner_jid = session.bound_owner_jid or ""
     owner_phone = session.phone_number or ""
 
-    for remote_jid, item in items:
+    for idx, (remote_jid, item) in enumerate(items):
         if is_owner_jid(
             remote_jid,
             owner_jid=owner_jid,
@@ -818,22 +885,23 @@ def sync_whatsapp_chats(
         )
         conversations_imported += 1
 
-        load_jid = lid_jid or remote_jid
-        # Always load without since_ts so historical messages are always imported.
-        # Deduplication in _import_messages handles re-syncing efficiently.
-        records = _load_message_records(
-            session.instance_name,
-            load_jid,
-            limit=messages_per_chat,
-            since_ts=None,
-        )
-        if not records and load_jid != remote_jid:
+        agenda_only = bool(item.get("_from_agenda")) and not item.get("lastMessageTimestamp")
+        records: list = []
+        if not agenda_only:
+            load_jid = lid_jid or remote_jid
             records = _load_message_records(
                 session.instance_name,
-                remote_jid,
+                load_jid,
                 limit=messages_per_chat,
                 since_ts=None,
             )
+            if not records and load_jid != remote_jid:
+                records = _load_message_records(
+                    session.instance_name,
+                    remote_jid,
+                    limit=messages_per_chat,
+                    since_ts=None,
+                )
         messages_imported += _import_messages(
             db,
             tenant=tenant,
@@ -843,8 +911,7 @@ def sync_whatsapp_chats(
             expected_jid=contact_jid,
             seen_evolution_ids=seen_evolution_ids,
         )
-        # Fallback de orden solo para chats sin ningún mensaje (van al fondo).
-        if conversation.last_message_at is None:
+        if conversation.last_message_at is None and not agenda_only:
             _apply_last_message_timestamp(
                 conversation,
                 item,
@@ -853,12 +920,21 @@ def sync_whatsapp_chats(
                 dsn=dsn,
             )
 
-        publish_conversation_updated(tenant.id, conversation)
-        try:
-            db.commit()
-        except Exception as exc:
-            log.warning("Commit conv %s falló: %s — reintentando", phone, exc)
-            db.rollback()
+        if not agenda_only:
+            publish_conversation_updated(tenant.id, conversation)
+
+        if (idx + 1) % _BATCH_COMMIT_SIZE == 0:
+            try:
+                db.commit()
+            except Exception as exc:
+                log.warning("Commit batch falló: %s — reintentando", exc)
+                db.rollback()
+
+    try:
+        db.commit()
+    except Exception as exc:
+        log.warning("Commit final sync falló: %s", exc)
+        db.rollback()
 
     enrich_stats = enrich_tenant_conversations(
         db,
@@ -871,6 +947,7 @@ def sync_whatsapp_chats(
         tenant_id=tenant.id,
         connection_id=connection_id,
         lid_to_phone=lid_to_phone,
+        owner_names=owner_names,
     )
 
     db.flush()

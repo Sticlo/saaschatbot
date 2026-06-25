@@ -11,6 +11,7 @@ from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, WhatsAppSession
 from app.domain.entities.enums import WhatsAppStatus
 from app.presentation.schemas.whatsapp import (
+    WhatsAppChatsDebugResponse,
     WhatsAppConnectResponse,
     WhatsAppStatusResponse,
     WhatsAppSyncResponse,
@@ -192,6 +193,33 @@ def sync_whatsapp_chats_endpoint(
     )
 
 
+@router.get("/debug/chats", response_model=WhatsAppChatsDebugResponse)
+def debug_whatsapp_chats(
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+    sample_limit: int = 25,
+):
+    """Diagnóstico de importación de chats y resolución de nombres (para soporte)."""
+    from app.application.sync.chat_debug_service import build_chats_debug_report
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if tenant is None or session is None:
+        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
+
+    report = build_chats_debug_report(
+        db,
+        tenant=tenant,
+        session=session,
+        sample_limit=max(5, min(sample_limit, 50)),
+    )
+    return WhatsAppChatsDebugResponse.model_validate(report)
+
+
 @router.post("/enrich-contacts", response_model=WhatsAppSyncResponse)
 def enrich_whatsapp_contacts(
     request: Request,
@@ -224,7 +252,28 @@ def enrich_whatsapp_contacts(
     except EvolutionAPIError:
         db.rollback()
 
+    from app.infrastructure.cache.redis_client import cache_delete, tenant_cache_key
+
+    if session.instance_name:
+        cache_delete(tenant_cache_key(session.instance_name, "owner_display_names"))
+
     stats = enrich_tenant_conversations(db, tenant=tenant, session=session)
+    from app.application.conversations.whatsapp_conversation_service import (
+        repair_duplicate_conversations,
+    )
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+
+    owner_names = build_owner_display_names(session)
+    merged = 0
+    if session.active_connection_id:
+        merged = repair_duplicate_conversations(
+            db,
+            tenant_id=tenant.id,
+            connection_id=session.active_connection_id,
+            instance_name=session.instance_name,
+            owner_names=owner_names,
+        )
+    stats["conversations_merged"] = merged
     log_audit(
         db,
         tenant_id=tenant.id,
@@ -259,9 +308,22 @@ def enrich_whatsapp_contacts(
         contacts_enriched=stats["enriched"],
         names_fixed=stats["names_fixed"],
         phones_fixed=stats["phones_fixed"],
+        profile_fetched=stats.get("profile_fetched", 0),
+        profile_names_fixed=stats.get("profile_names_fixed", 0),
         message=(
             f"Contactos actualizados: {stats['names_fixed']} nombres, "
             f"{stats['phones_fixed']} teléfonos reparados."
+            + (
+                f" Chats fusionados: {stats.get('conversations_merged', 0)}."
+                if stats.get("conversations_merged")
+                else ""
+            )
+            + (
+                f" Perfiles WA: {stats.get('profile_names_fixed', 0)} de "
+                f"{stats.get('profile_fetched', 0)} consultados."
+                if stats.get("profile_fetched")
+                else ""
+            )
         ),
     )
 

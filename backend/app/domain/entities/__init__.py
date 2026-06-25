@@ -21,6 +21,7 @@ from app.domain.entities.plan import DEFAULT_PLAN_ID, Plan
 from app.domain.entities.subscription import Subscription
 from app.domain.entities.tenant import Tenant, TenantProfile
 from app.domain.entities.user import User
+from app.domain.entities.whatsapp_contact_link import WhatsAppContactLink
 from app.domain.entities.whatsapp_session import WhatsAppSession
 
 __all__ = [
@@ -49,5 +50,6 @@ __all__ = [
     "User",
     "UserRole",
     "WhatsAppSession",
+    "WhatsAppContactLink",
     "WhatsAppStatus",
 ]

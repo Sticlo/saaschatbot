@@ -671,3 +671,104 @@ textarea { resize: vertical; min-height: 44px; }
   margin-top: 0.25rem;
 }
 
+.sidebar-header-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.debug-modal-card {
+  width: min(920px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  text-align: left;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.debug-modal-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.debug-loading {
+  padding: 1rem 0;
+}
+
+.debug-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.debug-stat {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.debug-stat strong {
+  display: block;
+  font-size: 1.1rem;
+  margin-bottom: 0.2rem;
+}
+
+.debug-stat span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.debug-sample {
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.debug-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.debug-table th,
+.debug-table td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.debug-table th {
+  background: var(--surface2);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.debug-table td.reason {
+  color: var(--warning);
+  max-width: 220px;
+}
+
+.debug-json-label {
+  display: block;
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.debug-json {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  resize: vertical;
+  min-height: 160px;
+}
+
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}

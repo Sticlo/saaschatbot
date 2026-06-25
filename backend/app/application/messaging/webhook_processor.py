@@ -29,11 +29,6 @@ def _payload_instance(payload: dict) -> str:
 
 
 def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
-    dedup_id = build_dedup_id(payload)
-    if is_duplicate_webhook(tenant_id, dedup_id):
-        log.debug("Webhook duplicado ignorado tenant=%s id=%s", tenant_id, dedup_id)
-        return
-
     db = SessionLocal()
     try:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -60,6 +55,12 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
         data = payload.get("data") or payload
         pending_ai_jobs: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = []
 
+        if event != "messages.upsert":
+            dedup_id = build_dedup_id(payload)
+            if is_duplicate_webhook(tenant_id, dedup_id):
+                log.debug("Webhook duplicado ignorado tenant=%s id=%s", tenant_id, dedup_id)
+                return
+
         if event == "connection.update":
             handle_connection_update(db, tenant=tenant, session=session, data=data)
             db.commit()
@@ -80,6 +81,17 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 from app.application.messaging.media_cache import save_media_from_webhook
 
                 for item in parse_messages_upsert(data):
+                    msg_id = item.get("message_id") or ""
+                    if msg_id:
+                        msg_dedup = f"messages.upsert:{msg_id}"
+                        if is_duplicate_webhook(tenant_id, msg_dedup):
+                            log.debug(
+                                "Mensaje duplicado ignorado tenant=%s id=%s",
+                                tenant_id,
+                                msg_id,
+                            )
+                            continue
+
                     # Capturar base64 del webhook y guardar en disco
                     b64 = item.get("base64") or ""
                     if b64 and item.get("message_id"):
@@ -104,6 +116,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                             message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
                             lid_jid=item.get("lid_jid") or "",
                             whatsapp_connection_id=connection_id,
+                            instance_name=session.instance_name,
                         )
                     else:
                         msg = save_inbound_message(
@@ -116,6 +129,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                             message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
                             lid_jid=item.get("lid_jid") or "",
                             whatsapp_connection_id=connection_id,
+                            instance_name=session.instance_name,
                         )
                         if msg is not None:
                             pending_ai_jobs.append((tenant.id, msg.conversation_id, msg.id))
@@ -147,16 +161,27 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 debounce=True,
                 delay_seconds=3,
             )
-        elif event in ("contacts.set", "contacts.upsert"):
-            # Los contactos de agenda no son chats; el sync los usa solo para nombres.
+        elif event in ("contacts.set",):
             from app.application.sync.sync_scheduler import schedule_whatsapp_sync
 
             schedule_whatsapp_sync(
                 tenant_id,
                 wait_for_history=False,
                 debounce=True,
-                delay_seconds=5,
+                delay_seconds=2,
             )
+        elif event == "contacts.upsert":
+            records = data if isinstance(data, list) else [data]
+            connection_id = session.active_connection_id
+            if connection_id:
+                for record in records:
+                    if isinstance(record, dict):
+                        import_evolution_chat_or_contact(
+                            db,
+                            tenant=tenant,
+                            record=record,
+                            whatsapp_connection_id=connection_id,
+                        )
         elif event == "chats.update":
             records = data if isinstance(data, list) else [data]
             for record in records:

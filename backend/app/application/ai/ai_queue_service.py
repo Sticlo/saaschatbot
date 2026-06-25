@@ -198,7 +198,7 @@ def recover_pending_ai_replies() -> None:
     def _run() -> None:
         time.sleep(3)
         from app.domain.entities import Conversation, Tenant
-        from app.domain.entities.enums import ConversationMode, ConversationStatus
+        from app.domain.entities.enums import ConversationMode, ConversationStatus, WhatsAppStatus
         from app.application.ai.ai_service import maybe_schedule_ai_for_conversation
 
         db = SessionLocal()
@@ -206,6 +206,8 @@ def recover_pending_ai_replies() -> None:
             tenants = db.query(Tenant).filter(Tenant.ai_global_enabled.is_(True)).all()
             scheduled = 0
             for tenant in tenants:
+                if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
+                    continue
                 conversations = (
                     db.query(Conversation)
                     .filter(
@@ -257,7 +259,7 @@ def start_ai_worker() -> None:
 def stop_ai_worker() -> None:
     _worker_stop.set()
     if _worker_thread and _worker_thread.is_alive():
-        _worker_thread.join(timeout=5)
+        _worker_thread.join(timeout=1)
 
 
 def ai_worker_is_alive() -> bool:

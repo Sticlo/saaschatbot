@@ -150,12 +150,23 @@ def evolution_send_target(conversation) -> str:
 def resolve_contact_phone(remote_jid: str, *, key: Optional[dict] = None) -> str:
     """Resuelve E.164 desde JID de WhatsApp (incluye remoteJidAlt para @lid)."""
     if remote_jid.endswith("@lid"):
+        if key:
+            for field in ("remoteJidAlt", "participant", "senderPn", "participantPn", "participantAlt"):
+                alt = key.get(field)
+                if not isinstance(alt, str) or not alt:
+                    continue
+                if alt.endswith("@s.whatsapp.net"):
+                    return jid_to_phone(alt)
+                digits = re.sub(r"\D", "", alt)
+                if len(digits) >= 10:
+                    return normalize_phone(digits)
         return ""
 
     if key:
-        alt = key.get("remoteJidAlt") or key.get("participant")
-        if isinstance(alt, str) and alt.endswith("@s.whatsapp.net"):
-            return jid_to_phone(alt)
+        for field in ("remoteJidAlt", "participant", "senderPn", "participantPn", "participantAlt"):
+            alt = key.get(field)
+            if isinstance(alt, str) and alt.endswith("@s.whatsapp.net"):
+                return jid_to_phone(alt)
         main = key.get("remoteJid")
         if isinstance(main, str) and main.endswith("@s.whatsapp.net"):
             return jid_to_phone(main)

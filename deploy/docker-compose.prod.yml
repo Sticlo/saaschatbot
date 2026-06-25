@@ -107,6 +107,10 @@ services:
     <<: *worker
     command: python -m app.worker ai --recover-ai
 
+  worker-sync:
+    <<: *worker
+    command: python -m app.worker sync
+
 volumes:
   postgres_data:
   redis_data:

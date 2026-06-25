@@ -35,5 +35,6 @@ export EMBED_WORKERS_IN_API=true
 export PYTHONPATH="$BACKEND"
 exec "$ROOT/.venv/bin/uvicorn" app.presentation.main:app --reload \
   --host 0.0.0.0 --port 8000 \
+  --timeout-graceful-shutdown 2 \
   --reload-exclude 'alembic/*' \
   --reload-exclude '.venv/*'

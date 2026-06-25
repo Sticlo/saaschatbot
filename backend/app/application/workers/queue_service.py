@@ -39,6 +39,26 @@ def is_duplicate_webhook(tenant_id: uuid.UUID, dedup_id: str) -> bool:
 def build_dedup_id(payload: dict) -> str:
     event = (payload.get("event") or "unknown").lower()
     data = payload.get("data") or payload
+
+    candidates: list[dict] = []
+    if isinstance(data, list):
+        candidates = [item for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        nested = data.get("messages")
+        if isinstance(nested, list):
+            candidates = [item for item in nested if isinstance(item, dict)]
+        else:
+            candidates = [data]
+
+    for item in candidates:
+        key = item.get("key") if isinstance(item.get("key"), dict) else {}
+        msg_id = key.get("id")
+        if msg_id:
+            return f"{event}:{msg_id}"
+        state = item.get("state") or item.get("status")
+        if state is not None:
+            return f"{event}:{state}"
+
     if isinstance(data, dict):
         key = data.get("key") if isinstance(data.get("key"), dict) else {}
         msg_id = key.get("id")
@@ -47,6 +67,7 @@ def build_dedup_id(payload: dict) -> str:
         state = data.get("state") or data.get("status")
         if state is not None:
             return f"{event}:{state}"
+
     instance = payload.get("instance") or payload.get("instanceName") or ""
     return f"{event}:{instance}"
 
@@ -85,4 +106,4 @@ def start_webhook_worker() -> None:
 def stop_webhook_worker() -> None:
     _worker_stop.set()
     if _worker_thread and _worker_thread.is_alive():
-        _worker_thread.join(timeout=5)
+        _worker_thread.join(timeout=1)

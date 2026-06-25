@@ -13,6 +13,7 @@ from app.shared.core.phone import (
     evolution_send_target,
     instance_name_for_tenant,
     is_valid_whatsapp_phone,
+    normalize_phone,
     phone_to_evolution_number,
 )
 from app.domain.entities import (
@@ -351,6 +352,14 @@ def send_text_message(
         )
         if alt_phone and is_valid_whatsapp_phone(alt_phone):
             recipient = phone_to_evolution_number(alt_phone)
+            from app.application.sync.contact_identity_service import apply_identity_to_conversation
+
+            apply_identity_to_conversation(
+                conversation,
+                contact_phone=normalize_phone(alt_phone),
+                contact_name=conversation.contact_name,
+                contact_jid=conversation.contact_jid,
+            )
 
     result = evolution_client.send_text(session.instance_name, recipient, text)
 

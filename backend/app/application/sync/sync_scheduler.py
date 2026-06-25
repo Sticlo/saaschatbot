@@ -7,7 +7,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_SYNC_LOCK_TTL = 120
+_SYNC_LOCK_TTL = 300
 _SYNC_DEBOUNCE_SECONDS = 60
 
 
@@ -17,6 +17,8 @@ def run_sync_job(
     ip_address: Optional[str] = None,
     *,
     wait_for_history: bool = True,
+    import_agenda: Optional[bool] = None,
+    silent: bool = False,
 ) -> None:
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Tenant, WhatsAppSession
@@ -25,7 +27,11 @@ def run_sync_job(
     from app.application.realtime.realtime_service import publish_panel_event
     from app.application.billing.tenant_service import log_audit
 
+    if import_agenda is None:
+        import_agenda = not wait_for_history
+
     db = SessionLocal()
+    stats: dict = {}
     try:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
         session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
@@ -36,6 +42,7 @@ def run_sync_job(
             tenant=tenant,
             session=session,
             wait_for_history=wait_for_history,
+            import_agenda=import_agenda,
         )
         if user_id is not None:
             log_audit(
@@ -47,35 +54,40 @@ def run_sync_job(
                 ip_address=ip_address,
             )
         db.commit()
-        publish_panel_event(
-            tenant_id,
-            {"type": "sync.completed", **stats, "status": "completed"},
-        )
-        if (
-            wait_for_history
+        if not silent:
+            publish_panel_event(
+                tenant_id,
+                {"type": "sync.completed", **stats, "status": "completed"},
+            )
+        if not wait_for_history and not silent:
+            _schedule_history_sync(tenant_id, delay_seconds=20)
+        elif (
+            not silent
             and stats.get("conversations_imported", 0) == 0
             and stats.get("messages_imported", 0) == 0
         ):
             log.info(
-                "Sync sin chats aún tenant=%s — reintento en 30s sin esperar historial",
+                "Sync sin chats aún tenant=%s — reintento en 15s",
                 tenant_id,
             )
             schedule_whatsapp_sync(
                 tenant_id,
                 wait_for_history=False,
-                delay_seconds=30,
+                delay_seconds=15,
             )
-        _schedule_delayed_enrich(tenant_id, delay_seconds=75)
+        if not silent:
+            _schedule_delayed_enrich(tenant_id, delay_seconds=45)
     except Exception as exc:
         log.warning("Sync background falló tenant=%s: %s", tenant_id, exc)
         db.rollback()
-        try:
-            publish_panel_event(
-                tenant_id,
-                {"type": "sync.completed", "status": "failed", "message": str(exc)},
-            )
-        except Exception:
-            pass
+        if not silent:
+            try:
+                publish_panel_event(
+                    tenant_id,
+                    {"type": "sync.completed", "status": "failed", "message": str(exc)},
+                )
+            except Exception:
+                pass
     finally:
         db.close()
         try:
@@ -84,7 +96,25 @@ def run_sync_job(
             pass
 
 
-def _schedule_delayed_enrich(tenant_id: uuid.UUID, delay_seconds: float = 75) -> None:
+def _schedule_history_sync(tenant_id: uuid.UUID, *, delay_seconds: float = 20) -> None:
+    """Segunda fase: importa mensajes/historial sin bloquear la lista inicial."""
+    import time as _time
+
+    def _job() -> None:
+        _time.sleep(delay_seconds)
+        from app.application.sync.sync_queue_service import enqueue_whatsapp_sync_job
+
+        enqueue_whatsapp_sync_job(
+            tenant_id=tenant_id,
+            wait_for_history=True,
+            import_agenda=False,
+            silent=True,
+        )
+
+    threading.Thread(target=_job, daemon=True).start()
+
+
+def _schedule_delayed_enrich(tenant_id: uuid.UUID, delay_seconds: float = 45) -> None:
     """Re-enrich 75s después del sync: captura contactos que Evolution poblaba mientras sincronizábamos."""
     import time as _time
 
@@ -155,6 +185,8 @@ def schedule_whatsapp_sync(
     user_id: Optional[uuid.UUID] = None,
     ip_address: Optional[str] = None,
     wait_for_history: bool = True,
+    import_agenda: Optional[bool] = None,
+    silent: bool = False,
     debounce: bool = False,
     delay_seconds: float = 0,
 ) -> bool:
@@ -179,11 +211,15 @@ def schedule_whatsapp_sync(
     def _job():
         if delay_seconds > 0:
             time.sleep(delay_seconds)
-        run_sync_job(
-            tenant_id,
+        from app.application.sync.sync_queue_service import enqueue_whatsapp_sync_job
+
+        enqueue_whatsapp_sync_job(
+            tenant_id=tenant_id,
             user_id=user_id,
             ip_address=ip_address,
             wait_for_history=wait_for_history,
+            import_agenda=import_agenda,
+            silent=silent,
         )
 
     threading.Thread(target=_job, daemon=True).start()
@@ -225,8 +261,8 @@ def ensure_whatsapp_sync_after_connect(tenant_id: uuid.UUID, *, force: bool = Fa
 
         return schedule_whatsapp_sync(
             tenant_id,
-            wait_for_history=True,
-            delay_seconds=3,
+            wait_for_history=False,
+            delay_seconds=1,
         )
     finally:
         db.close()

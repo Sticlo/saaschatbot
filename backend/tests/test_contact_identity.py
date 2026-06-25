@@ -40,6 +40,21 @@ def test_resolve_contact_identity_does_not_default_archived_false():
     assert identity[3] is None
 
 
+def test_merge_items_includes_agenda_contacts():
+    merged = _merge_items(
+        chats=[],
+        contacts=[{"remoteJid": "573001234567@s.whatsapp.net", "name": "Ana"}],
+        stored_chats=[],
+        stored_contacts=[],
+        message_index=[],
+    )
+    assert len(merged) == 1
+    jid, item = merged[0]
+    assert jid == "573001234567@s.whatsapp.net"
+    assert item["name"] == "Ana"
+    assert item.get("_from_agenda") is True
+
+
 def test_merge_items_combines_name_and_timestamp():
     merged = _merge_items(
         chats=[{"remoteJid": "573001234567@s.whatsapp.net", "pushName": "Perfil"}],
@@ -59,6 +74,42 @@ def test_merge_items_combines_name_and_timestamp():
     assert item["name"] == "Agenda"
     assert item["pushName"] == "Perfil"
     assert item["lastMessageTimestamp"] == 1700000000
+
+
+def test_contact_names_lookup_resolves_phone_from_lid_contact():
+    from app.application.sync.contact_identity_service import ContactNamesLookup
+    from app.domain.entities.conversation import Conversation
+
+    lookup = ContactNamesLookup(
+        jid_names={"123456789@lid": "Mi Novia"},
+        phone_names={},
+        lid_to_phone={"123456789@lid": "+573001234567"},
+        phone_to_lid={"+573001234567": "123456789@lid", "573001234567": "123456789@lid"},
+    )
+    conv = Conversation(
+        contact_phone="+573001234567",
+        contact_name="+573001234567",
+        contact_jid="",
+    )
+    assert lookup.resolve_for_conversation(conv) == "Mi Novia"
+
+
+def test_contact_names_lookup_resolves_push_name_by_phone_jid():
+    from app.application.sync.contact_identity_service import ContactNamesLookup
+    from app.domain.entities.conversation import Conversation
+
+    lookup = ContactNamesLookup(
+        jid_names={"573001234567@s.whatsapp.net": "Juan Perfil"},
+        phone_names={"+573001234567": "Juan Perfil"},
+        lid_to_phone={},
+        phone_to_lid={},
+    )
+    conv = Conversation(
+        contact_phone="+573001234567",
+        contact_name="+573001234567",
+        contact_jid="",
+    )
+    assert lookup.resolve_for_conversation(conv) == "Juan Perfil"
 
 
 def test_consolidate_lid_duplicates_merges_into_phone_jid():

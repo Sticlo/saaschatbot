@@ -24,6 +24,7 @@ export PYTHONPATH="$BACKEND"
   cd "$BACKEND"
   "$ROOT/.venv/bin/uvicorn" app.presentation.main:app --reload \
     --host 0.0.0.0 --port 8000 \
+    --timeout-graceful-shutdown 2 \
     --reload-exclude 'alembic/*' \
     --reload-exclude '.venv/*'
 ) &
