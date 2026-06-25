@@ -3,13 +3,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-EVO_DIR="$ROOT/services/evolution-api"
+EVO_DIR="$ROOT/whatsapp/evolution-api"
 CMD="${1:-start}"
 
 require_evo_dir() {
   if [ ! -d "$EVO_DIR" ]; then
     echo "→ Clonando Evolution API v2.2.3…"
-    mkdir -p "$ROOT/services"
+    mkdir -p "$ROOT/whatsapp"
     git clone --depth 1 --branch 2.2.3 https://github.com/EvolutionAPI/evolution-api.git "$EVO_DIR"
   fi
 }

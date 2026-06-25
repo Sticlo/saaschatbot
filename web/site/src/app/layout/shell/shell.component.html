@@ -1,0 +1,30 @@
+<header class="site-header">
+  <div class="container header-inner">
+    <a routerLink="/" class="brand">{{ appName }}</a>
+    <nav class="nav">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
+      <a routerLink="/precios" routerLinkActive="active">Precios</a>
+      <a routerLink="/login" routerLinkActive="active" class="btn btn-ghost">Entrar</a>
+      <a routerLink="/registro" routerLinkActive="active" class="btn btn-primary">Probar gratis</a>
+    </nav>
+  </div>
+</header>
+
+<main class="site-main">
+  <ng-content />
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div>
+      <strong>{{ appName }}</strong>
+      <p>WhatsApp + IA para vender y atender mejor.</p>
+    </div>
+    <div class="footer-links">
+      <a routerLink="/precios">Precios</a>
+      <a routerLink="/login">Entrar</a>
+      <a routerLink="/registro">Crear cuenta</a>
+    </div>
+    <p class="muted">© {{ year }} {{ appName }}</p>
+  </div>
+</footer>

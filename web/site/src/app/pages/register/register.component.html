@@ -1,0 +1,38 @@
+<app-shell>
+  <section class="container auth-page">
+    <div class="auth-card card">
+      <h1>Crear cuenta</h1>
+      <p class="muted">Empieza la prueba y conecta tu WhatsApp en minutos.</p>
+
+      <form [formGroup]="form" (ngSubmit)="submit()">
+        <label>
+          Nombre del negocio
+          <input type="text" formControlName="business_name" autocomplete="organization" />
+        </label>
+        <label>
+          Tu nombre
+          <input type="text" formControlName="owner_name" autocomplete="name" />
+        </label>
+        <label>
+          Email
+          <input type="email" formControlName="email" autocomplete="username" />
+        </label>
+        <label>
+          Contraseña
+          <input type="password" formControlName="password" autocomplete="new-password" />
+        </label>
+
+        <p class="error" *ngIf="error">{{ error }}</p>
+
+        <button class="btn btn-primary full" type="submit" [disabled]="submitting">
+          {{ submitting ? 'Creando cuenta…' : 'Crear cuenta y entrar' }}
+        </button>
+      </form>
+
+      <p class="muted center">
+        ¿Ya tienes cuenta?
+        <a routerLink="/login">Iniciar sesión</a>
+      </p>
+    </div>
+  </section>
+</app-shell>

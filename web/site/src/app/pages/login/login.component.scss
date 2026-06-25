@@ -1,0 +1,46 @@
+.auth-page {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 0;
+}
+
+.auth-card {
+  width: min(440px, 100%);
+  padding: 2rem;
+}
+
+.auth-card h1 {
+  margin: 0;
+}
+
+form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+input {
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.center {
+  text-align: center;
+  margin-top: 1.25rem;
+}
+
+.error {
+  color: #ff8f8f;
+  margin: 0;
+}

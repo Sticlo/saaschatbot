@@ -1,0 +1,70 @@
+.pricing-page {
+  padding: 3rem 0;
+}
+
+.section-head {
+  margin-bottom: 2rem;
+}
+
+.section-head h1 {
+  margin: 0.25rem 0 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.plan-card.featured {
+  border-color: rgba(0, 168, 132, 0.45);
+  box-shadow: 0 0 0 1px rgba(0, 168, 132, 0.2);
+}
+
+.plan-desc {
+  color: var(--muted);
+  min-height: 3rem;
+}
+
+.price {
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.price span {
+  font-size: 0.95rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.plan-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  line-height: 1.8;
+  flex: 1;
+}
+
+.pricing-cta {
+  margin-top: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.state {
+  color: var(--muted);
+}
+
+.state.error {
+  color: #ff8f8f;
+}

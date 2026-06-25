@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-Frame-Options" content="DENY" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
+  <title>SaasChatbot — Panel</title>
+  <link rel="stylesheet" href="/static/panel/styles.css?v=11" />
+</head>
+<body>
+  <div id="app">
+    <!-- Login -->
+    <section id="login-view" class="view">
+      <div class="login-card">
+        <h1>SaasChatbot</h1>
+        <p class="subtitle">Panel de conversaciones</p>
+        <form id="login-form">
+          <label>
+            Email
+            <input type="email" id="login-email" required autocomplete="username" />
+          </label>
+          <label>
+            Contraseña
+            <input type="password" id="login-password" required autocomplete="current-password" />
+          </label>
+          <p id="login-error" class="error hidden"></p>
+          <button type="submit" class="btn primary">Entrar</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Panel -->
+    <section id="panel-view" class="view hidden">
+      <header class="topbar">
+        <div class="topbar-left">
+          <strong id="business-name">—</strong>
+          <span id="ws-status" class="badge offline">Sin tiempo real</span>
+          <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
+          <button id="wa-connect-btn" class="btn primary small hidden">Conectar WhatsApp</button>
+          <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
+          <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
+        </div>
+        <div class="topbar-right">
+          <label class="toggle-row" title="Activa/desactiva IA en todos los chats">
+            <span>IA global</span>
+            <input type="checkbox" id="toggle-ai-global" />
+          </label>
+          <span id="user-label" class="muted"></span>
+          <button id="logout-btn" class="btn ghost">Salir</button>
+        </div>
+      </header>
+
+      <div id="ai-alert-banner" class="ai-alert-banner hidden"></div>
+
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="sidebar-mode-tabs">
+            <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
+            <button type="button" id="mode-outbound" class="sidebar-mode-tab">Carnadas</button>
+          </div>
+
+          <div id="sidebar-chats">
+            <div class="sidebar-header">
+              <h2>Chats</h2>
+              <button id="refresh-chats" class="btn ghost small" title="Reparar nombres">↻</button>
+            </div>
+            <div class="search-box">
+              <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
+            </div>
+            <div class="chat-tabs">
+              <button type="button" id="tab-chats-active" class="chat-tab active">Activos</button>
+              <button type="button" id="tab-chats-archived" class="chat-tab">Archivados</button>
+            </div>
+            <ul id="conversation-list" class="conversation-list"></ul>
+          </div>
+
+          <div id="sidebar-outbound" class="hidden">
+            <div class="sidebar-header">
+              <h2>Leads</h2>
+              <button id="refresh-outbound" class="btn ghost small" title="Actualizar">↻</button>
+            </div>
+            <ul id="leads-list" class="conversation-list leads-list"></ul>
+          </div>
+        </aside>
+
+        <main class="chat-area" id="chat-area">
+          <div id="empty-chat" class="empty-state">
+            <div id="wa-setup" class="wa-setup hidden">
+              <h3>Conecta tu WhatsApp</h3>
+              <p class="muted">Escanea el código QR con WhatsApp en tu celular para ver y responder chats.</p>
+              <button id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
+              <p id="wa-setup-error" class="error hidden"></p>
+            </div>
+            <p id="empty-chat-label">Selecciona una conversación</p>
+          </div>
+
+          <div id="active-chat" class="hidden">
+            <div class="chat-header">
+              <div>
+                <h3 id="chat-title">—</h3>
+                <span id="chat-phone" class="muted"></span>
+                <p id="chat-ai-hint" class="chat-ai-hint hidden"></p>
+              </div>
+              <div class="chat-toggles">
+                <label class="toggle-row">
+                  <span>Modo manual</span>
+                  <input type="checkbox" id="toggle-mode-manual" />
+                </label>
+                <label class="toggle-row">
+                  <span>IA activa</span>
+                  <input type="checkbox" id="toggle-ai-chat" />
+                </label>
+                <button type="button" id="ai-retry-btn" class="btn ghost small" title="Reintentar respuesta IA">↻ IA</button>
+              </div>
+            </div>
+
+            <div id="messages" class="messages"></div>
+
+            <form id="send-form" class="composer">
+              <textarea id="message-input" rows="2" placeholder="Escribe un mensaje…" maxlength="4096"></textarea>
+              <button type="submit" class="btn primary">Enviar</button>
+            </form>
+          </div>
+
+          <div id="outbound-panel" class="outbound-panel hidden">
+            <div class="outbound-header">
+              <h2>Carnadas automáticas</h2>
+              <p class="muted">Envía mensajes iniciales a tus leads con delays para reducir riesgo de ban.</p>
+            </div>
+
+            <div id="outbound-disclaimer-banner" class="outbound-banner warning hidden">
+              <p>Debes aceptar el disclaimer de uso responsable antes de enviar carnadas.</p>
+              <button type="button" id="accept-disclaimer-btn" class="btn primary small">Aceptar y continuar</button>
+            </div>
+
+            <div class="outbound-grid">
+              <section class="outbound-card">
+                <h3>Tu plan</h3>
+                <div id="outbound-limits" class="outbound-stats">
+                  <p class="muted">Cargando…</p>
+                </div>
+              </section>
+
+              <section class="outbound-card">
+                <h3>Cola de envío</h3>
+                <div id="outbound-queue-stats" class="outbound-stats">
+                  <p class="muted">Cargando…</p>
+                </div>
+                <div class="outbound-actions">
+                  <button type="button" id="outbound-pause-btn" class="btn ghost small hidden">Pausar envíos</button>
+                  <button type="button" id="outbound-resume-btn" class="btn ghost small hidden">Reanudar envíos</button>
+                </div>
+              </section>
+            </div>
+
+            <section class="outbound-card">
+              <h3>Importar leads</h3>
+              <p class="muted small">Un teléfono por línea. Opcional: <code>3001234567, Nombre</code></p>
+              <textarea id="leads-import-input" rows="5" placeholder="3001234567, Juan&#10;3009876543, María&#10;573001112233"></textarea>
+              <div class="outbound-actions">
+                <button type="button" id="import-leads-btn" class="btn primary">Importar leads</button>
+                <span id="import-leads-result" class="muted small"></span>
+              </div>
+            </section>
+
+            <section class="outbound-card">
+              <h3>Lanzar campaña</h3>
+              <div class="outbound-form-row">
+                <label>
+                  Nombre
+                  <input type="text" id="campaign-name" value="Campaña" maxlength="100" />
+                </label>
+                <label>
+                  Cantidad
+                  <input type="number" id="campaign-limit" min="1" max="100" value="10" />
+                </label>
+              </div>
+              <label>
+                Mensaje (opcional — usa plantilla del perfil si vacío)
+                <textarea id="campaign-template" rows="3" placeholder="Hola{name_part}! Vi tu negocio…"></textarea>
+              </label>
+              <p class="muted small">Variables: <code>{name_part}</code> primer nombre, <code>{name}</code> nombre completo, <code>{business}</code> tu negocio.</p>
+              <div class="outbound-actions">
+                <button type="button" id="start-campaign-btn" class="btn primary">Encolar carnadas</button>
+                <span id="campaign-result" class="muted small"></span>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- Modal QR WhatsApp -->
+    <div id="qr-modal" class="modal hidden">
+      <div class="modal-backdrop" id="qr-modal-backdrop"></div>
+      <div class="modal-card">
+        <button id="qr-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
+        <h3>Vincular WhatsApp</h3>
+        <p class="muted">WhatsApp → Dispositivos vinculados → Vincular dispositivo</p>
+        <div id="qr-loading" class="qr-loading">Generando QR…</div>
+        <img id="qr-image" class="qr-image hidden" alt="Código QR WhatsApp" />
+        <p id="qr-error" class="error hidden"></p>
+        <p id="qr-phone" class="muted hidden"></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/panel/app.js?v=28"></script>
+</body>
+</html>

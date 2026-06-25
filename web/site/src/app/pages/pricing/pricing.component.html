@@ -1,0 +1,32 @@
+<app-shell>
+  <section class="container pricing-page">
+    <div class="section-head">
+      <span class="eyebrow">Precios</span>
+      <h1>Planes simples para empezar y escalar.</h1>
+      <p class="lead">Prueba con límites seguros y entra al panel para conectar tu WhatsApp.</p>
+    </div>
+
+    <p *ngIf="loading" class="state">Cargando planes…</p>
+    <p *ngIf="error" class="state error">{{ error }}</p>
+
+    <div class="plans-grid" *ngIf="!loading && !error">
+      <article class="plan-card card" *ngFor="let plan of plans; let i = index" [class.featured]="i === 0">
+        <div class="plan-top">
+          <h2>{{ plan.name }}</h2>
+          <p class="plan-desc">{{ plan.description }}</p>
+          <div class="price">{{ formatCop(plan.price_cop) }}<span>/mes</span></div>
+        </div>
+        <ul>
+          <li *ngFor="let item of featureList(plan)">{{ item }}</li>
+        </ul>
+        <a routerLink="/registro" class="btn btn-primary full">Crear cuenta</a>
+      </article>
+    </div>
+
+    <div class="pricing-cta card" *ngIf="!loading">
+      <h3>¿Ya tienes cuenta?</h3>
+      <p>Inicia sesión y entra directo al panel de WhatsApp.</p>
+      <a routerLink="/login" class="btn btn-secondary">Ir a login</a>
+    </div>
+  </section>
+</app-shell>
