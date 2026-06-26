@@ -69,16 +69,39 @@ class Settings(BaseSettings):
     evolution_api_url: str = "http://localhost:8080"
     evolution_api_key: str = "change-me-evolution-key"
     evolution_database_url: str = ""
-    app_public_url: str = "http://host.docker.internal:8000"
+    app_public_url: str = "http://localhost:8000"
     evolution_webhook_secret: str = "change-me-webhook-secret"
+    # True solo si Evolution corre dentro de Docker y la API en el host (localhost).
+    evolution_in_docker: bool = False
+
+    # Chatwoot — sincronización WhatsApp vía Evolution (reemplaza sync custom).
+    chatwoot_enabled: bool = True
+    chatwoot_url: str = "http://localhost:3000"
+    chatwoot_account_id: str = "1"
+    chatwoot_api_token: str = ""
+    chatwoot_days_limit_import_messages: int = 30
+    chatwoot_webhook_secret: str = "dev-chatwoot-webhook-local"
+
+    def chatwoot_base_url(self) -> str:
+        """URL que Evolution usa para hablar con Chatwoot."""
+        url = self.chatwoot_url.rstrip("/")
+        if self.evolution_in_docker:
+            return url.replace("://localhost", "://chatwoot").replace("://127.0.0.1", "://chatwoot")
+        return url
+
+    def chatwoot_webhook_url(self) -> str:
+        return f"{self.evolution_webhook_base_url()}/webhooks/chatwoot"
 
     def evolution_webhook_base_url(self) -> str:
-        """URL que Evolution (en Docker) puede alcanzar para enviar webhooks."""
+        """URL que Evolution usa para POST de webhooks."""
         base = self.app_public_url.rstrip("/")
-        evo = (self.evolution_api_url or "").lower()
-        if ("localhost" in base or "127.0.0.1" in base) and (
-            "localhost" in evo or "127.0.0.1" in evo
-        ):
+        if not self.evolution_in_docker:
+            # Evolution nativo (npm) resuelve 127.0.0.1 de forma fiable; host.docker.internal falla.
+            return (
+                base.replace("host.docker.internal", "127.0.0.1")
+                .replace("://localhost", "://127.0.0.1")
+            )
+        if "localhost" in base or "127.0.0.1" in base:
             return (
                 base.replace("://localhost", "://host.docker.internal")
                 .replace("://127.0.0.1", "://host.docker.internal")
@@ -100,6 +123,13 @@ class Settings(BaseSettings):
         if env in ("production", "prod"):
             return False
         return value
+
+    @model_validator(mode="after")
+    def _apply_development_defaults(self) -> "Settings":
+        env = (self.app_env or "").lower()
+        if env in ("development", "dev", "local") and not self.embed_workers_in_api:
+            object.__setattr__(self, "embed_workers_in_api", True)
+        return self
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

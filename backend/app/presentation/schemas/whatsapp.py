@@ -25,6 +25,7 @@ class WhatsAppStatusResponse(BaseModel):
     qr_updated_at: Optional[datetime] = None
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None
+    chatwoot_inbox_url: Optional[str] = None
 
 
 class SendMessageRequest(BaseModel):
@@ -49,9 +50,15 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     display_name: str = ""
     display_phone: str = ""
+    last_message_preview: str = ""
 
 
-def serialize_conversation(conversation, *, display_name_override: str | None = None) -> dict:
+def serialize_conversation(
+    conversation,
+    *,
+    display_name_override: str | None = None,
+    last_message_preview: str = "",
+) -> dict:
     jid = getattr(conversation, "contact_jid", None) or ""
     resolved_name = display_name_override
     if not resolved_name:
@@ -64,6 +71,7 @@ def serialize_conversation(conversation, *, display_name_override: str | None = 
         update={
             "display_name": resolved_name,
             "display_phone": format_display_phone(conversation.contact_phone),
+            "last_message_preview": last_message_preview,
         }
     )
     return response.model_dump(mode="json")
@@ -134,4 +142,5 @@ class WhatsAppSyncDebugResponse(BaseModel):
 class ConversationLiveSyncResponse(BaseModel):
     imported: int
     message_count: int
+    conversation_id: uuid.UUID
     messages: list[MessageResponse]

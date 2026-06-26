@@ -39,6 +39,8 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 
 def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
+    from app.application.chatwoot.chatwoot_service import chatwoot_panel_url
+
     return WhatsAppStatusResponse(
         instance_name=session.instance_name,
         status=session.status,
@@ -47,6 +49,7 @@ def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
         qr_updated_at=session.qr_updated_at,
         last_connected_at=session.last_connected_at,
         last_disconnected_at=session.last_disconnected_at,
+        chatwoot_inbox_url=chatwoot_panel_url(session),
     )
 
 
@@ -81,6 +84,9 @@ def connect_whatsapp(
 
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         ensure_whatsapp_sync_after_connect(tenant.id, force=True)
+        from app.application.whatsapp.whatsapp_service import ensure_evolution_webhook
+
+        ensure_evolution_webhook(session, tenant.id, force=True)
 
     return WhatsAppConnectResponse(
         instance_name=session.instance_name,
@@ -133,9 +139,20 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
     session = get_or_create_session(db, tenant)
+    binding_repaired = False
     try:
         refresh = refresh_session_status(db, tenant, session)
         session = refresh.session
+        if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value and session.active_connection_id is None:
+            from app.application.conversations.whatsapp_conversation_service import (
+                ensure_whatsapp_binding_ready,
+            )
+
+            binding_repaired = ensure_whatsapp_binding_ready(
+                db,
+                tenant=tenant,
+                session=session,
+            )
         db.commit()
         db.refresh(session)
         db.refresh(tenant)
@@ -146,11 +163,28 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
 
     if refresh and refresh.should_sync:
         ensure_whatsapp_sync_after_connect(tenant.id, force=True)
+    elif binding_repaired:
+        ensure_whatsapp_sync_after_connect(tenant.id, force=True)
+    elif tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value and session.active_connection_id:
+        from app.domain.entities import Conversation
+        from app.infrastructure.cache.redis_client import get_redis
+
+        conv_count = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == session.active_connection_id,
+            )
+            .count()
+        )
+        boot_key = f"tenant:{tenant.id}:auto_sync:{session.active_connection_id}"
+        if conv_count == 0 and get_redis().set(boot_key, "1", nx=True, ex=600):
+            ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         from app.application.whatsapp.whatsapp_service import ensure_evolution_webhook
 
-        ensure_evolution_webhook(session, tenant.id)
+        ensure_evolution_webhook(session, tenant.id, force=False)
 
     return _session_response(session)
 
@@ -184,8 +218,8 @@ def sync_whatsapp_chats_endpoint(
         tenant.id,
         user_id=current.id,
         ip_address=request.client.host if request.client else None,
-        wait_for_history=True,
-        delay_seconds=1,
+        wait_for_history=False,
+        delay_seconds=0,
     )
     if not started:
         return WhatsAppSyncResponse(
@@ -284,13 +318,24 @@ def enrich_whatsapp_contacts(
     if session.instance_name:
         cache_delete(tenant_cache_key(session.instance_name, "owner_display_names"))
 
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+
+    owner_names = build_owner_display_names(session)
+    from app.application.sync.contact_name_cache_service import (
+        apply_cached_names_to_conversations,
+        backfill_names_from_evolution_api,
+        backfill_names_from_evolution_db,
+    )
+
+    backfill_names_from_evolution_db(session.instance_name, owner_names=owner_names)
+    backfill_names_from_evolution_api(
+        session.instance_name, max_pages=15, owner_names=owner_names
+    )
     stats = enrich_tenant_conversations(db, tenant=tenant, session=session)
     from app.application.conversations.whatsapp_conversation_service import (
         repair_duplicate_conversations,
     )
-    from app.application.whatsapp.whatsapp_status import build_owner_display_names
 
-    owner_names = build_owner_display_names(session)
     merged = 0
     if session.active_connection_id:
         merged = repair_duplicate_conversations(

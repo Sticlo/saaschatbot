@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.presentation.websockets.panel_ws import router as panel_ws_router
 from app.presentation.api.router import api_router
 from app.presentation.api.webhooks import router as webhooks_router
+from app.presentation.api.chatwoot_webhooks import router as chatwoot_webhooks_router
 from app.config import settings
 from app.infrastructure.persistence.database import SessionLocal
 from app.infrastructure.cache.redis_client import get_redis, redis_ping
@@ -31,6 +32,26 @@ def _resolve_panel_dir() -> Path:
 PANEL_DIR = _resolve_panel_dir()
 
 
+def _ensure_webhooks_for_connected_sessions() -> None:
+    """Re-registra webhook Evolution al arrancar (Docker debe alcanzar host.docker.internal)."""
+    try:
+        from app.domain.entities import Tenant, WhatsAppSession
+        from app.domain.entities.enums import WhatsAppStatus
+        from app.application.whatsapp.whatsapp_service import ensure_evolution_webhook
+
+        with SessionLocal() as db:
+            rows = (
+                db.query(Tenant, WhatsAppSession)
+                .join(WhatsAppSession, WhatsAppSession.tenant_id == Tenant.id)
+                .filter(Tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value)
+                .all()
+            )
+            for tenant, session in rows:
+                ensure_evolution_webhook(session, tenant.id)
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -48,19 +69,36 @@ async def lifespan(app: FastAPI):
         from app.application.outbound.bait_scheduler import start_outbound_worker, stop_outbound_worker
         from app.application.workers.queue_service import start_webhook_worker, stop_webhook_worker
         from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
+        from app.application.sync.live_pull_scheduler import (
+            start_live_pull_scheduler,
+            stop_live_pull_scheduler,
+        )
 
         start_webhook_worker()
         start_outbound_worker()
         start_ai_worker()
         start_sync_worker()
+        start_live_pull_scheduler()
         recover_pending_ai_replies()
+        _ensure_webhooks_for_connected_sessions()
         yield
+        stop_live_pull_scheduler()
         stop_ai_worker()
         stop_outbound_worker()
         stop_webhook_worker()
         stop_sync_worker()
     else:
+        from app.application.sync.live_pull_scheduler import (
+            start_live_pull_scheduler,
+            stop_live_pull_scheduler,
+        )
+
+        if settings.app_env.lower() in ("development", "dev", "local"):
+            start_live_pull_scheduler()
+            _ensure_webhooks_for_connected_sessions()
         yield
+        if settings.app_env.lower() in ("development", "dev", "local"):
+            stop_live_pull_scheduler()
 
     try:
         get_redis().close()
@@ -96,6 +134,7 @@ app.add_middleware(
 
 app.include_router(api_router)
 app.include_router(webhooks_router)
+app.include_router(chatwoot_webhooks_router)
 app.include_router(panel_ws_router)
 
 # Monorepo: panel estático; la landing principal vive en web/site (Angular SSR)

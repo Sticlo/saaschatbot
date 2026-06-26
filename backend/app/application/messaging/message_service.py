@@ -37,6 +37,17 @@ from app.application.whatsapp.whatsapp_status import apply_session_status, resol
 log = logging.getLogger(__name__)
 
 
+def bump_conversation_last_message_at(
+    conversation: Conversation,
+    ts: Optional[datetime],
+) -> None:
+    """Mantiene el orden de chats alineado con el último mensaje real."""
+    if ts is None:
+        return
+    if conversation.last_message_at is None or ts > conversation.last_message_at:
+        conversation.last_message_at = ts
+
+
 def _find_existing_message(
     db: Session,
     *,
@@ -193,27 +204,27 @@ def find_conversation_for_contact(
                 if lid_jid and lid_jid not in jids_to_try:
                     jids_to_try.append(lid_jid)
 
-    # Mapeos ya aprendidos en conversaciones de la app (@lid + teléfono en el mismo chat).
-    app_rows = (
-        db.query(Conversation)
-        .filter(
-            Conversation.tenant_id == tenant_id,
-            Conversation.whatsapp_connection_id == whatsapp_connection_id,
+    # Enrich LID mappings from app conversations that already have both @lid + real phone.
+    # Use targeted queries instead of full-table scan to stay O(1) per JID/phone.
+    for jid in list(jids_to_try):
+        if not jid.endswith("@lid"):
+            continue
+        mapping_row = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant_id,
+                Conversation.whatsapp_connection_id == whatsapp_connection_id,
+                Conversation.contact_jid == jid,
+            )
+            .first()
         )
-        .all()
-    )
-    for conv in app_rows:
-        jid = str(conv.contact_jid or "")
-        phone = str(conv.contact_phone or "")
-        if jid.endswith("@lid") and is_valid_whatsapp_phone(phone):
-            norm = normalize_phone(phone)
-            lid_to_phone.setdefault(jid, norm)
-            phone_to_lid.setdefault(phone_to_evolution_number(norm), jid)
-            phone_to_lid.setdefault(norm, jid)
-        elif is_lid_placeholder(phone):
-            derived = lid_jid_from_lid_phone(phone)
-            if derived:
-                lid_to_phone.setdefault(derived, "")
+        if mapping_row:
+            phone = str(mapping_row.contact_phone or "")
+            if is_valid_whatsapp_phone(phone):
+                norm = normalize_phone(phone)
+                lid_to_phone.setdefault(jid, norm)
+                phone_to_lid.setdefault(phone_to_evolution_number(norm), jid)
+                phone_to_lid.setdefault(norm, jid)
 
     for jid in list(jids_to_try):
         if jid.endswith("@lid"):
@@ -231,6 +242,7 @@ def find_conversation_for_contact(
         if lid_jid and lid_jid not in jids_to_try:
             jids_to_try.append(lid_jid)
 
+    # Direct indexed lookups — uses ix_conversations_jid_lookup and existing phone index.
     for jid in jids_to_try:
         conversation = (
             db.query(Conversation)
@@ -257,6 +269,7 @@ def find_conversation_for_contact(
         if conversation:
             return conversation
 
+    # Tail-match fallback: only load rows when we have no direct match to avoid full scans.
     tail_phone = ""
     for phone in phones_to_try:
         if is_valid_whatsapp_phone(phone):
@@ -264,6 +277,14 @@ def find_conversation_for_contact(
             break
 
     if tail_phone or jids_to_try:
+        app_rows = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant_id,
+                Conversation.whatsapp_connection_id == whatsapp_connection_id,
+            )
+            .all()
+        )
         for conversation in app_rows:
             if tail_phone and phone_match_tail(conversation.contact_phone, tail_phone):
                 return conversation
@@ -273,6 +294,11 @@ def find_conversation_for_contact(
                 if is_lid_placeholder(conversation.contact_phone):
                     if lid_jid_from_lid_phone(conversation.contact_phone) == jid:
                         return conversation
+
+        # Name-based matching intentionally removed: matching conversations by cached
+        # name is too unreliable — two different contacts can share a common name, and
+        # @lid → name mappings from contacts.set are phone-book data that can be wrong.
+        # Better to create a new conversation than to assign messages to the wrong one.
 
     return None
 
@@ -317,7 +343,7 @@ def get_or_create_conversation(
     conversation = Conversation(
         tenant_id=tenant_id,
         contact_phone=contact_phone,
-        contact_name=contact_name or (contact_phone if is_valid_whatsapp_phone(contact_phone) else "Contacto"),
+        contact_name=(contact_name or (contact_phone if is_valid_whatsapp_phone(contact_phone) else ""))[:200],
         contact_jid=contact_jid or None,
         whatsapp_connection_id=whatsapp_connection_id,
     )
@@ -350,6 +376,7 @@ def _save_message(
         created_at=ts,
     )
     if existing:
+        bump_conversation_last_message_at(conversation, ts)
         return existing
 
     message = Message(
@@ -362,7 +389,7 @@ def _save_message(
         evolution_message_id=evolution_message_id,
     )
     message.created_at = ts
-    conversation.last_message_at = ts
+    bump_conversation_last_message_at(conversation, ts)
     if increment_unread:
         conversation.unread_count = (conversation.unread_count or 0) + 1
 
@@ -586,6 +613,8 @@ def save_outbound_from_phone(
                     .first()
                 )
                 if conv is not None:
+                    bump_conversation_last_message_at(conv, existing.created_at)
+                    db.flush()
                     publish_message_event(
                         tenant, conv, existing, event_type="message.out"
                     )
@@ -682,6 +711,7 @@ def import_evolution_chat_or_contact(
     tenant: Tenant,
     record: dict,
     whatsapp_connection_id: Optional[UUID] = None,
+    instance_name: str = "",
 ) -> Optional[Conversation]:
     if whatsapp_connection_id is None:
         return None
@@ -712,12 +742,17 @@ def import_evolution_chat_or_contact(
     if not phone:
         return None
 
-    # "name" es el nombre de agenda del celular; "notify" y "pushName" son el nombre de perfil de WhatsApp
+    # "name" = agenda del celular; "notify"/"pushName" = nombre de perfil WhatsApp
+    last_msg = record.get("lastMessage") if isinstance(record.get("lastMessage"), dict) else {}
+    # WhatsApp profile names take priority over phone book "name".
+    # "name" = what the user typed in contacts (unreliable for @lid identity).
+    # "pushName"/"verifiedName"/"notify" = what WhatsApp itself reports (reliable).
     name = (
-        record.get("name")
-        or record.get("notify")
-        or record.get("pushName")
+        record.get("pushName")
         or record.get("verifiedName")
+        or record.get("notify")
+        or last_msg.get("pushName")
+        or record.get("name")
         or ""
     )
     from app.domain.entities import WhatsAppSession
@@ -740,6 +775,7 @@ def import_evolution_chat_or_contact(
         contact_name=str(name),
         contact_jid=contact_jid,
         whatsapp_connection_id=whatsapp_connection_id,
+        instance_name=instance_name,
     )
     apply_identity_to_conversation(
         conversation,
@@ -748,6 +784,30 @@ def import_evolution_chat_or_contact(
         contact_jid=contact_jid,
         is_archived=bool(archived_raw) if archived_raw is not None else None,
     )
+    ts_raw = (
+        record.get("lastMessageTimestamp")
+        or record.get("conversationTimestamp")
+        or record.get("updatedAt")
+    )
+    if ts_raw is not None:
+        try:
+            from datetime import datetime, timezone
+
+            ts = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
+            # No inventar actividad reciente: last_message_at solo si ya hay mensajes.
+            from sqlalchemy import func as sa_func
+            from app.domain.entities import Message
+
+            msg_count = (
+                db.query(sa_func.count(Message.id))
+                .filter(Message.conversation_id == conversation.id)
+                .scalar()
+                or 0
+            )
+            if msg_count > 0 and (not conversation.last_message_at or ts > conversation.last_message_at):
+                conversation.last_message_at = ts
+        except (TypeError, ValueError, OSError):
+            pass
     from app.application.realtime.realtime_service import publish_conversation_updated
 
     publish_conversation_updated(tenant.id, conversation)
@@ -838,10 +898,10 @@ def parse_messages_upsert(data: Any) -> list[dict]:
             if isinstance(mdata, dict) and mdata.get("mimetype"):
                 mimetype = mdata["mimetype"]
                 break
-        if phone_jid and msg_id:
+        if (phone_jid or lid_jid) and msg_id:
             parsed.append(
                 {
-                    "remote_jid": phone_jid,
+                    "remote_jid": phone_jid or lid_jid,
                     "lid_jid": lid_jid,
                     "message_id": str(msg_id),
                     "body": body or "[mensaje]",

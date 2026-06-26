@@ -58,20 +58,46 @@ def _webhook_url(tenant_id: uuid.UUID) -> str:
     return f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
 
 
-def ensure_evolution_webhook(session: WhatsAppSession, tenant_id: uuid.UUID) -> None:
-    """Re-registra webhook con URL alcanzable desde el contenedor Evolution."""
+def ensure_evolution_webhook(
+    session: WhatsAppSession,
+    tenant_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Re-registra webhook con URL alcanzable desde Evolution (nativo o Docker)."""
     from app.infrastructure.cache.redis_client import get_redis
 
+    webhook_url = _webhook_url(tenant_id)
+    if not force:
+        try:
+            found = evolution_client._request(
+                "GET",
+                f"/webhook/find/{session.instance_name}",
+                timeout=8.0,
+            )
+            if isinstance(found, dict):
+                stored = str(found.get("url") or "").rstrip("/")
+                expected = webhook_url.rstrip("/")
+                if stored == expected and found.get("enabled"):
+                    return
+        except EvolutionAPIError:
+            pass
+
     key = f"webhook:ensure:{tenant_id}"
-    if not get_redis().set(key, "1", nx=True, ex=120):
+    if not force and not get_redis().set(key, "1", nx=True, ex=120):
         return
     try:
         evolution_client.ensure_webhook(
             session.instance_name,
-            _webhook_url(tenant_id),
+            webhook_url,
             settings.evolution_webhook_secret,
         )
-        log.info("Webhook Evolution actualizado instancia=%s", session.instance_name)
+        log.info(
+            "Webhook Evolution actualizado instancia=%s url=%s force=%s",
+            session.instance_name,
+            webhook_url,
+            force,
+        )
     except EvolutionAPIError as exc:
         log.warning("ensure_webhook %s: %s", session.instance_name, exc)
 
@@ -143,6 +169,10 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
                 )
             except EvolutionAPIError as exc:
                 log.warning("No se pudo actualizar webhook: %s", exc)
+        try:
+            client.ensure_realtime_settings(session.instance_name)
+        except Exception:
+            pass
     except EvolutionAPIError:
         raise
 
@@ -166,6 +196,9 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
             qr_base64=None,
             phone_number=session.phone_number,
         )
+        from app.application.sync.sync_scheduler import ensure_whatsapp_sync_after_connect
+
+        ensure_whatsapp_sync_after_connect(tenant.id, force=True)
         return session
 
     session.status = WhatsAppStatus.CONNECTING.value
@@ -321,6 +354,9 @@ def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) ->
         notify_conversations_cleared,
         purge_all_tenant_whatsapp_conversations,
     )
+    from app.application.sync.tenant_sync_state import clear_tenant_sync_state
+
+    clear_tenant_sync_state(tenant.id)
 
     purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
     if settings.evolution_database_url:

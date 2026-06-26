@@ -60,7 +60,7 @@ def build_contacts_index(contacts: list) -> dict[str, dict]:
 
 
 def _pick_saved_name(*candidates: str, phone: str = "") -> str:
-    """Prioriza nombre de agenda sobre pushName de WhatsApp."""
+    """Returns the first non-placeholder candidate name."""
     for candidate in candidates:
         text = str(candidate or "").strip()
         if text and not is_placeholder_contact_name(text, phone):
@@ -139,7 +139,10 @@ def resolve_contact_identity(
     owner_names = item.get("_owner_names") or set()
     if push_name and is_owner_display_name(str(push_name), owner_names):
         push_name = ""
-    name = saved_name or push_name
+    # WhatsApp pushName takes priority over phone book "saved_name":
+    # pushName = what the contact set in their WA profile (reliable).
+    # saved_name = what the user typed in their phone book (can be wrong for @lid contacts).
+    name = push_name or saved_name
 
     if is_placeholder_contact_name(str(name), phone) and effective_lid and dsn:
         name = fetch_lid_push_name(dsn, instance_name, effective_lid) or name
@@ -148,7 +151,7 @@ def resolve_contact_identity(
         if effective_lid and is_placeholder_contact_name(str(name), phone):
             name = fetch_contact_push_name(dsn, instance_name, effective_lid) or name
     if is_placeholder_contact_name(str(name), phone):
-        name = phone if is_valid_whatsapp_phone(phone) else "Contacto"
+        name = phone if is_valid_whatsapp_phone(phone) else ""
 
     archived_raw = item.get("archived")
     is_archived: Optional[bool] = bool(archived_raw) if archived_raw is not None else None
@@ -247,6 +250,22 @@ def build_contact_names_lookup(
         except Exception:
             pass
 
+    msg_push = _build_msg_push_name_index(dsn, instance_name)
+    for jid, name in msg_push.items():
+        register_contact_name(jid_names, phone_names, jid, name)
+
+    try:
+        from app.application.sync.contact_name_cache_service import load_cached_names
+
+        cached_jid, cached_phone = load_cached_names(instance_name)
+        for jid, name in cached_jid.items():
+            register_contact_name(jid_names, phone_names, jid, name)
+        for phone, name in cached_phone.items():
+            if phone and name:
+                phone_names[phone] = name
+    except Exception:
+        pass
+
         for lid_jid, phone in lid_to_phone.items():
             lid_name = jid_names.get(lid_jid)
             if lid_name and phone and phone not in phone_names:
@@ -316,13 +335,14 @@ def apply_identity_to_conversation(
         new_placeholder = is_placeholder_contact_name(
             contact_name, contact_phone or conversation.contact_phone
         )
-        if old_placeholder or (not new_placeholder and contact_name != conversation.contact_name):
-            if conversation.contact_name != contact_name:
-                conversation.contact_name = contact_name
+        trimmed = contact_name[:200]
+        if old_placeholder or (not new_placeholder and trimmed != conversation.contact_name):
+            if conversation.contact_name != trimmed:
+                conversation.contact_name = trimmed
                 changed = True
-        elif old_placeholder and contact_name:
-            if conversation.contact_name != contact_name:
-                conversation.contact_name = contact_name
+        elif old_placeholder and trimmed:
+            if conversation.contact_name != trimmed:
+                conversation.contact_name = trimmed
                 changed = True
     if is_archived is not None and conversation.is_archived != is_archived:
         conversation.is_archived = is_archived
@@ -377,6 +397,18 @@ def enrich_tenant_conversations(
 
     dsn = settings.evolution_database_url
     instance_name = session.instance_name
+    from app.application.whatsapp.whatsapp_status import build_owner_display_names
+
+    owner_names = build_owner_display_names(session)
+    from app.application.sync.contact_name_cache_service import (
+        backfill_names_from_evolution_api,
+        load_cached_names,
+        remember_from_record,
+    )
+
+    backfill_names_from_evolution_api(
+        instance_name, max_pages=20, owner_names=owner_names
+    )
     names_lookup = build_contact_names_lookup(instance_name, use_api=True)
     jid_names = names_lookup.jid_names
     phone_names = names_lookup.phone_names
@@ -394,8 +426,16 @@ def enrich_tenant_conversations(
                 if not isinstance(row, dict):
                     continue
                 r = dict(row)
+                r["name"] = (
+                    r.get("name")
+                    or r.get("notify")
+                    or r.get("pushName")
+                    or r.get("verifiedName")
+                    or ""
+                )
                 if r.get("pushName") and not r.get("name"):
                     r["name"] = r["pushName"]
+                remember_from_record(instance_name, r, owner_names=owner_names)
                 api_rows.append(r)
         except Exception:
             pass
@@ -433,9 +473,13 @@ def enrich_tenant_conversations(
             remote_jid = f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
         if not remote_jid:
             if is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone):
-                conversation.contact_name = "Contacto"
-                stats["names_fixed"] += 1
-                stats["enriched"] += 1
+                lookup_name = names_lookup.resolve_for_conversation(
+                    conversation, owner_names=owner_names
+                )
+                if lookup_name:
+                    conversation.contact_name = lookup_name
+                    stats["names_fixed"] += 1
+                    stats["enriched"] += 1
             continue
 
         item = contacts_index.get(remote_jid, {"remoteJid": remote_jid})
@@ -455,11 +499,15 @@ def enrich_tenant_conversations(
         )
         if not identity:
             if is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone):
-                conversation.contact_name = "Contacto"
                 if not conversation.contact_jid and remote_jid.endswith("@lid"):
                     conversation.contact_jid = remote_jid
-                stats["names_fixed"] += 1
-                stats["enriched"] += 1
+                lookup_name = names_lookup.resolve_for_conversation(
+                    conversation, owner_names=owner_names
+                )
+                if lookup_name:
+                    conversation.contact_name = lookup_name
+                    stats["names_fixed"] += 1
+                    stats["enriched"] += 1
             continue
 
         phone, contact_jid, name, is_archived = identity

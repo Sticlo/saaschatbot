@@ -5,15 +5,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
 from app.application.sync.webhook_trace_service import last_webhook_at, list_webhook_trace
 from app.application.workers.queue_service import INBOUND_WEBHOOK_QUEUE, webhook_worker_is_alive
+from app.application.sync.live_pull_scheduler import live_pull_scheduler_is_alive
 from app.infrastructure.cache.redis_client import get_redis
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+from app.infrastructure.evolution.evolution_store import fetch_stored_counts
 
 
 def _ms(start: float) -> int:
@@ -95,6 +97,19 @@ def build_sync_debug_report(
     trace = list_webhook_trace(tenant.id, limit=15)
     last_wh = last_webhook_at(tenant.id)
 
+    evolution_db_counts: dict[str, int] = {}
+    if settings.evolution_database_url:
+        try:
+            evolution_db_counts = fetch_stored_counts(
+                settings.evolution_database_url, session.instance_name
+            )
+        except Exception as exc:
+            errors.append(f"evolution_db: {exc}")
+
+    only_test_webhooks = bool(trace) and all(
+        str(item.get("message_id") or "").startswith("TEST") for item in trace[:5]
+    )
+
     url_mismatch = False
     configured = evolution_webhook_config.get("url") or ""
     if configured and configured.rstrip("/") != webhook_url.rstrip("/"):
@@ -109,13 +124,40 @@ def build_sync_debug_report(
             "Abre el panel y espera 2 min — el status de WhatsApp re-registra el webhook."
         )
     if not last_wh:
-        hints.append(
-            "Ningún webhook recibido en 24h. Evolution (Docker) no alcanza la API: "
-            "usa APP_PUBLIC_URL=http://host.docker.internal:8000 y reinicia."
-        )
+        if url_mismatch:
+            hints.append(
+                "Ningún webhook recibido en 24h. La URL del webhook en Evolution no coincide "
+                "con la esperada — desconecta y vuelve a conectar WhatsApp, o reinicia Evolution."
+            )
+        elif messages_15m > 0:
+            hints.append(
+                "Sin webhooks recientes pero sí mensajes en BD — el pull/sync batch funciona; "
+                "revisa que la API esté arriba y que Evolution pueda POST a host.docker.internal:8000."
+            )
+        else:
+            hints.append(
+                "Ningún webhook recibido. Verifica que la API escuche en :8000, "
+                "EVOLUTION_WEBHOOK_SECRET coincida, y reinicia Evolution tras conectar WhatsApp."
+            )
     elif messages_15m == 0:
+        if only_test_webhooks:
+            hints.append(
+                "Solo webhooks de prueba (TEST*) — Evolution no está enviando eventos reales. "
+                "Reinicia Evolution (./scripts/evolution-mac.sh start) y escribe un mensaje desde el celular."
+            )
+        elif evolution_db_counts.get("messages", 0) == 0 and session.status == "connected":
+            hints.append(
+                "Evolution conectado pero sin chats/mensajes en su BD — WhatsApp aún no sincronizó. "
+                "Envía o recibe un mensaje desde el celular para arrancar."
+            )
+        else:
+            hints.append(
+                "Hay webhooks pero no mensajes nuevos en 15 min — revisa active_connection_id."
+            )
+    if configured and "host.docker.internal" in configured and not settings.evolution_in_docker:
         hints.append(
-            "Hay webhooks pero no mensajes nuevos en 15 min — revisa active_connection_id."
+            "Webhook Evolution apunta a host.docker.internal pero Evolution corre nativo — "
+            "usa APP_PUBLIC_URL=http://localhost:8000, reinicia Evolution y vuelve a conectar."
         )
     if not settings.evolution_database_url:
         hints.append(
@@ -123,6 +165,13 @@ def build_sync_debug_report(
         )
     if webhook_reachable is False:
         hints.append(f"La API no responde en {settings.app_public_url}: {webhook_reachable_detail}")
+
+    # ── Diagnóstico de chats: fantasmas, confusión de identidad, @lid ──────
+    conv_diagnostics = _build_conv_diagnostics(
+        db,
+        tenant_id=tenant.id,
+        connection_id=session.active_connection_id,
+    )
 
     timing_ms["total"] = _ms(started)
 
@@ -152,12 +201,113 @@ def build_sync_debug_report(
             "last_received_at": last_wh,
             "queue_depth": queue_depth,
             "worker_alive": webhook_worker_is_alive(),
+            "live_pull_alive": live_pull_scheduler_is_alive(),
             "recent_trace": trace,
+            "only_test_events": only_test_webhooks,
         },
+        "evolution_db": evolution_db_counts,
         "messages": {
             "last_15_minutes": messages_15m,
             "last_message_at": last_message.created_at.isoformat() if last_message else None,
             "last_message_preview": (last_message.body[:80] if last_message else ""),
             "conversations_active": conv_count,
         },
+        "conversations": conv_diagnostics,
+    }
+
+
+def _build_conv_diagnostics(
+    db: Session,
+    *,
+    tenant_id,
+    connection_id,
+) -> dict[str, Any]:
+    """Diagnóstico profundo de chats: fantasmas, nombres placeholders, conflictos @lid."""
+    from app.shared.core.phone import is_placeholder_contact_name
+
+    if connection_id is None:
+        return {"error": "Sin active_connection_id"}
+
+    tid = str(tenant_id)
+    cid = str(connection_id)
+
+    # Totales
+    total = db.execute(text(
+        "SELECT COUNT(*) FROM conversations WHERE tenant_id=:tid AND whatsapp_connection_id=:cid"
+    ), {"tid": tid, "cid": cid}).scalar() or 0
+
+    ghost = db.execute(text("""
+        SELECT COUNT(*) FROM conversations c
+        WHERE c.tenant_id=:tid AND c.whatsapp_connection_id=:cid
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id)
+    """), {"tid": tid, "cid": cid}).scalar() or 0
+
+    with_msgs = total - ghost
+
+    # Nombres placeholder (mostrando número en lugar de nombre)
+    all_convs = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == connection_id,
+        )
+        .all()
+    )
+    placeholder_convs = [
+        c for c in all_convs
+        if is_placeholder_contact_name(c.contact_name, c.contact_phone)
+        and c.id in {
+            row[0] for row in db.execute(text(
+                "SELECT conversation_id FROM messages WHERE conversation_id IN "
+                "(SELECT id FROM conversations WHERE tenant_id=:tid AND whatsapp_connection_id=:cid)"
+            ), {"tid": tid, "cid": cid}).fetchall()
+        }
+    ]
+
+    # Conversaciones @lid sin teléfono real
+    lid_only = [
+        c for c in all_convs
+        if (c.contact_jid or "").endswith("@lid")
+        and not (c.contact_phone or "").startswith("+")
+        and not (c.contact_phone or "").startswith("lid:")
+    ]
+
+    # Detectar posibles duplicados: mismo nombre, distinto teléfono
+    name_count: dict[str, list] = {}
+    for c in all_convs:
+        name = (c.contact_name or "").strip()
+        if name and not is_placeholder_contact_name(name, c.contact_phone) and len(name) > 3:
+            name_count.setdefault(name, []).append(c)
+    potential_dups = {
+        name: [
+            {"id": str(c.id), "phone": c.contact_phone, "jid": c.contact_jid}
+            for c in convs
+        ]
+        for name, convs in name_count.items()
+        if len(convs) > 1
+    }
+
+    # Top 10 convs con nombre placeholder (para debug)
+    placeholder_sample = [
+        {
+            "name": c.contact_name,
+            "phone": c.contact_phone,
+            "jid": c.contact_jid,
+        }
+        for c in sorted(
+            placeholder_convs,
+            key=lambda x: x.last_message_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )[:10]
+    ]
+
+    return {
+        "total": total,
+        "with_messages": with_msgs,
+        "ghost_0_messages": ghost,
+        "placeholder_names": len(placeholder_convs),
+        "placeholder_sample": placeholder_sample,
+        "lid_only_no_phone": len(lid_only),
+        "potential_duplicates": potential_dups,
+        "duplicate_count": len(potential_dups),
     }

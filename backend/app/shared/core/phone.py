@@ -55,12 +55,40 @@ def is_valid_whatsapp_phone(phone_e164: str) -> bool:
     return True
 
 
+def is_untrusted_contact_phone(phone_e164: str) -> bool:
+    """Números de prueba o placeholders incorrectos (p. ej. 3001234567)."""
+    if not phone_e164 or is_lid_placeholder(phone_e164):
+        return False
+    digits = re.sub(r"\D", "", phone_e164)
+    local = digits[-10:] if len(digits) >= 10 else digits
+    if not local:
+        return False
+    if local.startswith("300123456"):
+        return True
+    if local in {"3000000000", "3001111111", "1234567890", "0123456789"}:
+        return True
+    return False
+
+
+def phone_trust_rank(phone_e164: str) -> int:
+    """Mayor = más confiable para elegir identidad canónica."""
+    if not phone_e164 or is_lid_placeholder(phone_e164):
+        return 0
+    if not is_valid_whatsapp_phone(phone_e164):
+        return 0
+    if is_untrusted_contact_phone(phone_e164):
+        return 1
+    return 2
+
+
 def is_lid_placeholder(phone: str) -> bool:
     return bool(phone) and phone.startswith("lid:")
 
 
 def is_placeholder_contact_name(name: str, phone: str) -> bool:
     if not name:
+        return True
+    if str(name).strip().lower() in {"contacto", "contact", "unknown", "desconocido"}:
         return True
     if name == phone:
         return True
@@ -85,10 +113,16 @@ def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str
     if display_phone:
         return display_phone
     if contact_jid and contact_jid.endswith("@lid"):
-        return "Contacto"
-    if is_lid_placeholder(phone) or is_lid_placeholder(name):
-        return "Contacto"
-    return "Contacto"
+        lid_id = contact_jid.split("@")[0]
+        if len(lid_id) > 6:
+            return f"···{lid_id[-6:]}"
+        return f"···{lid_id}" if lid_id else "Chat"
+    if is_lid_placeholder(phone):
+        lid_id = phone[4:]
+        if len(lid_id) > 6:
+            return f"···{lid_id[-6:]}"
+        return f"···{lid_id}" if lid_id else "Chat"
+    return "Chat"
 
 
 def is_owner_jid(
@@ -149,29 +183,55 @@ def evolution_send_target(conversation) -> str:
 
 def resolve_contact_phone(remote_jid: str, *, key: Optional[dict] = None) -> str:
     """Resuelve E.164 desde JID de WhatsApp (incluye remoteJidAlt para @lid)."""
-    if remote_jid.endswith("@lid"):
-        if key:
-            for field in ("remoteJidAlt", "participant", "senderPn", "participantPn", "participantAlt"):
-                alt = key.get(field)
-                if not isinstance(alt, str) or not alt:
-                    continue
-                if alt.endswith("@s.whatsapp.net"):
-                    return jid_to_phone(alt)
-                digits = re.sub(r"\D", "", alt)
-                if len(digits) >= 10:
-                    return normalize_phone(digits)
-        return ""
+    return pick_trusted_phone(collect_phone_candidates(remote_jid, key=key))
 
-    if key:
-        for field in ("remoteJidAlt", "participant", "senderPn", "participantPn", "participantAlt"):
-            alt = key.get(field)
-            if isinstance(alt, str) and alt.endswith("@s.whatsapp.net"):
-                return jid_to_phone(alt)
-        main = key.get("remoteJid")
-        if isinstance(main, str) and main.endswith("@s.whatsapp.net"):
-            return jid_to_phone(main)
+
+def collect_phone_candidates(remote_jid: str, *, key: Optional[dict] = None) -> list[str]:
+    """Todos los teléfonos plausibles en el mensaje (sin placeholders)."""
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def add(raw: str) -> None:
+        if not raw:
+            return
+        if raw.endswith("@s.whatsapp.net"):
+            phone = jid_to_phone(raw)
+        else:
+            digits = re.sub(r"\D", "", raw)
+            if len(digits) < 10:
+                return
+            phone = normalize_phone(digits)
+        if not phone or not is_valid_whatsapp_phone(phone):
+            return
+        norm = normalize_phone(phone)
+        if norm in seen:
+            return
+        seen.add(norm)
+        out.append(norm)
 
     if remote_jid.endswith("@s.whatsapp.net"):
-        return jid_to_phone(remote_jid)
+        add(remote_jid)
 
-    return ""
+    if key:
+        for field in (
+            "remoteJid",
+            "remoteJidAlt",
+            "participant",
+            "senderPn",
+            "participantPn",
+            "participantAlt",
+        ):
+            alt = key.get(field)
+            if isinstance(alt, str):
+                add(alt)
+
+    return out
+
+
+def pick_trusted_phone(candidates: list[str]) -> str:
+    if not candidates:
+        return ""
+    trusted = [p for p in candidates if not is_untrusted_contact_phone(p)]
+    if trusted:
+        return normalize_phone(trusted[0])
+    return normalize_phone(candidates[0])

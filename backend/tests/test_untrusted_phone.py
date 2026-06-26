@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import uuid
+
+from app.shared.core.phone import (
+    is_untrusted_contact_phone,
+    pick_trusted_phone,
+    collect_phone_candidates,
+)
+from app.application.conversations.whatsapp_conversation_service import (
+    repair_duplicate_conversations,
+)
+from app.domain.entities import Conversation, Message, Tenant
+from app.domain.entities.enums import MessageDirection
+from tests.conftest import requires_db
+
+
+def test_untrusted_pattern_phone():
+    assert is_untrusted_contact_phone("+573001234567") is True
+    assert is_untrusted_contact_phone("+573004583560") is False
+
+
+def test_pick_trusted_phone_prefers_real_number():
+    candidates = collect_phone_candidates(
+        "573001234567@s.whatsapp.net",
+        key={
+            "remoteJid": "573001234567@s.whatsapp.net",
+            "remoteJidAlt": "573004583560@s.whatsapp.net",
+        },
+    )
+    assert "+573004583560" in candidates
+    assert pick_trusted_phone(candidates) == "+573004583560"
+
+
+@requires_db
+def test_repair_merges_lid_with_fake_phone_and_real_phone_chat():
+    from app.infrastructure.persistence.database import SessionLocal
+
+    connection_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Untrusted Merge",
+            slug=f"untrusted-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(tenant)
+        db.flush()
+
+        lid_chat = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573001234567",
+            contact_name="Julián Alarcón",
+            contact_jid="71021579251813@lid",
+            whatsapp_connection_id=connection_id,
+        )
+        phone_chat = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573004583560",
+            contact_name="+573004583560",
+            whatsapp_connection_id=connection_id,
+        )
+        db.add(lid_chat)
+        db.add(phone_chat)
+        db.flush()
+
+        db.add(
+            Message(
+                tenant_id=tenant.id,
+                conversation_id=lid_chat.id,
+                direction=MessageDirection.IN.value,
+                source="contact",
+                body="relax",
+                status="received",
+            )
+        )
+        db.add(
+            Message(
+                tenant_id=tenant.id,
+                conversation_id=phone_chat.id,
+                direction=MessageDirection.OUT.value,
+                source="agent",
+                body="relax",
+                status="sent",
+            )
+        )
+        db.commit()
+
+        merged = repair_duplicate_conversations(
+            db,
+            tenant_id=tenant.id,
+            connection_id=connection_id,
+        )
+        db.commit()
+
+        assert merged >= 1
+        remaining = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == connection_id,
+            )
+            .all()
+        )
+        assert len(remaining) == 1
+        assert remaining[0].contact_phone == "+573004583560"
+        assert remaining[0].contact_name == "Julián Alarcón"

@@ -93,7 +93,7 @@ class EvolutionClient:
             "instanceName": instance_name,
             "integration": "WHATSAPP-BAILEYS",
             "qrcode": True,
-            "syncFullHistory": True,
+            "syncFullHistory": False,
             "webhook": {
                 "url": webhook_url,
                 "byEvents": False,
@@ -124,6 +124,22 @@ class EvolutionClient:
             json=payload,
             timeout=15.0,
         )
+
+    def set_chatwoot(self, instance_name: str, config: dict) -> dict:
+        return self._request(
+            "POST",
+            f"/chatwoot/set/{instance_name}",
+            json=config,
+            timeout=30.0,
+        )
+
+    def find_chatwoot(self, instance_name: str) -> dict:
+        result = self._request(
+            "GET",
+            f"/chatwoot/find/{instance_name}",
+            timeout=15.0,
+        )
+        return result if isinstance(result, dict) else {}
 
     def restart_instance(self, instance_name: str) -> dict:
         return self._request(
@@ -177,6 +193,24 @@ class EvolutionClient:
         return self._request(
             "POST", f"/message/sendText/{instance_name}", json=payload, timeout=30.0
         )
+
+    def ensure_realtime_settings(self, instance_name: str) -> None:
+        """Evita descarga masiva de historial al conectar (modo WhatsApp Web)."""
+        try:
+            self.set_settings(
+                instance_name,
+                {
+                    "rejectCall": False,
+                    "groupsIgnore": True,
+                    "alwaysOnline": False,
+                    "readMessages": False,
+                    "readStatus": False,
+                    "syncFullHistory": False,
+                },
+                timeout=8.0,
+            )
+        except EvolutionAPIError as exc:
+            log.warning("ensure_realtime_settings %s: %s", instance_name, exc)
 
     def set_settings(self, instance_name: str, settings: dict, *, timeout: Optional[float] = 15.0) -> dict:
         return self._request(

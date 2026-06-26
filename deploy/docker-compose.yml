@@ -16,6 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -44,17 +45,85 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
+    env_file:
+      - ../.env
     environment:
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-change-me-evolution-key}
       SERVER_URL: http://localhost:8080
       DEL_INSTANCE: "false"
-      DATABASE_ENABLED: "false"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-saaschatbot}:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_DATA_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      DATABASE_SAVE_DATA_HISTORIC: "true"
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/1
+      CACHE_REDIS_SAVE_INSTANCES: "true"
       WEBHOOK_GLOBAL_ENABLED: "false"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
+
+  chatwoot:
+    image: chatwoot/chatwoot:v3.16.0
+    container_name: saaschatbot_chatwoot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../.env
+    environment:
+      INSTALLATION_ENV: docker
+      RAILS_ENV: production
+      NODE_ENV: production
+      FRONTEND_URL: ${CHATWOOT_PUBLIC_URL:-http://localhost:3000}
+      SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE:-change-me-chatwoot-secret-key-min-32-chars}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USERNAME: ${POSTGRES_USER:-saaschatbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://redis:6379/2
+      ACTIVE_STORAGE_SERVICE: local
+      RAILS_LOG_TO_STDOUT: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+
+  chatwoot-sidekiq:
+    image: chatwoot/chatwoot:v3.16.0
+    container_name: saaschatbot_chatwoot_sidekiq
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      INSTALLATION_ENV: docker
+      RAILS_ENV: production
+      NODE_ENV: production
+      FRONTEND_URL: ${CHATWOOT_PUBLIC_URL:-http://localhost:3000}
+      SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE:-change-me-chatwoot-secret-key-min-32-chars}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USERNAME: ${POSTGRES_USER:-saaschatbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://redis:6379/2
+      ACTIVE_STORAGE_SERVICE: local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
 
 volumes:
   postgres_data:

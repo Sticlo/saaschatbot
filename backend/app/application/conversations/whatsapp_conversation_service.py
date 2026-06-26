@@ -85,11 +85,11 @@ def start_new_whatsapp_binding(
 
     purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
     if settings.evolution_database_url:
-        purge_instance_stored_data(settings.evolution_database_url, instance_name)
+        purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
     try:
-        from app.infrastructure.cache.redis_client import get_redis
+        from app.application.sync.tenant_sync_state import clear_tenant_sync_state
 
-        get_redis().delete(f"tenant:{tenant.id}:sync_running")
+        clear_tenant_sync_state(tenant.id)
     except Exception:
         pass
     connection_id = begin_whatsapp_connection(session, owner_jid=owner_jid)
@@ -240,7 +240,9 @@ def pick_merge_primary(
         is_lid_placeholder,
         is_owner_display_name,
         is_placeholder_contact_name,
+        is_untrusted_contact_phone,
         is_valid_whatsapp_phone,
+        phone_trust_rank,
     )
 
     owner_names = owner_names or set()
@@ -257,7 +259,7 @@ def pick_merge_primary(
             lid_score = 2
         elif is_lid_placeholder(conv.contact_phone):
             lid_score = 1
-        phone_score = 1 if is_valid_whatsapp_phone(conv.contact_phone) else 0
+        phone_score = phone_trust_rank(conv.contact_phone)
         return (named, lid_score, phone_score)
 
     left_score = score(left)
@@ -283,7 +285,9 @@ def merge_conversations(
     from app.shared.core.phone import (
         is_owner_display_name,
         is_placeholder_contact_name,
+        is_untrusted_contact_phone,
         is_valid_whatsapp_phone,
+        phone_trust_rank,
     )
 
     owner_names = owner_names or set()
@@ -324,9 +328,20 @@ def merge_conversations(
     db.delete(secondary)
     db.flush()
 
+    def _better_phone(a: str, b: str) -> str:
+        if phone_trust_rank(a) > phone_trust_rank(b):
+            return a
+        if phone_trust_rank(b) > phone_trust_rank(a):
+            return b
+        if is_valid_whatsapp_phone(a):
+            return a
+        return b
+
+    merged_phone = _better_phone(primary.contact_phone, secondary_phone)
+
     apply_identity_to_conversation(
         primary,
-        contact_phone=secondary_phone if is_valid_whatsapp_phone(secondary_phone) else primary.contact_phone,
+        contact_phone=merged_phone if is_valid_whatsapp_phone(merged_phone) else primary.contact_phone,
         contact_name=(
             secondary_name
             if is_placeholder_contact_name(primary.contact_name, primary.contact_phone)
@@ -358,6 +373,8 @@ def repair_duplicate_conversations(
     from app.domain.entities.enums import MessageDirection
     from app.shared.core.phone import (
         is_lid_placeholder,
+        is_placeholder_contact_name,
+        is_untrusted_contact_phone,
         is_valid_whatsapp_phone,
         lid_jid_from_lid_phone,
         normalize_phone,
@@ -445,6 +462,113 @@ def repair_duplicate_conversations(
             other = by_phone.get(phone)
             if other:
                 _do_merge(conv, other)
+
+    # Bodies genéricos que aparecen en casi cualquier conversación — no sirven como señal de identidad
+    _GENERIC_BODIES = frozenset({
+        "[image]", "[video]", "[audio]", "[sticker]", "[document]", "[voice]",
+        "[gif]", "[ptt]", "[file]", ".", "..", "ok", "Ok", "OK", "si", "Si",
+        "no", "No", "sí", "Sí",
+    })
+
+    def _message_bodies(conversation: Conversation) -> set[str]:
+        rows = (
+            db.query(Message.body)
+            .filter(
+                Message.tenant_id == tenant_id,
+                Message.conversation_id == conversation.id,
+            )
+            .all()
+        )
+        return {
+            (row[0] or "").strip()
+            for row in rows
+            if (row[0] or "").strip()
+            and (row[0] or "").strip() not in _GENERIC_BODIES
+            and len((row[0] or "").strip()) >= 5  # ignorar mensajes muy cortos
+        }
+
+    # @lid con teléfono falso (3001234567…) + chat con teléfono real del contacto.
+    untrusted_lid = [
+        conv
+        for conv in list(alive.values())
+        if (conv.contact_jid or "").endswith("@lid")
+        and is_untrusted_contact_phone(conv.contact_phone)
+    ]
+    trusted_phone = [
+        conv
+        for conv in list(alive.values())
+        if is_valid_whatsapp_phone(conv.contact_phone)
+        and not is_untrusted_contact_phone(conv.contact_phone)
+    ]
+    for lid_conv in untrusted_lid:
+        lid_bodies = _message_bodies(lid_conv)
+        lid_named = bool(
+            lid_conv.contact_name
+            and not is_placeholder_contact_name(
+                lid_conv.contact_name, lid_conv.contact_phone
+            )
+        )
+        for phone_conv in trusted_phone:
+            if lid_conv.id == phone_conv.id or lid_conv.id not in alive:
+                break
+            if phone_conv.id not in alive:
+                continue
+            phone_named = not is_placeholder_contact_name(
+                phone_conv.contact_name, phone_conv.contact_phone
+            )
+            shared = lid_bodies & _message_bodies(phone_conv)
+            if not shared:
+                continue
+            if lid_named and not phone_named:
+                _do_merge(lid_conv, phone_conv)
+                break
+            if lid_conv.contact_name == phone_conv.contact_name:
+                _do_merge(lid_conv, phone_conv)
+                break
+
+    # Varios chats con el mismo @lid (historial repartido).
+    by_jid: dict[str, list[Conversation]] = {}
+    for conv in list(alive.values()):
+        jid = str(conv.contact_jid or "")
+        if jid.endswith("@lid"):
+            by_jid.setdefault(jid, []).append(conv)
+    for group in by_jid.values():
+        if len(group) < 2:
+            continue
+        primary = group[0]
+        for other in group[1:]:
+            if primary.id in alive and other.id in alive:
+                primary, secondary = pick_merge_primary(primary, other, owner_names=owner_names)
+                _do_merge(primary, secondary)
+                primary = alive.get(primary.id, primary)
+
+    # Chat con nombre (@lid) + chat solo número: solo si comparten mucho historial.
+    _MIN_SHARED_BODIES = 8
+    lid_named_convs = [
+        conv
+        for conv in list(alive.values())
+        if (conv.contact_jid or "").endswith("@lid")
+        and conv.contact_name
+        and not is_placeholder_contact_name(conv.contact_name, conv.contact_phone)
+    ]
+    for lid_conv in lid_named_convs:
+        if lid_conv.id not in alive:
+            continue
+        lid_bodies = _message_bodies(lid_conv)
+        if len(lid_bodies) < _MIN_SHARED_BODIES:
+            continue
+        for phone_conv in trusted_phone:
+            if phone_conv.id not in alive or phone_conv.id == lid_conv.id:
+                continue
+            if (phone_conv.contact_jid or "").endswith("@lid"):
+                continue
+            if is_placeholder_contact_name(
+                phone_conv.contact_name, phone_conv.contact_phone
+            ):
+                shared = lid_bodies & _message_bodies(phone_conv)
+                if len(shared) >= _MIN_SHARED_BODIES:
+                    _do_merge(lid_conv, phone_conv)
+                    break
 
     since = datetime.now(timezone.utc) - timedelta(seconds=120)
     recent = (

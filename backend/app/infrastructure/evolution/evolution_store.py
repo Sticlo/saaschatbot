@@ -775,3 +775,50 @@ def fetch_stored_messages(
     except Exception as exc:
         log.warning("No se pudo leer mensajes Evolution jid=%s: %s", remote_jid, exc)
         return []
+
+
+def fetch_recent_stored_messages(
+    dsn: str,
+    instance_name: str,
+    *,
+    since_ts: int,
+    limit: int = 120,
+) -> list[dict]:
+    """Mensajes recientes de todos los chats (pull en vivo sin webhook)."""
+    if not dsn or since_ts <= 0:
+        return []
+    try:
+        with psycopg.connect(_normalize_dsn(dsn), **_CONNECT_KWARGS) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT m.key, m."pushName", m.message, m."messageTimestamp"
+                    FROM "Message" m
+                    JOIN "Instance" i ON i.id = m."instanceId"
+                    WHERE i.name = %s
+                      AND m."messageTimestamp" >= %s
+                      AND m.key->>'remoteJid' IS NOT NULL
+                      AND m.key->>'remoteJid' NOT LIKE '%%@g.us'
+                      AND m.key->>'remoteJid' NOT LIKE '%%broadcast%%'
+                    ORDER BY m."messageTimestamp" ASC
+                    LIMIT %s
+                    """,
+                    (instance_name, since_ts, limit),
+                )
+                rows = cur.fetchall()
+        records = []
+        for key, push_name, message, ts in rows:
+            if not isinstance(key, dict):
+                continue
+            records.append(
+                {
+                    "key": key,
+                    "pushName": push_name,
+                    "message": message if isinstance(message, dict) else {},
+                    "messageTimestamp": ts,
+                }
+            )
+        return records
+    except Exception as exc:
+        log.warning("fetch_recent_stored_messages: %s", exc)
+        return []

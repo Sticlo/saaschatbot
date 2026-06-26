@@ -13,7 +13,7 @@
     canWrite: false,
     canManageGlobal: false,
     canConnectWa: false,
-    wa: { status: "disconnected", qr_base64: null, phone_number: null },
+    wa: { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null },
     chatListTab: "active",
     syncInProgress: false,
     autoSyncRequested: false,
@@ -65,6 +65,11 @@
         logout();
         throw new Error("Sesión expirada");
       }
+      if (res.status === 404) {
+        const e = new Error("Not Found");
+        e.status = 404;
+        throw e;
+      }
       const text = await res.text();
       let data = null;
       try {
@@ -112,7 +117,7 @@
     state.canImportLeads = false;
     state.panelMode = "chats";
     state.outbound = { limits: null, queue: null, leads: [] };
-    state.wa = { status: "disconnected", qr_base64: null, phone_number: null };
+    state.wa = { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null };
     setWsBadge(false);
     updateWaBadge("disconnected");
     hideQrModal();
@@ -215,13 +220,43 @@
     }
   }
 
+  let pullInFlight = false;
+
   async function pullActiveChat() {
-    if (!state.activeId || state.wa.status !== "connected") return;
+    if (!state.activeId || state.wa.status !== "connected" || pullInFlight) return;
+    const chatId = state.activeId;
+    pullInFlight = true;
     try {
-      const data = await api(`/conversations/${state.activeId}/sync-live`, { method: "POST" }, 20000);
+      const data = await api(`/conversations/${chatId}/sync-live`, { method: "POST" }, 12000);
+      if (state.activeId !== chatId) return;
+
       const pullLabel = data.imported > 0 ? `+${data.imported}` : "ok";
       state._lastPull = pullLabel;
       updateSyncStatus({ pull: pullLabel });
+
+      if (data.conversation_id && data.conversation_id !== chatId) {
+        state.activeId = data.conversation_id;
+        const msgs = dedupeMessages(data.messages || []);
+        state._messagesSig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+        state.messages = msgs;
+        renderMessages();
+        fetchConversations()
+          .then((rows) => {
+            if (rows.length) {
+              setConversations(rows);
+              renderConversationList();
+            }
+            const conv = state.conversations.find((c) => c.id === data.conversation_id);
+            if (conv && state.activeId === data.conversation_id) {
+              $("chat-title").textContent = convTitle(conv);
+              $("chat-phone").textContent = convSubtitle(conv);
+              syncChatToggles(conv);
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+
       const msgs = dedupeMessages(data.messages || []);
       const sig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
       if (sig !== state._messagesSig) {
@@ -230,9 +265,41 @@
         renderMessages();
       }
     } catch (err) {
+      if (state.activeId !== chatId) return;
+      // Si la conversación ya no existe, limpiar selección y recargar lista
+      if (err.status === 404) {
+        state.activeId = null;
+        fetchConversations().then((rows) => {
+          if (rows.length) { setConversations(rows); renderConversationList(); }
+        }).catch(() => {});
+        return;
+      }
       state._lastPull = `ERR`;
       updateSyncStatus({ pull: `ERR` });
       console.warn("sync-live:", err.message);
+      try {
+        const msgs = dedupeMessages(await api(`/conversations/${chatId}/messages`, {}, 8000));
+        if (state.activeId !== chatId) return;
+        const sig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+        if (sig !== state._messagesSig) {
+          state._messagesSig = sig;
+          state.messages = msgs;
+          renderMessages();
+        }
+        state._lastPull = "bd";
+        updateSyncStatus({ pull: "bd" });
+      } catch (fallbackErr) {
+        if (fallbackErr.status === 404) {
+          state.activeId = null;
+          fetchConversations().then((rows) => {
+            if (rows.length) { setConversations(rows); renderConversationList(); }
+          }).catch(() => {});
+          return;
+        }
+        console.warn("messages fallback:", fallbackErr.message);
+      }
+    } finally {
+      pullInFlight = false;
     }
   }
 
@@ -243,7 +310,9 @@
       const lastWh = report.webhook?.last_received_at;
       state._lastWebhook = lastWh
         ? new Date(lastWh).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })
-        : "nunca";
+        : report.webhook?.live_pull_alive
+          ? "pull●"
+          : "nunca";
       if (report.webhook?.url_mismatch) state._lastWebhook = "URL mal";
       updateSyncStatus({ webhook: state._lastWebhook });
       if (report.errors?.length) console.warn("sync debug:", report.errors);
@@ -262,13 +331,13 @@
         return;
       }
       pullActiveChat();
-    }, 2000);
+    }, 4000);
     convPollTimer = setInterval(async () => {
       if (!state.user || state.wa.status !== "connected") return;
       try {
         const rows = await fetchConversations();
         if (rows.length) {
-          state.conversations = rows;
+          setConversations(rows);
           renderConversationList();
         }
       } catch {
@@ -340,12 +409,12 @@
       fetchConversations()
         .then((rows) => {
           if (rows.length) {
-            state.conversations = rows;
+            setConversations(rows);
             renderConversationList();
           }
         })
         .catch(() => {});
-    }, 4000);
+    }, 2000);
   }
 
   function startSyncWatchdog() {
@@ -356,11 +425,11 @@
       stopSyncPoll();
       fetchConversations()
         .then((rows) => {
-          state.conversations = rows;
+          setConversations(rows);
           renderConversationList();
         })
         .catch(() => renderConversationList());
-    }, 30000);
+    }, 120000);
   }
 
   function clearSyncWatchdog() {
@@ -405,6 +474,7 @@
       status,
       qr_base64: wa.qr_base64 ?? null,
       phone_number: nextPhone,
+      chatwoot_inbox_url: wa.chatwoot_inbox_url ?? null,
     };
     updateWaBadge(state.wa.status);
     sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
@@ -425,7 +495,7 @@
       } else if (!state.syncInProgress) {
         fetchConversations()
           .then((rows) => {
-            state.conversations = rows;
+            setConversations(rows);
             renderConversationList();
           })
           .catch(() => {});
@@ -451,6 +521,12 @@
     $("wa-disconnect-btn").classList.toggle("hidden", !connected || !canManageWa);
     $("wa-reset-chats-btn").classList.toggle("hidden", !connected || !canManageWa);
     $("wa-setup").classList.toggle("hidden", !needsConnect);
+    const cwLink = $("wa-chatwoot-link");
+    if (cwLink) {
+      const showCw = connected && !!state.wa.chatwoot_inbox_url;
+      cwLink.classList.toggle("hidden", !showCw);
+      if (showCw) cwLink.href = state.wa.chatwoot_inbox_url;
+    }
     $("empty-chat-label").classList.toggle("hidden", needsConnect && !state.conversations.length);
   }
 
@@ -509,6 +585,7 @@
   }
 
   function convSubtitle(c) {
+    if (c.last_message_preview) return c.last_message_preview;
     return c.display_phone || "";
   }
 
@@ -547,9 +624,21 @@
     );
   }
 
+  function sortConversations(rows) {
+    return [...(rows || [])].sort((a, b) => {
+      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return tb - ta;
+    });
+  }
+
+  function setConversations(rows) {
+    state.conversations = sortConversations(rows);
+  }
+
   async function fetchConversations() {
     const archived = state.chatListTab === "archived";
-    return api(`/conversations?archived=${archived}`);
+    return sortConversations(await api(`/conversations?archived=${archived}`));
   }
 
   async function fetchAllConversationsForSearch() {
@@ -590,12 +679,8 @@
       return;
     }
     if (idx >= 0) state.conversations[idx] = { ...state.conversations[idx], ...conv };
-    else state.conversations.unshift(conv);
-    state.conversations.sort((a, b) => {
-      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-      return tb - ta;
-    });
+    else state.conversations.push(conv);
+    state.conversations = sortConversations(state.conversations);
     renderConversationList();
   }
 
@@ -613,6 +698,8 @@
     let list = state.searchQuery && state.searchPool ? state.searchPool : state.conversations;
     if (state.searchQuery) {
       list = list.filter((c) => matchesSearch(c, state.searchQuery));
+    } else {
+      list = sortConversations(list);
     }
 
     if (!list.length) {
@@ -977,7 +1064,10 @@
   }
 
   async function selectConversation(id) {
+    pullInFlight = false;
     state.activeId = id;
+    state.messages = [];
+    state._messagesSig = "";
     const conv = state.conversations.find((c) => c.id === id);
     if (!conv) return;
 
@@ -989,8 +1079,10 @@
     renderConversationList();
 
     try {
-      state.messages = dedupeMessages(await api(`/conversations/${id}/messages`));
-      state._messagesSig = state.messages
+      const msgs = dedupeMessages(await api(`/conversations/${id}/messages`));
+      if (state.activeId !== id) return;
+      state.messages = msgs;
+      state._messagesSig = msgs
         .map((m) => m.id || `${m.body}|${m.created_at}`)
         .join("\n");
       renderMessages();
@@ -1030,7 +1122,7 @@
 
       applyWaSession(wa);
       if (state.wa.status === "connected" && !state.syncInProgress) {
-        state.conversations = await fetchConversations();
+        setConversations(await api("/conversations?archived=false", {}, 30000));
       } else {
         state.conversations = [];
       }
@@ -1118,18 +1210,7 @@
       case "message.out":
         if (event.conversation) upsertConversation(event.conversation);
         if (event.message) {
-          const active = state.conversations.find((c) => c.id === state.activeId);
-          const sameChat =
-            event.conversation?.id === state.activeId ||
-            (active && event.conversation && convSamePerson(active, event.conversation));
-          if (sameChat && event.conversation?.id && event.conversation.id !== state.activeId) {
-            state.activeId = event.conversation.id;
-            const conv = state.conversations.find((c) => c.id === state.activeId);
-            if (conv) {
-              $("chat-title").textContent = convTitle(conv);
-              $("chat-phone").textContent = convSubtitle(conv);
-            }
-          }
+          const sameChat = event.conversation?.id === state.activeId;
           if (sameChat) {
             const key = event.message.id || `${event.message.body}|${event.message.created_at}`;
             const exists = state.messages.some(
@@ -1182,13 +1263,24 @@
       case "sync.started":
         if (!state.syncInProgress) showSyncingList();
         break;
+      case "sync.progress":
+        if (!state.syncInProgress) showSyncingList();
+        fetchConversations()
+          .then((rows) => {
+            if (rows.length) {
+              setConversations(rows);
+              renderConversationList();
+            }
+          })
+          .catch(() => {});
+        break;
       case "sync.completed":
         clearSyncWatchdog();
         state.syncInProgress = false;
         if (event.status === "completed") {
           fetchConversations()
             .then((rows) => {
-              state.conversations = rows;
+              setConversations(rows);
               renderConversationList();
               if (state.activeId) {
                 return api(`/conversations/${state.activeId}/messages`).then((msgs) => {
@@ -1201,7 +1293,7 @@
         } else if (event.status === "failed") {
           fetchConversations()
             .then((rows) => {
-              state.conversations = rows;
+              setConversations(rows);
               renderConversationList();
             })
             .catch(() => renderConversationList());
@@ -1210,7 +1302,7 @@
       case "contacts.enriched":
         fetchConversations()
           .then((rows) => {
-            state.conversations = rows;
+            setConversations(rows);
             renderConversationList();
           })
           .catch(() => {});
@@ -1221,7 +1313,7 @@
         if (event.type === "outbound.sent" && event.conversation_id) {
           fetchConversations()
             .then((rows) => {
-              state.conversations = rows;
+              setConversations(rows);
               renderConversationList();
             })
             .catch(() => {});
@@ -1308,13 +1400,13 @@
     btn.disabled = true;
     try {
       const stats = await api("/whatsapp/enrich-contacts", { method: "POST" }, 120000);
-      state.conversations = await fetchConversations();
+      setConversations(await fetchConversations());
       renderConversationList();
       if (stats.names_fixed || stats.phones_fixed) {
         alert(stats.message || `Actualizados: ${stats.names_fixed} nombres`);
       }
     } catch (err) {
-      state.conversations = await fetchConversations();
+      setConversations(await fetchConversations());
       renderConversationList();
       if (!String(err.message).includes("409")) alert(err.message);
     } finally {
@@ -1528,7 +1620,7 @@
     activeChat.classList.add("hidden");
     conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
     try {
-      state.conversations = await fetchConversations();
+      setConversations(await fetchConversations());
       renderConversationList();
     } catch (err) {
       conversationList.innerHTML = `<li class="conversation-item"><span class="error">${escapeHtml(err.message)}</span></li>`;

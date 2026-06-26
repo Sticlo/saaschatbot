@@ -66,6 +66,25 @@ def test_parse_messages_upsert_extracts_lid_when_phone_is_primary_jid():
     assert item["from_me"] is True
 
 
+def test_parse_messages_upsert_lid_only_without_phone_jid():
+    """WhatsApp reciente: solo @lid en remoteJid, sin remoteJidAlt."""
+    payload = [
+        {
+            "key": {
+                "remoteJid": "71021579251813@lid",
+                "fromMe": False,
+                "id": "LID1",
+            },
+            "message": {"conversation": "Claro que sí primo"},
+            "pushName": "Primito",
+        }
+    ]
+    parsed = parse_messages_upsert(payload)
+    assert len(parsed) == 1
+    assert parsed[0]["remote_jid"] == "71021579251813@lid"
+    assert parsed[0]["lid_jid"] == "71021579251813@lid"
+
+
 def test_resolve_whatsapp_status_banned():
     assert resolve_whatsapp_status("close", {"statusReason": "blocked"}) == WhatsAppStatus.BANNED.value
     assert resolve_whatsapp_status("open", {}) == WhatsAppStatus.CONNECTED.value
@@ -199,17 +218,37 @@ def test_connect_whatsapp_returns_qr(mock_evo, client: TestClient):
     assert body["qr_base64"] is not None
 
 
+def test_evolution_webhook_base_url_native_evolution_uses_127():
+    from app.config import Settings
+
+    s = Settings(
+        app_public_url="http://localhost:8000",
+        evolution_api_url="http://localhost:8080",
+        evolution_in_docker=False,
+    )
+    assert s.evolution_webhook_base_url() == "http://127.0.0.1:8000"
+
+    s2 = Settings(
+        app_public_url="http://host.docker.internal:8000",
+        evolution_api_url="http://localhost:8080",
+        evolution_in_docker=False,
+    )
+    assert s2.evolution_webhook_base_url() == "http://127.0.0.1:8000"
+
+
 def test_evolution_webhook_base_url_rewrites_localhost_for_docker():
     from app.config import Settings
 
     s = Settings(
         app_public_url="http://localhost:8000",
         evolution_api_url="http://localhost:8080",
+        evolution_in_docker=True,
     )
     assert s.evolution_webhook_base_url() == "http://host.docker.internal:8000"
 
     s2 = Settings(
         app_public_url="https://api.midominio.com",
         evolution_api_url="http://localhost:8080",
+        evolution_in_docker=True,
     )
     assert s2.evolution_webhook_base_url() == "https://api.midominio.com"

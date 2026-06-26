@@ -157,6 +157,6 @@ def sanitize_leaked_owner_name(conversation, owner_names: set[str]) -> bool:
     if is_valid_whatsapp_phone(conversation.contact_phone):
         conversation.contact_name = conversation.contact_phone
     else:
-        conversation.contact_name = "Contacto"
+        conversation.contact_name = ""
     return not is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone)
 

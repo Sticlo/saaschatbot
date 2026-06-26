@@ -46,18 +46,23 @@ from app.infrastructure.evolution.evolution_store import (
     fetch_stored_messages,
 )
 from app.application.messaging.message_service import _extract_message_body, get_or_create_conversation, _find_existing_message
-from app.application.realtime.realtime_service import publish_conversation_updated
+from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
 from app.application.whatsapp.whatsapp_service import refresh_session_status
 
 log = logging.getLogger(__name__)
 
 _HISTORY_POLL_ATTEMPTS = 8
 _HISTORY_POLL_SECONDS = 3
+_FAST_SYNC_POLL_ATTEMPTS = 6
+_FAST_SYNC_POLL_SECONDS = 3
 _MAX_CHATS_PER_SYNC = 1000
 _BULK_MESSAGE_PAGES = 20
 _BULK_MESSAGE_PAGE_SIZE = 500
 _BATCH_COMMIT_SIZE = 50
 _FAST_SYNC_MIN_POLLS = 1
+_FAST_SYNC_TOP_CHATS = 50
+_FAST_SYNC_MESSAGES_PER_CHAT = 5
+_FAST_PROGRESS_BATCH = 15
 
 
 def _fetch_chat_states(instance_name: str) -> dict[str, dict]:
@@ -150,13 +155,13 @@ def _parse_evolution_message(
     }
 
 
-def _nudge_history_sync(instance_name: str, *, tenant_id) -> dict[str, int]:
-    """Activa webhook de historial, syncFullHistory y reinicia Evolution."""
+def _prepare_sync_connection(instance_name: str, *, tenant_id) -> dict[str, int]:
+    """Asegura webhook + settings realtime sin reiniciar ni pedir historial masivo."""
     from app.config import settings
 
-    webhook_url = f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
     dsn = settings.evolution_database_url
     baseline = fetch_stored_counts(dsn, instance_name)
+    webhook_url = f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
 
     try:
         evolution_client.ensure_webhook(
@@ -167,44 +172,7 @@ def _nudge_history_sync(instance_name: str, *, tenant_id) -> dict[str, int]:
     except EvolutionAPIError as exc:
         log.warning("ensure_webhook: %s", exc)
 
-    try:
-        evolution_client.set_settings(
-            instance_name,
-            {
-                "rejectCall": False,
-                "groupsIgnore": True,
-                "alwaysOnline": False,
-                "readMessages": False,
-                "readStatus": False,
-                "syncFullHistory": True,
-            },
-            timeout=8.0,
-        )
-    except EvolutionAPIError as exc:
-        log.warning("syncFullHistory: %s", exc)
-
-    already_open = False
-    try:
-        state_payload = evolution_client.connection_state(instance_name)
-        state = str((state_payload.get("instance") or {}).get("state") or "").lower()
-        already_open = state in {"open", "connected"}
-    except EvolutionAPIError as exc:
-        log.warning("connection_state: %s", exc)
-
-    if already_open:
-        log.info("Instancia %s ya conectada — sin reiniciar para pedir historial", instance_name)
-        return baseline
-
-    try:
-        evolution_client.restart_instance(instance_name)
-        log.info("Evolution reiniciado para pedir historial del celular")
-    except EvolutionAPIError as exc:
-        log.warning("restart_instance: %s — intentando connect", exc)
-        try:
-            evolution_client.connect_instance(instance_name)
-        except EvolutionAPIError as exc2:
-            log.warning("connect nudge: %s", exc2)
-
+    evolution_client.ensure_realtime_settings(instance_name)
     return baseline
 
 
@@ -222,22 +190,20 @@ def _collect_evolution_items(
     stored_chats: list = []
     stored_contacts: list = []
     message_index: list = []
-    attempts = _HISTORY_POLL_ATTEMPTS if wait_for_history else 1
+    attempts = _HISTORY_POLL_ATTEMPTS if wait_for_history else _FAST_SYNC_POLL_ATTEMPTS
     baseline = {"chats": 0, "contacts": 0, "messages": 0}
     stable_polls = 0
     prev_total = 0
 
     if wait_for_history:
-        baseline = _nudge_history_sync(instance_name, tenant_id=tenant_id)
-        already_open = False
-        try:
-            state_payload = evolution_client.connection_state(instance_name)
-            state = str((state_payload.get("instance") or {}).get("state") or "").lower()
-            already_open = state in {"open", "connected"}
-        except EvolutionAPIError:
-            pass
-        if not already_open:
-            time.sleep(5)
+        counts0 = fetch_stored_counts(dsn, instance_name)
+        if counts0["messages"] > 10 or counts0["chats"] > 10:
+            attempts = min(attempts, 2)
+        else:
+            attempts = min(attempts, 3)
+        baseline = _prepare_sync_connection(instance_name, tenant_id=tenant_id)
+    elif attempts > 1:
+        baseline = _prepare_sync_connection(instance_name, tenant_id=tenant_id)
 
     for attempt in range(attempts):
         try:
@@ -281,6 +247,15 @@ def _collect_evolution_items(
                     len(message_index),
                 )
                 break
+            if attempt < attempts - 1:
+                log.info(
+                    "Sync rápido — Evolution aún sin chats (%s/%s), reintento en %ss",
+                    attempt + 1,
+                    attempts,
+                    _FAST_SYNC_POLL_SECONDS,
+                )
+                time.sleep(_FAST_SYNC_POLL_SECONDS)
+                continue
             break
 
         if has_chats and (grew or attempt >= _FAST_SYNC_MIN_POLLS):
@@ -289,6 +264,17 @@ def _collect_evolution_items(
             else:
                 stable_polls = 0
             prev_total = total
+            # Con celular nuevo Evolution tarda: seguir si aún hay pocos chats.
+            min_chats = 15
+            if total < min_chats and attempt < attempts - 1:
+                log.info(
+                    "Historial parcial (%s chats) — reintento %s/%s",
+                    total,
+                    attempt + 1,
+                    attempts,
+                )
+                time.sleep(_HISTORY_POLL_SECONDS)
+                continue
             if stable_polls >= 1 or attempt == attempts - 1:
                 log.info(
                     "Historial listo — chats=%s contacts=%s msg_jids=%s db_msgs=%s",
@@ -483,7 +469,11 @@ def _consolidate_lid_duplicates(
         if saved and not item.get("name"):
             item["name"] = saved
 
-    return list(by_jid.items())[:_MAX_CHATS_PER_SYNC]
+    return sorted(
+        list(by_jid.items()),
+        key=lambda kv: int(kv[1].get("lastMessageTimestamp") or 0),
+        reverse=True,
+    )[:_MAX_CHATS_PER_SYNC]
 
 
 def _recompute_last_message_at(db: Session, *, tenant_id) -> None:
@@ -530,6 +520,8 @@ def _apply_last_message_timestamp(
         lid_jid = item.get("_lid_jid")
         if ts_raw is None and lid_jid:
             ts_raw = fetch_chat_last_timestamp(dsn, instance_name, lid_jid)
+    if ts_raw is None:
+        ts_raw = item.get("lastMessageTimestamp") or item.get("conversationTimestamp")
     if ts_raw is None:
         return
     try:
@@ -670,6 +662,16 @@ def _import_messages(
             continue
         seen_evolution_ids.add(msg_id)
         imported += 1
+        push_name = str(parsed.get("contact_name") or "").strip()
+        if (
+            push_name
+            and not parsed["from_me"]
+            and is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone)
+        ):
+            from app.shared.core.phone import is_placeholder_contact_name as _is_ph
+
+            if not _is_ph(push_name, conversation.contact_phone):
+                conversation.contact_name = push_name
 
     # last_message_at = fecha REAL del último mensaje (no la hora del sync).
     if latest_ts is not None:
@@ -770,6 +772,66 @@ def _dedupe_conversations_by_phone(
     return merged
 
 
+def _prune_empty_lid_ghosts(
+    db: Session,
+    *,
+    tenant_id,
+    connection_id,
+) -> int:
+    """Elimina chats @lid sin mensajes creados por bursts de chats.set."""
+    from sqlalchemy import func as sa_func
+    from app.shared.core.phone import is_lid_placeholder, is_placeholder_contact_name
+
+    pruned = 0
+    rows = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == connection_id,
+        )
+        .all()
+    )
+    for conv in rows:
+        if not is_lid_placeholder(conv.contact_phone):
+            continue
+        if not is_placeholder_contact_name(conv.contact_name, conv.contact_phone):
+            continue
+        msg_count = (
+            db.query(sa_func.count(Message.id))
+            .filter(Message.conversation_id == conv.id)
+            .scalar()
+            or 0
+        )
+        if msg_count == 0:
+            db.delete(conv)
+            pruned += 1
+    return pruned
+
+
+def _publish_sync_progress(
+    tenant_id,
+    *,
+    done: int,
+    total: int,
+    conversations_imported: int,
+    messages_imported: int,
+) -> None:
+    try:
+        publish_panel_event(
+            tenant_id,
+            {
+                "type": "sync.progress",
+                "status": "running",
+                "done": done,
+                "total": total,
+                "conversations_imported": conversations_imported,
+                "messages_imported": messages_imported,
+            },
+        )
+    except Exception:
+        pass
+
+
 def sync_whatsapp_chats(
     db: Session,
     *,
@@ -830,6 +892,9 @@ def sync_whatsapp_chats(
         import_agenda=import_agenda,
     )
     items = _consolidate_lid_duplicates(items, lid_to_phone, chat_names)
+    fast_mode = not wait_for_history
+    total_items = len(items)
+    batch_commit = _FAST_PROGRESS_BATCH if fast_mode else _BATCH_COMMIT_SIZE
 
     conversations_imported = 0
     messages_imported = 0
@@ -868,6 +933,70 @@ def sync_whatsapp_chats(
         phone, contact_jid, name, is_archived = identity
         if lid_jid and not contact_jid:
             contact_jid = lid_jid
+
+        # Determine intent before creating the conversation to avoid ghost chats.
+        # agenda_only = contact from phone book with no WhatsApp message history.
+        # per_chat_limit = 0 in fast mode for items beyond the top-N batch.
+        agenda_only = bool(item.get("_from_agenda")) and not item.get("lastMessageTimestamp")
+        per_chat_limit = messages_per_chat
+        if fast_mode:
+            per_chat_limit = (
+                _FAST_SYNC_MESSAGES_PER_CHAT if idx < _FAST_SYNC_TOP_CHATS else 0
+            )
+
+        if agenda_only or per_chat_limit == 0:
+            # Update existing conversation only — never create from agenda/no-message items.
+            from app.application.messaging.message_service import find_conversation_for_contact
+            conversation = find_conversation_for_contact(
+                db,
+                tenant_id=tenant.id,
+                whatsapp_connection_id=connection_id,
+                contact_phone=phone,
+                contact_jid=contact_jid,
+            )
+            if not conversation:
+                continue
+            apply_identity_to_conversation(
+                conversation,
+                contact_phone=phone,
+                contact_name=name,
+                contact_jid=contact_jid,
+                is_archived=is_archived,
+            )
+            conversations_imported += 1
+            continue
+
+        # Load messages BEFORE creating the conversation.
+        # If no messages exist AND no conversation exists yet, skip to avoid ghost chats.
+        records: list = []
+        load_jid = lid_jid or remote_jid
+        records = _load_message_records(
+            session.instance_name,
+            load_jid,
+            limit=per_chat_limit,
+            since_ts=None,
+        )
+        if not records and load_jid != remote_jid:
+            records = _load_message_records(
+                session.instance_name,
+                remote_jid,
+                limit=per_chat_limit,
+                since_ts=None,
+            )
+
+        # Only create a new conversation if we found actual messages for it.
+        # If the conversation already exists, always update it (even with 0 new messages).
+        from app.application.messaging.message_service import find_conversation_for_contact
+        existing_conv = find_conversation_for_contact(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=connection_id,
+            contact_phone=phone,
+            contact_jid=contact_jid,
+        )
+        if not existing_conv and not records:
+            continue  # Would create a ghost chat — skip
+
         conversation = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
@@ -885,23 +1014,6 @@ def sync_whatsapp_chats(
         )
         conversations_imported += 1
 
-        agenda_only = bool(item.get("_from_agenda")) and not item.get("lastMessageTimestamp")
-        records: list = []
-        if not agenda_only:
-            load_jid = lid_jid or remote_jid
-            records = _load_message_records(
-                session.instance_name,
-                load_jid,
-                limit=messages_per_chat,
-                since_ts=None,
-            )
-            if not records and load_jid != remote_jid:
-                records = _load_message_records(
-                    session.instance_name,
-                    remote_jid,
-                    limit=messages_per_chat,
-                    since_ts=None,
-                )
         messages_imported += _import_messages(
             db,
             tenant=tenant,
@@ -911,7 +1023,7 @@ def sync_whatsapp_chats(
             expected_jid=contact_jid,
             seen_evolution_ids=seen_evolution_ids,
         )
-        if conversation.last_message_at is None and not agenda_only:
+        if conversation.last_message_at is None or fast_mode:
             _apply_last_message_timestamp(
                 conversation,
                 item,
@@ -923,18 +1035,77 @@ def sync_whatsapp_chats(
         if not agenda_only:
             publish_conversation_updated(tenant.id, conversation)
 
-        if (idx + 1) % _BATCH_COMMIT_SIZE == 0:
+        if (idx + 1) % batch_commit == 0:
             try:
                 db.commit()
             except Exception as exc:
                 log.warning("Commit batch falló: %s — reintentando", exc)
                 db.rollback()
+            if fast_mode:
+                _publish_sync_progress(
+                    tenant.id,
+                    done=idx + 1,
+                    total=total_items,
+                    conversations_imported=conversations_imported,
+                    messages_imported=messages_imported,
+                )
 
     try:
         db.commit()
     except Exception as exc:
         log.warning("Commit final sync falló: %s", exc)
         db.rollback()
+
+    if fast_mode:
+        pruned = _prune_empty_lid_ghosts(
+            db,
+            tenant_id=tenant.id,
+            connection_id=connection_id,
+        )
+        enrich_stats = enrich_tenant_conversations(
+            db,
+            tenant=tenant,
+            session=session,
+            contacts_index=None,
+            fetch_profiles=True,
+            profile_limit=30,
+        )
+        try:
+            db.commit()
+        except Exception as exc:
+            log.warning("Commit enrich rápido falló: %s", exc)
+            db.rollback()
+        if enrich_stats.get("names_fixed"):
+            try:
+                publish_panel_event(
+                    tenant.id,
+                    {"type": "contacts.enriched", **enrich_stats, "status": "completed"},
+                )
+            except Exception:
+                pass
+        _publish_sync_progress(
+            tenant.id,
+            done=total_items,
+            total=total_items,
+            conversations_imported=conversations_imported,
+            messages_imported=messages_imported,
+        )
+        return {
+            "conversations_imported": conversations_imported,
+            "messages_imported": messages_imported,
+            "contacts_enriched": enrich_stats["enriched"],
+            "names_fixed": enrich_stats["names_fixed"],
+            "phones_fixed": enrich_stats["phones_fixed"],
+            "conversations_merged": 0,
+            "ghosts_pruned": pruned,
+            "evolution_chats": len(chats),
+            "evolution_contacts": len(contacts),
+            "evolution_stored_chats": len(stored_chats),
+            "evolution_stored_contacts": len(stored_contacts),
+            "evolution_message_chats": len(message_index),
+            "evolution_api_discovered": len(api_discovered),
+            "phase": "fast",
+        }
 
     enrich_stats = enrich_tenant_conversations(
         db,
@@ -949,6 +1120,25 @@ def sync_whatsapp_chats(
         lid_to_phone=lid_to_phone,
         owner_names=owner_names,
     )
+
+    # Deep dedup pass: catches residual duplicates that _dedupe_conversations_by_phone
+    # missed (e.g. same @lid JID in multiple rows, named @lid + unnamed phone, etc.)
+    try:
+        from app.application.conversations.whatsapp_conversation_service import (
+            repair_duplicate_conversations,
+        )
+        deep_merged = repair_duplicate_conversations(
+            db,
+            tenant_id=tenant.id,
+            connection_id=connection_id,
+            instance_name=session.instance_name,
+            owner_names=owner_names,
+        )
+        merged += deep_merged
+        if deep_merged:
+            log.info("repair_duplicate_conversations fusionó %s chats en sync completo", deep_merged)
+    except Exception as exc:
+        log.warning("repair_duplicate_conversations falló en sync completo: %s", exc)
 
     db.flush()
     _recompute_last_message_at(db, tenant_id=tenant.id)

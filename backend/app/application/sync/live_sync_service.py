@@ -60,25 +60,33 @@ def pull_live_conversation_messages(
 
     imported = 0
     seen_ids: set[str] = set()
-    for jid in jids:
-        records = _load_message_records(session.instance_name, jid, limit=limit)
-        if not records:
-            continue
-        imported += _import_messages(
-            db,
-            tenant=tenant,
-            conversation=conversation,
-            records=records,
-            expected_phone=conversation.contact_phone,
-            expected_jid=conversation.contact_jid or "",
-            seen_evolution_ids=seen_ids,
+    try:
+        for jid in jids:
+            records = _load_message_records(session.instance_name, jid, limit=limit)
+            if not records:
+                continue
+            imported += _import_messages(
+                db,
+                tenant=tenant,
+                conversation=conversation,
+                records=records,
+                expected_phone=conversation.contact_phone,
+                expected_jid=conversation.contact_jid or "",
+                seen_evolution_ids=seen_ids,
+            )
+
+        if imported:
+            db.flush()
+            publish_conversation_updated(tenant.id, conversation)
+
+        db.commit()
+    except Exception:
+        log.exception(
+            "pull_live falló conv=%s jids=%s — devolviendo mensajes de BD",
+            conversation.id,
+            jids,
         )
-
-    if imported:
-        db.flush()
-        publish_conversation_updated(tenant.id, conversation)
-
-    db.commit()
+        db.rollback()
 
     messages = (
         db.query(Message)

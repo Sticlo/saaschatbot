@@ -47,6 +47,7 @@ class Conversation(Base):
         String(20), nullable=False, default=ConversationStatus.ACTIVE.value
     )
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    chatwoot_conversation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -91,6 +92,7 @@ class Message(Base):
     evolution_message_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True, index=True
     )
+    chatwoot_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

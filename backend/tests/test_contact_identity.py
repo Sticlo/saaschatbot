@@ -9,6 +9,23 @@ from app.application.sync.contact_identity_service import (
 from app.application.sync.chat_sync_service import _consolidate_lid_duplicates, _merge_items
 
 
+def test_extract_name_prefers_notify_from_whatsapp():
+    from app.application.sync.contact_name_cache_service import extract_name_from_record
+
+    assert extract_name_from_record({"id": "573208177650@s.whatsapp.net", "notify": "Katherin"}) == "Katherin"
+    assert extract_name_from_record({"remoteJid": "573004583560@s.whatsapp.net", "pushName": "Julian"}) == "Julian"
+    assert extract_name_from_record({"name": "Agenda", "pushName": "Perfil"}) == "Agenda"
+
+
+def test_is_placeholder_contact_name_treats_contacto_as_placeholder():
+    from app.shared.core.phone import is_placeholder_contact_name, resolve_display_name
+
+    assert is_placeholder_contact_name("Contacto", "lid:123")
+    assert is_placeholder_contact_name("contacto", "+573001234567")
+    assert not is_placeholder_contact_name("Katherin", "+573208177650")
+    assert resolve_display_name("", "lid:50985707815107", contact_jid="50985707815107@lid").startswith("···")
+
+
 def test_resolve_contact_identity_prefers_agenda_name_over_push_name():
     item = {"remoteJid": "573001234567@s.whatsapp.net", "pushName": "Perfil WA"}
     contacts_index = build_contacts_index(
