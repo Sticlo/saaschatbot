@@ -266,12 +266,12 @@ def build_contact_names_lookup(
     except Exception:
         pass
 
-        for lid_jid, phone in lid_to_phone.items():
-            lid_name = jid_names.get(lid_jid)
-            if lid_name and phone and phone not in phone_names:
-                phone_names[phone] = lid_name
-                phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
-                jid_names.setdefault(phone_jid, lid_name)
+    for lid_jid, phone in lid_to_phone.items():
+        lid_name = jid_names.get(lid_jid)
+        if lid_name and phone and phone not in phone_names:
+            phone_names[phone] = lid_name
+            phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
+            jid_names.setdefault(phone_jid, lid_name)
 
     return ContactNamesLookup(
         jid_names=jid_names,

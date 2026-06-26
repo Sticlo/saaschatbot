@@ -132,6 +132,75 @@ def _extract_qr(payload: dict) -> Optional[str]:
     return None
 
 
+def _instance_needs_clean_qr(meta: Optional[dict]) -> bool:
+    """Sesión vieja o logout de WhatsApp — el QR falla en el celular si no se limpia."""
+    if not meta:
+        return False
+    status = str(meta.get("connectionStatus") or "").lower()
+    if status in {"close", "closed", "disconnected"}:
+        return True
+    if meta.get("disconnectionReasonCode") in (401, 403, 428):
+        return True
+    if status == "connecting" and meta.get("ownerJid"):
+        return True
+    return False
+
+
+def _prepare_instance_for_new_qr(
+    session: WhatsAppSession,
+    tenant: Tenant,
+    *,
+    webhook_url: str,
+    webhook_secret: str,
+) -> None:
+    """Logout/borrado en Evolution para vincular otro celular sin error en el QR."""
+    from app.config import settings
+    from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
+    meta = None
+    try:
+        meta = evolution_client.fetch_instance(session.instance_name)
+    except EvolutionAPIError:
+        pass
+
+    if not _instance_needs_clean_qr(meta):
+        return
+
+    log.info(
+        "Limpiando sesión Evolution instancia=%s (vincular celular nuevo)",
+        session.instance_name,
+    )
+    try:
+        evolution_client.logout_instance(session.instance_name)
+    except EvolutionAPIError as exc:
+        log.warning("logout antes de QR %s: %s", session.instance_name, exc)
+
+    try:
+        meta_after = evolution_client.fetch_instance(session.instance_name)
+    except EvolutionAPIError:
+        meta_after = None
+
+    if _instance_needs_clean_qr(meta_after):
+        try:
+            evolution_client.delete_instance(session.instance_name)
+            if settings.evolution_database_url:
+                purge_instance_stored_data(
+                    settings.evolution_database_url, session.instance_name
+                )
+            evolution_client.create_instance(
+                session.instance_name,
+                webhook_url,
+                webhook_secret,
+            )
+            log.info("Instancia %s recreada para QR limpio", session.instance_name)
+        except EvolutionAPIError as exc:
+            log.warning("delete/recreate %s: %s", session.instance_name, exc)
+
+    session.phone_number = None
+    session.bound_owner_jid = None
+    session.qr_base64 = None
+
+
 def reconnect_session(db: Session, tenant: Tenant) -> WhatsAppSession:
     """Reconexión: regenera QR si Evolution no está vinculado."""
     session = get_or_create_session(db, tenant)
@@ -173,6 +242,12 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
             client.ensure_realtime_settings(session.instance_name)
         except Exception:
             pass
+        _prepare_instance_for_new_qr(
+            session,
+            tenant,
+            webhook_url=_webhook_url(tenant.id),
+            webhook_secret=settings.evolution_webhook_secret,
+        )
     except EvolutionAPIError:
         raise
 

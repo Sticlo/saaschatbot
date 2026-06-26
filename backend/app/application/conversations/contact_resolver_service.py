@@ -242,12 +242,38 @@ def _collect_candidates(
                 if phone_match_tail(conv.contact_phone, tail):
                     _add(conv)
 
-    for jid in jids_to_try:
+    for jid in list(jids_to_try):
         if not jid.endswith("@lid"):
             continue
         lid_key = jid.split("@")[0]
         for conv in base.filter(Conversation.contact_phone == f"lid:{lid_key}").limit(4):
             _add(conv)
+
+    if is_valid_whatsapp_phone(phone) and instance_name:
+        norm = normalize_phone(phone)
+        try:
+            from app.application.sync.contact_identity_service import build_contact_names_lookup
+
+            lookup = build_contact_names_lookup(instance_name, use_api=False)
+            cached_name = (
+                lookup.phone_names.get(norm)
+                or lookup.phone_names.get(phone)
+                or ""
+            ).strip()
+            if cached_name:
+                for conv in base.filter(
+                    Conversation.contact_name.ilike(cached_name)
+                ).limit(6):
+                    _add(conv)
+            lid_jid = (
+                phone_to_lid.get(phone_to_evolution_number(norm))
+                or phone_to_lid.get(norm)
+                or ""
+            )
+            if lid_jid:
+                _add(base.filter(Conversation.contact_jid == lid_jid).first())
+        except Exception:
+            pass
 
     return list(found.values())
 

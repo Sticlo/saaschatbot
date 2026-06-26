@@ -79,8 +79,21 @@ def list_conversations(
 
     if settings.chatwoot_enabled and session.active_connection_id:
         from app.application.chatwoot.chatwoot_service import ensure_chatwoot_integration
+        from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+        from app.application.conversations.whatsapp_conversation_service import (
+            repair_duplicate_conversations,
+        )
 
         if ensure_chatwoot_integration(db, tenant=tenant, session=session):
+            db.commit()
+        sync_chatwoot_inbox(db, tenant=tenant, session=session)
+        merged = repair_duplicate_conversations(
+            db,
+            tenant_id=tenant.id,
+            connection_id=session.active_connection_id,
+            instance_name=session.instance_name,
+        )
+        if merged:
             db.commit()
 
     query = (

@@ -188,6 +188,9 @@ class EvolutionClient:
     def logout_instance(self, instance_name: str) -> dict:
         return self._request("DELETE", f"/instance/logout/{instance_name}")
 
+    def delete_instance(self, instance_name: str) -> dict:
+        return self._request("DELETE", f"/instance/delete/{instance_name}")
+
     def send_text(self, instance_name: str, number: str, text: str) -> dict:
         payload = {"number": number, "text": text}
         return self._request(

@@ -104,3 +104,67 @@ def test_repair_merges_lid_with_fake_phone_and_real_phone_chat():
         assert len(remaining) == 1
         assert remaining[0].contact_phone == "+573004583560"
         assert remaining[0].contact_name == "Julián Alarcón"
+
+
+@requires_db
+def test_repair_merges_named_lid_chat_with_phone_only_chat():
+    """Katherin Roballo +573… — mismo contacto, dos chats."""
+    from app.domain.entities import WhatsAppContactLink
+    from app.infrastructure.persistence.database import SessionLocal
+
+    connection_id = uuid.uuid4()
+    lid_jid = "71021579251813@lid"
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Named Phone Merge",
+            slug=f"named-phone-{uuid.uuid4().hex[:8]}",
+        )
+        db.add(tenant)
+        db.flush()
+
+        named_chat = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="lid:71021579251813",
+            contact_name="Katherin Roballo",
+            contact_jid=lid_jid,
+            whatsapp_connection_id=connection_id,
+        )
+        phone_chat = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573219469201",
+            contact_name="+573219469201",
+            whatsapp_connection_id=connection_id,
+        )
+        db.add(named_chat)
+        db.add(phone_chat)
+        db.flush()
+        db.add(
+            WhatsAppContactLink(
+                tenant_id=tenant.id,
+                whatsapp_connection_id=connection_id,
+                lid_jid=lid_jid,
+                phone_e164="+573219469201",
+            )
+        )
+        db.commit()
+
+        merged = repair_duplicate_conversations(
+            db,
+            tenant_id=tenant.id,
+            connection_id=connection_id,
+        )
+        db.commit()
+
+        assert merged >= 1
+        remaining = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.whatsapp_connection_id == connection_id,
+            )
+            .all()
+        )
+        assert len(remaining) == 1
+        assert remaining[0].contact_phone == "+573219469201"
+        assert remaining[0].contact_name == "Katherin Roballo"

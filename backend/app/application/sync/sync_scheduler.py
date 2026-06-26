@@ -328,6 +328,31 @@ def ensure_whatsapp_sync_after_connect(tenant_id: uuid.UUID, *, force: bool = Fa
         if settings.chatwoot_enabled:
             ensure_chatwoot_integration(db, tenant=tenant, session=session, force=force)
             db.commit()
+            from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+
+            def _cw_sync():
+                import time
+
+                time.sleep(5)
+                db2 = None
+                try:
+                    from app.infrastructure.persistence.database import SessionLocal
+
+                    db2 = SessionLocal()
+                    t2 = db2.query(Tenant).filter(Tenant.id == tenant_id).first()
+                    s2 = db2.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
+                    if t2 and s2:
+                        stats = sync_chatwoot_inbox(db2, tenant=t2, session=s2)
+                        log.info("Chatwoot inbox sync tenant=%s stats=%s", tenant_id, stats)
+                except Exception as exc:
+                    log.warning("Chatwoot inbox sync falló tenant=%s: %s", tenant_id, exc)
+                finally:
+                    if db2:
+                        db2.close()
+
+            import threading
+
+            threading.Thread(target=_cw_sync, daemon=True).start()
             _schedule_contact_name_enrich(tenant_id, delay_seconds=10)
             log.info("Sync custom omitido — Chatwoot activo tenant=%s", tenant_id)
             return True

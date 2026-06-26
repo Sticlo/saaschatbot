@@ -378,6 +378,7 @@ def repair_duplicate_conversations(
         is_valid_whatsapp_phone,
         lid_jid_from_lid_phone,
         normalize_phone,
+        phone_match_tail,
     )
 
     rows = (
@@ -542,6 +543,34 @@ def repair_duplicate_conversations(
                 _do_merge(primary, secondary)
                 primary = alive.get(primary.id, primary)
 
+    for phone_conv in trusted_phone:
+        if phone_conv.id not in alive:
+            continue
+        phone = normalize_phone(phone_conv.contact_phone)
+        for other in list(alive.values()):
+            if other.id == phone_conv.id or other.id not in alive:
+                continue
+            if is_placeholder_contact_name(other.contact_name, other.contact_phone):
+                continue
+            other_phone = (
+                normalize_phone(other.contact_phone)
+                if is_valid_whatsapp_phone(other.contact_phone)
+                else ""
+            )
+            mapped = lid_to_phone.get(other.contact_jid or "") if other.contact_jid else ""
+            same_person = (
+                (other_phone and other_phone == phone)
+                or (mapped and mapped == phone)
+                or phone_match_tail(other.contact_phone, phone)
+            )
+            if not same_person:
+                continue
+            if is_placeholder_contact_name(
+                phone_conv.contact_name, phone_conv.contact_phone
+            ) or not is_placeholder_contact_name(other.contact_name, other.contact_phone):
+                _do_merge(phone_conv, other)
+                break
+
     # Chat con nombre (@lid) + chat solo número: solo si comparten mucho historial.
     _MIN_SHARED_BODIES = 8
     lid_named_convs = [
@@ -569,6 +598,80 @@ def repair_duplicate_conversations(
                 if len(shared) >= _MIN_SHARED_BODIES:
                     _do_merge(lid_conv, phone_conv)
                     break
+
+    # Nombre real (@lid / sin teléfono fiable) + chat que solo muestra el número.
+    names_lookup = None
+    if instance_name:
+        try:
+            from app.application.sync.contact_identity_service import build_contact_names_lookup
+
+            names_lookup = build_contact_names_lookup(instance_name, use_api=False)
+        except Exception:
+            names_lookup = None
+
+    phone_only_convs = [
+        conv
+        for conv in list(alive.values())
+        if is_valid_whatsapp_phone(conv.contact_phone)
+        and not is_untrusted_contact_phone(conv.contact_phone)
+        and is_placeholder_contact_name(conv.contact_name, conv.contact_phone)
+    ]
+    named_convs = [
+        conv
+        for conv in list(alive.values())
+        if conv.contact_name
+        and not is_placeholder_contact_name(conv.contact_name, conv.contact_phone)
+    ]
+
+    def _weak_phone_identity(conv: Conversation) -> bool:
+        return (
+            is_lid_placeholder(conv.contact_phone)
+            or (conv.contact_jid or "").endswith("@lid")
+            or not is_valid_whatsapp_phone(conv.contact_phone)
+            or is_untrusted_contact_phone(conv.contact_phone)
+        )
+
+    def _name_matches_phone(name: str, phone: str) -> bool:
+        if not name or not phone:
+            return False
+        name_key = name.strip().lower()
+        if not name_key:
+            return False
+        norm = normalize_phone(phone)
+        if names_lookup:
+            cached = (
+                names_lookup.phone_names.get(norm)
+                or names_lookup.phone_names.get(phone)
+                or ""
+            ).strip()
+            if cached and cached.lower() == name_key:
+                return True
+        return False
+
+    for named_conv in named_convs:
+        if named_conv.id not in alive:
+            continue
+        name_key = str(named_conv.contact_name or "").strip()
+        if not name_key:
+            continue
+        named_jid = str(named_conv.contact_jid or "")
+        for phone_conv in phone_only_convs:
+            if phone_conv.id not in alive or named_conv.id == phone_conv.id:
+                continue
+            phone = normalize_phone(phone_conv.contact_phone)
+            should_merge = False
+            if named_jid.endswith("@lid"):
+                mapped = lid_to_phone.get(named_jid)
+                if mapped and normalize_phone(mapped) == phone:
+                    should_merge = True
+                phone_lid = phone_to_lid.get(phone_to_evolution_number(phone)) or phone_to_lid.get(phone)
+                if phone_lid and phone_lid == named_jid:
+                    should_merge = True
+            if _weak_phone_identity(named_conv) and _name_matches_phone(name_key, phone):
+                should_merge = True
+            if should_merge:
+                _do_merge(named_conv, phone_conv)
+                break
 
     since = datetime.now(timezone.utc) - timedelta(seconds=120)
     recent = (

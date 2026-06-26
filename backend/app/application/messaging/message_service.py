@@ -485,6 +485,18 @@ def save_inbound_message(
 
         publish_conversation_updated(tenant.id, conversation)
 
+    from app.application.conversations.contact_resolver_service import repair_duplicates_for_contact
+
+    repair_duplicates_for_contact(
+        db,
+        tenant_id=tenant.id,
+        whatsapp_connection_id=whatsapp_connection_id,
+        phone=phone,
+        lid_jid=contact_jid,
+        instance_name=inst,
+        owner_names=owner_names,
+    )
+
     return message
 
 
@@ -701,6 +713,18 @@ def save_outbound_from_phone(
 
             publish_message_event(tenant, conv, message, event_type="message.out")
             publish_conversation_updated(tenant.id, conv)
+
+    from app.application.conversations.contact_resolver_service import repair_duplicates_for_contact
+
+    repair_duplicates_for_contact(
+        db,
+        tenant_id=tenant.id,
+        whatsapp_connection_id=whatsapp_connection_id,
+        phone=phone,
+        lid_jid=contact_jid,
+        instance_name=inst,
+        owner_names=owner_names,
+    )
 
     return message
 
@@ -1008,7 +1032,7 @@ def handle_connection_update(
                     "alwaysOnline": False,
                     "readMessages": False,
                     "readStatus": False,
-                    "syncFullHistory": True,
+                    "syncFullHistory": False,
                 },
                 timeout=5.0,
             )

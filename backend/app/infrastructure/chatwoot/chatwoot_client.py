@@ -42,6 +42,7 @@ class ChatwootClient:
         path: str,
         *,
         json: Optional[dict] = None,
+        params: Optional[dict] = None,
         timeout: Optional[float] = None,
     ) -> Any:
         if not self.api_token:
@@ -54,6 +55,7 @@ class ChatwootClient:
                     url,
                     headers=self._headers(),
                     json=json,
+                    params=params,
                 )
         except httpx.RequestError as exc:
             raise ChatwootAPIError(f"No se pudo conectar con Chatwoot: {exc}") from exc
@@ -84,6 +86,37 @@ class ChatwootClient:
             if str(inbox.get("name") or "").strip().lower() == target:
                 return inbox
         return None
+
+    def list_inbox_conversations(self, inbox_id: int, *, page: int = 1) -> list[dict]:
+        result = self._request(
+            "GET",
+            f"/api/v1/accounts/{self.account_id}/conversations",
+            params={"inbox_id": inbox_id, "status": "all", "page": page},
+            timeout=30.0,
+        )
+        if isinstance(result, dict):
+            payload = result.get("data") or result.get("payload")
+            if isinstance(payload, dict):
+                return payload.get("payload") or []
+            if isinstance(payload, list):
+                return payload
+        return result if isinstance(result, list) else []
+
+    def get_conversation(self, conversation_id: int) -> dict:
+        result = self._request(
+            "GET",
+            f"/api/v1/accounts/{self.account_id}/conversations/{conversation_id}",
+            timeout=20.0,
+        )
+        return result if isinstance(result, dict) else {}
+
+    def list_messages(self, conversation_id: int, *, limit: int = 50) -> Any:
+        return self._request(
+            "GET",
+            f"/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/messages",
+            params={"page": 1},
+            timeout=30.0,
+        )
 
     def ensure_account_webhook(self, target_url: str) -> None:
         subscriptions = [
