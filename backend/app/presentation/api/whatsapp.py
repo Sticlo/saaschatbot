@@ -21,10 +21,9 @@ from app.application.sync.sync_scheduler import (
     ensure_whatsapp_sync_after_connect,
     schedule_whatsapp_sync,
 )
-from app.application.sync.contact_identity_service import enrich_tenant_conversations
-from app.infrastructure.evolution.evolution_client import EvolutionAPIError
 from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_service import (
+    EvolutionAPIError,
     disconnect_session,
     get_or_create_session,
     reconnect_session,
@@ -78,7 +77,9 @@ def connect_whatsapp(
     except EvolutionAPIError as exc:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            if "WAHA no responde" in str(exc)
+            else status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
 
@@ -121,7 +122,12 @@ def reconnect_whatsapp(
         db.refresh(session)
     except EvolutionAPIError as exc:
         db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            if "WAHA no responde" in str(exc)
+            else status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
     return WhatsAppConnectResponse(
         instance_name=session.instance_name,
@@ -214,6 +220,14 @@ def sync_whatsapp_chats_endpoint(
             detail="WhatsApp no conectado — escanea el QR antes de sincronizar",
         )
 
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    sync_label = (
+        "Sincronizando chats desde Chatwoot…"
+        if chatwoot_sync_mode()
+        else "Sincronizando chats del celular…"
+    )
+
     started = schedule_whatsapp_sync(
         tenant.id,
         user_id=current.id,
@@ -224,12 +238,12 @@ def sync_whatsapp_chats_endpoint(
     if not started:
         return WhatsAppSyncResponse(
             status="running",
-            message="Sincronizando chats del celular…",
+            message=sync_label,
         )
 
     return WhatsAppSyncResponse(
         status="started",
-        message="Sincronizando chats del celular…",
+        message=sync_label,
     )
 
 
@@ -321,8 +335,39 @@ def enrich_whatsapp_contacts(
     from app.application.whatsapp.whatsapp_status import build_owner_display_names
 
     owner_names = build_owner_display_names(session)
+    from app.application.chatwoot.chatwoot_service import (
+        chatwoot_sync_mode,
+        ensure_chatwoot_integration,
+    )
+
+    if chatwoot_sync_mode():
+        ensure_chatwoot_integration(db, tenant=tenant, session=session)
+        from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+
+        stats = sync_chatwoot_inbox(db, tenant=tenant, session=session)
+        log_audit(
+            db,
+            tenant_id=tenant.id,
+            user_id=current.id,
+            action="whatsapp.contacts_enriched",
+            details=stats,
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+        publish_panel_event(
+            tenant.id,
+            {"type": "sync.completed", "source": "chatwoot", **stats, "status": "completed"},
+        )
+        return WhatsAppSyncResponse(
+            status="completed",
+            message=(
+                f"Sincronizado desde Chatwoot: {stats.get('conversations', 0)} chats, "
+                f"{stats.get('messages', 0)} mensajes."
+            ),
+        )
+
+    from app.application.sync.contact_identity_service import enrich_tenant_conversations
     from app.application.sync.contact_name_cache_service import (
-        apply_cached_names_to_conversations,
         backfill_names_from_evolution_api,
         backfill_names_from_evolution_db,
     )
@@ -332,20 +377,6 @@ def enrich_whatsapp_contacts(
         session.instance_name, max_pages=15, owner_names=owner_names
     )
     stats = enrich_tenant_conversations(db, tenant=tenant, session=session)
-    from app.application.conversations.whatsapp_conversation_service import (
-        repair_duplicate_conversations,
-    )
-
-    merged = 0
-    if session.active_connection_id:
-        merged = repair_duplicate_conversations(
-            db,
-            tenant_id=tenant.id,
-            connection_id=session.active_connection_id,
-            instance_name=session.instance_name,
-            owner_names=owner_names,
-        )
-    stats["conversations_merged"] = merged
     log_audit(
         db,
         tenant_id=tenant.id,

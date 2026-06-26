@@ -14,7 +14,11 @@ def test_extract_name_prefers_notify_from_whatsapp():
 
     assert extract_name_from_record({"id": "573208177650@s.whatsapp.net", "notify": "Katherin"}) == "Katherin"
     assert extract_name_from_record({"remoteJid": "573004583560@s.whatsapp.net", "pushName": "Julian"}) == "Julian"
-    assert extract_name_from_record({"name": "Agenda", "pushName": "Perfil"}) == "Agenda"
+    assert extract_name_from_record({
+        "remoteJid": "573001234567@s.whatsapp.net",
+        "name": "Agenda",
+        "pushName": "Perfil",
+    }) == "Agenda"
 
 
 def test_is_placeholder_contact_name_treats_contacto_as_placeholder():

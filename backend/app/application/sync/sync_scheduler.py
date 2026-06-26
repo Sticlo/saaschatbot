@@ -24,9 +24,12 @@ def run_sync_job(
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Tenant, WhatsAppSession
     from app.infrastructure.cache.redis_client import get_redis
-    from app.application.sync.chat_sync_service import sync_whatsapp_chats
     from app.application.realtime.realtime_service import publish_panel_event
     from app.application.billing.tenant_service import log_audit
+    from app.application.chatwoot.chatwoot_service import (
+        chatwoot_sync_mode,
+        ensure_chatwoot_integration,
+    )
 
     if import_agenda is None:
         import_agenda = not wait_for_history
@@ -38,6 +41,33 @@ def run_sync_job(
         session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
         if tenant is None or session is None:
             return
+
+        if chatwoot_sync_mode():
+            ensure_chatwoot_integration(db, tenant=tenant, session=session)
+            from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+
+            stats = sync_chatwoot_inbox(db, tenant=tenant, session=session)
+            stats["source"] = "chatwoot"
+            stats["status"] = "completed"
+            if user_id is not None:
+                log_audit(
+                    db,
+                    tenant_id=tenant.id,
+                    user_id=user_id,
+                    action="whatsapp.chats_synced",
+                    details=stats,
+                    ip_address=ip_address,
+                )
+            db.commit()
+            if not silent:
+                publish_panel_event(
+                    tenant_id,
+                    {"type": "sync.completed", **stats},
+                )
+            return
+
+        from app.application.sync.chat_sync_service import sync_whatsapp_chats
+
         stats = sync_whatsapp_chats(
             db,
             tenant=tenant,
@@ -94,7 +124,11 @@ def run_sync_job(
 
 
 def _schedule_delayed_enrich(tenant_id: uuid.UUID, delay_seconds: float = 45) -> None:
-    """Re-enrich 75s después del sync: captura contactos que Evolution poblaba mientras sincronizábamos."""
+    """Re-enrich tras sync custom (omitido en modo Chatwoot)."""
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    if chatwoot_sync_mode():
+        return
     import time as _time
 
     def _job() -> None:
@@ -159,7 +193,11 @@ def _schedule_delayed_enrich(tenant_id: uuid.UUID, delay_seconds: float = 45) ->
 
 
 def _schedule_contact_name_enrich(tenant_id: uuid.UUID, *, delay_seconds: float = 12) -> None:
-    """Aplica nombres de WhatsApp (pushName/agenda) tras conectar."""
+    """Aplica nombres de WhatsApp (pushName/agenda) tras conectar — solo sync custom."""
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    if chatwoot_sync_mode():
+        return
     import time as _time
 
     def _job() -> None:
@@ -323,39 +361,56 @@ def ensure_whatsapp_sync_after_connect(tenant_id: uuid.UUID, *, force: bool = Fa
         except Exception:
             log.warning("ensure_webhook tras conexión tenant=%s", tenant_id, exc_info=True)
 
-        from app.application.chatwoot.chatwoot_service import ensure_chatwoot_integration
+        from app.application.chatwoot.chatwoot_service import (
+            chatwoot_only_mode,
+            chatwoot_sync_mode,
+            chatwoot_token_configured,
+            ensure_chatwoot_integration,
+        )
 
-        if settings.chatwoot_enabled:
-            ensure_chatwoot_integration(db, tenant=tenant, session=session, force=force)
-            db.commit()
-            from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+        if chatwoot_only_mode():
+            if chatwoot_token_configured():
+                ensure_chatwoot_integration(db, tenant=tenant, session=session, force=force)
+                db.commit()
 
-            def _cw_sync():
-                import time
+            if chatwoot_sync_mode():
+                from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
 
-                time.sleep(5)
-                db2 = None
-                try:
-                    from app.infrastructure.persistence.database import SessionLocal
+                def _cw_sync():
+                    import time
 
-                    db2 = SessionLocal()
-                    t2 = db2.query(Tenant).filter(Tenant.id == tenant_id).first()
-                    s2 = db2.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
-                    if t2 and s2:
-                        stats = sync_chatwoot_inbox(db2, tenant=t2, session=s2)
-                        log.info("Chatwoot inbox sync tenant=%s stats=%s", tenant_id, stats)
-                except Exception as exc:
-                    log.warning("Chatwoot inbox sync falló tenant=%s: %s", tenant_id, exc)
-                finally:
-                    if db2:
-                        db2.close()
+                    for delay in (15, 45, 90, 120):
+                        time.sleep(delay)
+                        db2 = None
+                        try:
+                            from app.infrastructure.persistence.database import SessionLocal
 
-            import threading
+                            db2 = SessionLocal()
+                            t2 = db2.query(Tenant).filter(Tenant.id == tenant_id).first()
+                            s2 = db2.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
+                            if t2 and s2:
+                                ensure_chatwoot_integration(db2, tenant=t2, session=s2)
+                                db2.commit()
+                                stats = sync_chatwoot_inbox(db2, tenant=t2, session=s2)
+                                log.info("Chatwoot inbox sync tenant=%s stats=%s", tenant_id, stats)
+                                if stats.get("conversations", 0) > 0:
+                                    break
+                        except Exception as exc:
+                            log.warning("Chatwoot inbox sync falló tenant=%s: %s", tenant_id, exc)
+                        finally:
+                            if db2:
+                                db2.close()
 
-            threading.Thread(target=_cw_sync, daemon=True).start()
-            _schedule_contact_name_enrich(tenant_id, delay_seconds=10)
-            log.info("Sync custom omitido — Chatwoot activo tenant=%s", tenant_id)
-            return True
+                import threading
+
+                threading.Thread(target=_cw_sync, daemon=True).start()
+                log.info("Sync Evolution omitido — modo Chatwoot tenant=%s", tenant_id)
+                return True
+
+            log.warning(
+                "CHATWOOT_ENABLED sin CHATWOOT_API_TOKEN — sync Evolution como fallback tenant=%s",
+                tenant_id,
+            )
 
         conv_count = (
             db.query(Conversation)

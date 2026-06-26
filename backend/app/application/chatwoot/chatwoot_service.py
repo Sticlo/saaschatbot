@@ -14,6 +14,35 @@ from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evo
 log = logging.getLogger(__name__)
 
 
+def chatwoot_token_configured() -> bool:
+    token = (settings.chatwoot_api_token or "").strip()
+    if not token:
+        return False
+    if token.startswith("<") or "replace" in token.lower():
+        return False
+    return True
+
+
+def chatwoot_only_mode() -> bool:
+    """True = prohibir sync Evolution custom; solo Chatwoot importa chats/mensajes."""
+    return bool(settings.chatwoot_enabled)
+
+
+def chatwoot_sync_mode() -> bool:
+    """True = Chatwoot configurado y listo para importar vía API."""
+    return bool(chatwoot_only_mode() and chatwoot_token_configured())
+
+
+def chatwoot_sync_ready(session: Optional[WhatsAppSession]) -> bool:
+    """True si Chatwoot está configurado y la sesión tiene inbox listo para importar."""
+    if not chatwoot_sync_mode():
+        return False
+    if session is None:
+        return False
+    meta = _chatwoot_meta(session)
+    return bool(meta.get("enabled") and meta.get("inbox_id"))
+
+
 def _chatwoot_meta(session: WhatsAppSession) -> dict:
     meta = session.metadata_json if isinstance(session.metadata_json, dict) else {}
     cw = meta.get("chatwoot")
@@ -38,13 +67,14 @@ def ensure_chatwoot_integration(
     """Conecta instancia Evolution ↔ Chatwoot (importa chats/mensajes sin sync custom)."""
     if not settings.chatwoot_enabled:
         return False
-    if not settings.chatwoot_api_token:
+    if not chatwoot_token_configured():
         log.warning("Chatwoot habilitado pero falta CHATWOOT_API_TOKEN tenant=%s", tenant.id)
         return False
 
     existing = _chatwoot_meta(session)
-    if existing.get("enabled") and existing.get("inbox_id") and not force:
-        return True
+
+    if uses_waha():
+        return _ensure_waha_chatwoot_app(db, tenant=tenant, session=session, existing=existing)
 
     payload = {
         "enabled": True,
@@ -68,6 +98,14 @@ def ensure_chatwoot_integration(
     except EvolutionAPIError as exc:
         log.warning("set_chatwoot falló instancia=%s: %s", session.instance_name, exc)
         return False
+
+    if existing.get("enabled") and existing.get("inbox_id") and not force:
+        log.debug(
+            "Chatwoot config actualizada tenant=%s days_limit=%s",
+            tenant.id,
+            settings.chatwoot_days_limit_import_messages,
+        )
+        return True
 
     inbox_id: Optional[int] = None
     if isinstance(cw_info, dict):
@@ -134,3 +172,76 @@ def chatwoot_panel_url(session: WhatsAppSession) -> Optional[str]:
         return None
     base = settings.chatwoot_url.rstrip("/")
     return f"{base}/app/accounts/{settings.chatwoot_account_id}/inbox/{inbox_id}"
+
+
+def _ensure_waha_chatwoot_app(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    existing: dict,
+) -> bool:
+    """WAHA app Chatwoot: Chrome sincroniza historial nativo → Chatwoot."""
+    from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
+    from app.infrastructure.chatwoot.chatwoot_client import ChatwootAPIError, chatwoot_client
+
+    inbox_id: Optional[int] = None
+    try:
+        raw = existing.get("inbox_id")
+        if raw is not None:
+            inbox_id = int(raw)
+    except (TypeError, ValueError):
+        inbox_id = None
+
+    if inbox_id is None:
+        try:
+            inbox = chatwoot_client.find_inbox_by_name(session.instance_name)
+            if inbox:
+                inbox_id = int(inbox.get("id"))
+        except ChatwootAPIError as exc:
+            log.debug("find_inbox_by_name waha: %s", exc)
+
+    try:
+        waha_client.ensure_chatwoot_app(
+            session=session.instance_name,
+            chatwoot_url=settings.chatwoot_internal_url(),
+            account_id=int(settings.chatwoot_account_id),
+            account_token=settings.chatwoot_api_token,
+            inbox_id=inbox_id or 1,
+        )
+    except WahaAPIError as exc:
+        log.warning("WAHA chatwoot app falló instancia=%s: %s", session.instance_name, exc)
+        return False
+
+    if inbox_id is None:
+        try:
+            inbox = chatwoot_client.find_inbox_by_name(session.instance_name)
+            if inbox:
+                inbox_id = int(inbox.get("id"))
+        except ChatwootAPIError:
+            pass
+
+    _save_chatwoot_meta(
+        session,
+        {
+            "enabled": True,
+            "inbox_id": inbox_id,
+            "inbox_name": session.instance_name,
+            "account_id": settings.chatwoot_account_id,
+            "provider": "waha",
+        },
+    )
+    db.flush()
+
+    try:
+        chatwoot_client.ensure_account_webhook(settings.chatwoot_webhook_url())
+    except ChatwootAPIError as exc:
+        log.warning("ensure_account_webhook: %s", exc)
+
+    log.info(
+        "WAHA↔Chatwoot conectado tenant=%s instancia=%s inbox_id=%s",
+        tenant.id,
+        session.instance_name,
+        inbox_id,
+    )
+    return True

@@ -27,7 +27,7 @@ def test_extract_message_identities_phone_primary_with_lid_alt():
 
 
 @requires_db
-def test_resolve_canonical_merges_lid_and_phone_chats():
+def test_resolve_canonical_picks_phone_without_merging_lid_chat():
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Tenant
 
@@ -73,6 +73,7 @@ def test_resolve_canonical_merges_lid_and_phone_chats():
         db.commit()
 
         assert conv is not None
+        assert conv.contact_phone == "+573219469201"
         assert lid == "236429376532542@lid"
         assert phone == "+573219469201"
 
@@ -84,7 +85,7 @@ def test_resolve_canonical_merges_lid_and_phone_chats():
             )
             .count()
         )
-        assert remaining == 1
+        assert remaining == 2
 
         record_contact_link(
             db,
@@ -122,4 +123,4 @@ def test_resolve_canonical_merges_lid_and_phone_chats():
             )
             .count()
         )
-        assert count == 1
+        assert count == 2

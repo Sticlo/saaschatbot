@@ -7,9 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_conversation
 from app.application.chatwoot.chatwoot_service import resolve_tenant_by_inbox_id
-from app.application.conversations.whatsapp_conversation_service import (
-    repair_duplicate_conversations,
-)
 from app.config import settings
 
 log = logging.getLogger(__name__)
@@ -66,16 +63,6 @@ def process_chatwoot_webhook(db: Session, payload: dict) -> None:
         chatwoot_conversation_id=cw_conv_id,
     )
     db.commit()
-
-    merged = repair_duplicate_conversations(
-        db,
-        tenant_id=tenant.id,
-        connection_id=session.active_connection_id,
-        instance_name=session.instance_name,
-    )
-    if merged:
-        db.commit()
-        log.info("Chatwoot repair post-sync fusionó %s tenant=%s", merged, tenant.id)
 
     if event == "message_created":
         msg = payload if isinstance(payload, dict) else {}

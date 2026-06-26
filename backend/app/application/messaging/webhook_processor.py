@@ -435,21 +435,6 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 log.debug("Webhook duplicado ignorado tenant=%s id=%s", tenant_id, dedup_id)
                 return
 
-        from app.config import settings as app_settings
-
-        if app_settings.chatwoot_enabled and event in {
-            "messages.upsert",
-            "messages.set",
-            "chats.set",
-            "chats.upsert",
-            "chats.update",
-            "contacts.set",
-            "contacts.upsert",
-            "contacts.update",
-        }:
-            log.debug("Webhook Evolution omitido (Chatwoot activo) event=%s", event)
-            return
-
         if event == "connection.update":
             handle_connection_update(db, tenant=tenant, session=session, data=data)
             db.commit()
@@ -460,9 +445,19 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
 
                 ensure_whatsapp_sync_after_connect(tenant_id, force=True)
             return
-        elif event == "qrcode.updated":
+        if event == "qrcode.updated":
             handle_qrcode_update(db, session, tenant, data if isinstance(data, dict) else {})
-        elif event == "messages.upsert":
+            db.commit()
+            return
+
+        from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+        from app.application.whatsapp.whatsapp_gateway import uses_waha
+
+        if chatwoot_sync_mode() or uses_waha():
+            log.debug("Webhook Evolution omitido (WAHA/Chatwoot) event=%s", event)
+            return
+
+        if event == "messages.upsert":
             connection_id = session.active_connection_id
             if connection_id is None:
                 log.debug("Mensaje ignorado — WhatsApp no vinculado tenant=%s", tenant_id)

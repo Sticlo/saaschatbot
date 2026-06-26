@@ -77,24 +77,16 @@ def list_conversations(
     if not conversations_visible_for_tenant(db, tenant=tenant, session=session):
         return []
 
-    if settings.chatwoot_enabled and session.active_connection_id:
-        from app.application.chatwoot.chatwoot_service import ensure_chatwoot_integration
-        from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
-        from app.application.conversations.whatsapp_conversation_service import (
-            repair_duplicate_conversations,
-        )
+    from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
+    from app.application.chatwoot.chatwoot_service import (
+        chatwoot_sync_mode,
+        ensure_chatwoot_integration,
+    )
 
+    if chatwoot_sync_mode():
         if ensure_chatwoot_integration(db, tenant=tenant, session=session):
             db.commit()
         sync_chatwoot_inbox(db, tenant=tenant, session=session)
-        merged = repair_duplicate_conversations(
-            db,
-            tenant_id=tenant.id,
-            connection_id=session.active_connection_id,
-            instance_name=session.instance_name,
-        )
-        if merged:
-            db.commit()
 
     query = (
         db.query(Conversation)
@@ -108,16 +100,35 @@ def list_conversations(
     elif archived is False:
         query = query.filter(Conversation.is_archived.is_(False))
 
-    if query.count() == 0 and archived is not False and not settings.chatwoot_enabled:
+    conv_count_pre = query.count()
+    if archived is not False and not chatwoot_sync_mode():
         from app.application.sync.sync_scheduler import schedule_whatsapp_sync
 
-        schedule_whatsapp_sync(
-            current.tenant_id,
-            wait_for_history=False,
-            delay_seconds=0,
-            silent=True,
-            debounce=True,
-        )
+        if conv_count_pre == 0:
+            schedule_whatsapp_sync(
+                current.tenant_id,
+                wait_for_history=False,
+                delay_seconds=0,
+                silent=True,
+                debounce=True,
+            )
+        elif conv_count_pre < 10 and settings.evolution_database_url:
+            try:
+                from app.infrastructure.evolution.evolution_store import fetch_stored_counts
+
+                evo_chats = fetch_stored_counts(
+                    settings.evolution_database_url, session.instance_name
+                ).get("chats", 0)
+                if evo_chats > conv_count_pre + 5:
+                    schedule_whatsapp_sync(
+                        current.tenant_id,
+                        wait_for_history=False,
+                        delay_seconds=0,
+                        silent=True,
+                        debounce=True,
+                    )
+            except Exception:
+                pass
 
     last_msg_subq = (
         db.query(
@@ -198,7 +209,12 @@ def list_conversations(
         placeholders = []
 
     names_lookup = None
-    if placeholders and session.instance_name and settings.evolution_database_url:
+    if (
+        not chatwoot_sync_mode()
+        and placeholders
+        and session.instance_name
+        and settings.evolution_database_url
+    ):
         from app.application.sync.contact_identity_service import (
             apply_names_lookup_to_conversations,
             build_contact_names_lookup,
@@ -299,9 +315,9 @@ def sync_live_conversation(
     current: RequireViewer,
     db: Session = Depends(get_db),
 ):
-    """Pull mensajes recientes desde Evolution para el chat abierto (fallback sin webhook)."""
+    """Pull mensajes recientes (Chatwoot en modo CW; Evolution solo sin Chatwoot)."""
     from app.domain.entities.enums import WhatsAppStatus
-    from app.application.sync.live_sync_service import pull_live_conversation_messages
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     session = (
@@ -324,6 +340,34 @@ def sync_live_conversation(
     )
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    if chatwoot_sync_mode() and conversation.chatwoot_conversation_id:
+        from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_conversation
+
+        imported = sync_chatwoot_conversation(
+            db,
+            tenant=tenant,
+            session=session,
+            chatwoot_conversation_id=int(conversation.chatwoot_conversation_id),
+        )
+        db.commit()
+        messages = (
+            db.query(Message)
+            .filter(
+                Message.tenant_id == tenant.id,
+                Message.conversation_id == conversation.id,
+            )
+            .order_by(Message.created_at.asc())
+            .all()
+        )
+        return ConversationLiveSyncResponse(
+            imported=imported,
+            message_count=len(messages),
+            conversation_id=conversation.id,
+            messages=[MessageResponse.model_validate(m) for m in messages],
+        )
+
+    from app.application.sync.live_sync_service import pull_live_conversation_messages
 
     imported, messages = pull_live_conversation_messages(
         db,

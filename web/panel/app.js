@@ -234,29 +234,6 @@
       state._lastPull = pullLabel;
       updateSyncStatus({ pull: pullLabel });
 
-      if (data.conversation_id && data.conversation_id !== chatId) {
-        state.activeId = data.conversation_id;
-        const msgs = dedupeMessages(data.messages || []);
-        state._messagesSig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
-        state.messages = msgs;
-        renderMessages();
-        fetchConversations()
-          .then((rows) => {
-            if (rows.length) {
-              setConversations(rows);
-              renderConversationList();
-            }
-            const conv = state.conversations.find((c) => c.id === data.conversation_id);
-            if (conv && state.activeId === data.conversation_id) {
-              $("chat-title").textContent = convTitle(conv);
-              $("chat-phone").textContent = convSubtitle(conv);
-              syncChatToggles(conv);
-            }
-          })
-          .catch(() => {});
-        return;
-      }
-
       const msgs = dedupeMessages(data.messages || []);
       const sig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
       if (sig !== state._messagesSig) {
@@ -581,7 +558,19 @@
   }
 
   function convTitle(c) {
+    const name = String(c.contact_name || "").trim();
+    const phone = String(c.contact_phone || "").trim();
+    const digits = name.replace(/\D/g, "");
+    const looksLikePhone = digits.length >= 10 && digits.length <= 13 && /^\+?\d/.test(name);
+    if (name && name !== phone && !looksLikePhone) return name;
     return c.display_name || c.contact_name || c.display_phone || c.contact_phone || "Contacto";
+  }
+
+  function refreshActiveChatHeader(conv) {
+    if (!conv || conv.id !== state.activeId) return;
+    $("chat-title").textContent = convTitle(conv);
+    $("chat-phone").textContent = convSubtitle(conv);
+    syncChatToggles(conv);
   }
 
   function convSubtitle(c) {
@@ -682,6 +671,7 @@
     else state.conversations.push(conv);
     state.conversations = sortConversations(state.conversations);
     renderConversationList();
+    refreshActiveChatHeader(conv);
   }
 
   function renderConversationList() {
@@ -689,7 +679,9 @@
     if (state.syncInProgress) {
       const syncLi = document.createElement("li");
       syncLi.className = "conversation-item sync-status";
-      syncLi.innerHTML = '<span class="muted">Importando chats y contactos de tu celular…</span>';
+      syncLi.innerHTML = state.wa.chatwoot_inbox_url
+        ? '<span class="muted">Sincronizando chats desde Chatwoot…</span>'
+        : '<span class="muted">Importando chats y contactos de tu celular…</span>';
       conversationList.appendChild(syncLi);
     }
     const emptyLabel =
@@ -1229,7 +1221,6 @@
       case "conversation.updated":
         if (event.conversation) {
           upsertConversation(event.conversation);
-          if (event.conversation.id === state.activeId) syncChatToggles(event.conversation);
         }
         break;
       case "whatsapp.status":

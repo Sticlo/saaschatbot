@@ -441,20 +441,73 @@ def save_inbound_message(
         message_key=message_key,
         instance_name=inst,
         owner_names=owner_names,
+        push_name=push_name,
     )
 
     if conversation is None:
         if not phone and not contact_jid:
             return None
+        display_name = push_name
+        if is_valid_whatsapp_phone(phone) and inst:
+            from app.config import settings as app_settings
+
+            if app_settings.evolution_database_url:
+                from app.application.sync.contact_identity_service import resolve_contact_identity
+
+                resolved = resolve_contact_identity(
+                    remote_jid
+                    or contact_jid
+                    or f"{phone_to_evolution_number(phone)}@s.whatsapp.net",
+                    {"pushName": push_name, "_owner_names": owner_names},
+                    contacts_index={},
+                    instance_name=inst,
+                    dsn=app_settings.evolution_database_url,
+                    message_key=message_key,
+                    lid_jid=contact_jid,
+                )
+                if resolved:
+                    _, _, display_name, _ = resolved
         conversation = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
             contact_phone=phone or f"lid:{contact_jid.split('@')[0]}",
-            contact_name=push_name,
+            contact_name=display_name,
             contact_jid=contact_jid,
             whatsapp_connection_id=whatsapp_connection_id,
             instance_name=inst,
         )
+    elif push_name or is_valid_whatsapp_phone(phone):
+        from app.config import settings as app_settings
+
+        display_name = push_name
+        if is_valid_whatsapp_phone(phone) and inst and app_settings.evolution_database_url:
+            from app.application.sync.contact_identity_service import resolve_contact_identity
+
+            resolved = resolve_contact_identity(
+                remote_jid
+                or contact_jid
+                or f"{phone_to_evolution_number(phone)}@s.whatsapp.net",
+                {"pushName": push_name, "_owner_names": owner_names},
+                contacts_index={},
+                instance_name=inst,
+                dsn=app_settings.evolution_database_url,
+                message_key=message_key,
+                lid_jid=contact_jid,
+            )
+            if resolved:
+                _, _, display_name, _ = resolved
+        if display_name and not is_placeholder_contact_name(display_name, phone or conversation.contact_phone):
+            from app.shared.core.phone import is_owner_display_name
+
+            if not owner_names or not is_owner_display_name(display_name, owner_names):
+                from app.application.sync.contact_identity_service import apply_identity_to_conversation
+
+                apply_identity_to_conversation(
+                    conversation,
+                    contact_phone=phone or conversation.contact_phone,
+                    contact_name=display_name,
+                    contact_jid=contact_jid or conversation.contact_jid or "",
+                )
     elif push_name and is_placeholder_contact_name(
         conversation.contact_name, conversation.contact_phone
     ):
@@ -486,16 +539,19 @@ def save_inbound_message(
         publish_conversation_updated(tenant.id, conversation)
 
     from app.application.conversations.contact_resolver_service import repair_duplicates_for_contact
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
-    repair_duplicates_for_contact(
-        db,
-        tenant_id=tenant.id,
-        whatsapp_connection_id=whatsapp_connection_id,
-        phone=phone,
-        lid_jid=contact_jid,
-        instance_name=inst,
-        owner_names=owner_names,
-    )
+    if not chatwoot_sync_mode():
+        repair_duplicates_for_contact(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            phone=phone,
+            lid_jid=contact_jid,
+            instance_name=inst,
+            owner_names=owner_names,
+            push_name=push_name,
+        )
 
     return message
 
@@ -538,36 +594,12 @@ def _find_recent_outbound_echo(
         conv = row.conversation
         if contact_jid and conv.contact_jid == contact_jid:
             return conv
-        if contact_phone and phone_match_tail(conv.contact_phone, contact_phone):
-            return conv
+        if contact_phone and is_valid_whatsapp_phone(contact_phone):
+            if normalize_phone(conv.contact_phone) == normalize_phone(contact_phone):
+                return conv
         if contact_jid and is_lid_placeholder(conv.contact_phone):
             if lid_jid_from_lid_phone(conv.contact_phone) == contact_jid:
                 return conv
-
-    if not rows:
-        return None
-
-    seen: dict[UUID, Conversation] = {}
-    for row in rows:
-        seen[row.conversation_id] = row.conversation
-
-    # Caso seguro: el eco no se pudo enlazar por jid/teléfono (típico de @lid sin mapeo),
-    # pero hay exactamente UNA conversación con ese mismo texto saliente reciente. Es el
-    # mismo chat que el panel/IA acaba de usar — reutilízalo en vez de duplicar.
-    if len(seen) == 1:
-        return next(iter(seen.values()))
-
-    # Varias conversaciones con el mismo texto (p.ej. baits masivos): solo el heurístico
-    # antiguo sin evolution_message_id intenta consolidar; con id es ambiguo, no arriesgar.
-    if not evolution_message_id:
-        from app.application.conversations.whatsapp_conversation_service import (
-            pick_merge_primary,
-        )
-
-        primary = next(iter(seen.values()))
-        for other in seen.values():
-            primary, _ = pick_merge_primary(primary, other, owner_names=owner_names)
-        return primary
 
     return None
 
@@ -683,6 +715,7 @@ def save_outbound_from_phone(
                 whatsapp_connection_id=whatsapp_connection_id,
                 lid_jid=contact_jid,
                 phone_e164=phone,
+                verified=True,
             )
 
     message = _save_message(
@@ -715,16 +748,19 @@ def save_outbound_from_phone(
             publish_conversation_updated(tenant.id, conv)
 
     from app.application.conversations.contact_resolver_service import repair_duplicates_for_contact
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
-    repair_duplicates_for_contact(
-        db,
-        tenant_id=tenant.id,
-        whatsapp_connection_id=whatsapp_connection_id,
-        phone=phone,
-        lid_jid=contact_jid,
-        instance_name=inst,
-        owner_names=owner_names,
-    )
+    if not chatwoot_sync_mode():
+        repair_duplicates_for_contact(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            phone=phone,
+            lid_jid=contact_jid,
+            instance_name=inst,
+            owner_names=owner_names,
+            push_name="",
+        )
 
     return message
 

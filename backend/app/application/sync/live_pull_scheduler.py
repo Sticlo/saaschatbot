@@ -43,7 +43,11 @@ def _write_since_ts(tenant_id: uuid.UUID, ts: int) -> None:
 
 
 def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
-    """Importa mensajes nuevos desde Evolution DB (fallback cuando no hay webhook)."""
+    """Importa mensajes nuevos desde Evolution DB (solo sin modo Chatwoot)."""
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    if chatwoot_sync_mode():
+        return 0
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Tenant, WhatsAppSession
     from app.domain.entities.enums import WhatsAppStatus

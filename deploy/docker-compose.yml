@@ -38,6 +38,7 @@ services:
       retries: 5
 
   evolution:
+    profiles: ["evolution"]
     image: evoapicloud/evolution-api:v2.2.3
     container_name: saaschatbot_evolution
     restart: unless-stopped
@@ -70,6 +71,32 @@ services:
       redis:
         condition: service_healthy
 
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: saaschatbot_waha
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    env_file:
+      - ../.env
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: ${WAHA_ENGINE:-WEBJS}
+      WAHA_API_KEY: ${WAHA_API_KEY:-dev-waha-key-local}
+      WAHA_API_KEY_PLAIN: ${WAHA_API_KEY:-dev-waha-key-local}
+      WAHA_APPS_ENABLED: "true"
+      WAHA_APPS_ON: chatwoot
+      REDIS_URL: redis://redis:6379/3
+      WAHA_DASHBOARD_USERNAME: admin
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:-admin}
+    volumes:
+      - waha_sessions:/app/.sessions
+      - waha_media:/app/.media
+    depends_on:
+      redis:
+        condition: service_healthy
+      chatwoot:
+        condition: service_started
+
   chatwoot:
     image: chatwoot/chatwoot:v3.16.0
     container_name: saaschatbot_chatwoot
@@ -92,6 +119,8 @@ services:
       REDIS_URL: redis://redis:6379/2
       ACTIVE_STORAGE_SERVICE: local
       RAILS_LOG_TO_STDOUT: "true"
+      RACK_TIMEOUT_SERVICE_TIMEOUT: "60"
+      CONVERSATION_MESSAGE_PER_MINUTE_LIMIT: "3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,3 +157,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  waha_sessions:
+  waha_media:

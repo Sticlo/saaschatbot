@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 from app.domain.entities import Conversation, WhatsAppContactLink
 from app.shared.core.phone import (
     is_lid_placeholder,
+    is_placeholder_contact_name,
     is_untrusted_contact_phone,
     is_valid_whatsapp_phone,
     jid_to_phone,
     lid_jid_from_lid_phone,
     normalize_phone,
-    phone_match_tail,
+    pair_lid_phone_from_message_key,
     phone_to_evolution_number,
     phone_trust_rank,
     pick_trusted_phone,
@@ -58,34 +59,56 @@ def record_contact_link(
     whatsapp_connection_id: UUID,
     lid_jid: str,
     phone_e164: str,
+    verified: bool = False,
 ) -> None:
-    """Persiste o actualiza el puente @lid ↔ teléfono."""
+    """Persiste o actualiza el puente @lid ↔ teléfono (solo verified=True desde message key)."""
     if not lid_jid.endswith("@lid") or not is_valid_whatsapp_phone(phone_e164):
         return
     if is_untrusted_contact_phone(phone_e164):
         return
 
     phone_e164 = normalize_phone(phone_e164)
-    existing_lid = (
-        db.query(WhatsAppContactLink)
-        .filter(
-            WhatsAppContactLink.tenant_id == tenant_id,
-            WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
-            WhatsAppContactLink.lid_jid == lid_jid,
+
+    def _find_by_lid() -> Optional[WhatsAppContactLink]:
+        rows = (
+            db.query(WhatsAppContactLink)
+            .filter(
+                WhatsAppContactLink.tenant_id == tenant_id,
+                WhatsAppContactLink.lid_jid == lid_jid,
+            )
+            .all()
         )
-        .first()
-    )
-    existing_phone = (
-        db.query(WhatsAppContactLink)
-        .filter(
-            WhatsAppContactLink.tenant_id == tenant_id,
-            WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
-            WhatsAppContactLink.phone_e164 == phone_e164,
+        for row in rows:
+            if row.whatsapp_connection_id == whatsapp_connection_id:
+                return row
+        return rows[0] if rows else None
+
+    def _find_by_phone() -> Optional[WhatsAppContactLink]:
+        rows = (
+            db.query(WhatsAppContactLink)
+            .filter(
+                WhatsAppContactLink.tenant_id == tenant_id,
+                WhatsAppContactLink.phone_e164 == phone_e164,
+            )
+            .all()
         )
-        .first()
-    )
+        for row in rows:
+            if row.whatsapp_connection_id == whatsapp_connection_id:
+                return row
+        return rows[0] if rows else None
+
+    existing_lid = _find_by_lid()
+    existing_phone = _find_by_phone()
 
     if existing_lid and existing_lid.phone_e164 != phone_e164:
+        if not verified:
+            log.debug(
+                "Enlace @lid ignorado (sin key verificado) tenant=%s %s ≠ %s",
+                tenant_id,
+                lid_jid,
+                phone_e164,
+            )
+            return
         if existing_phone and existing_phone.id != existing_lid.id:
             log.info(
                 "Enlace @lid actualizado tenant=%s %s → %s",
@@ -95,15 +118,28 @@ def record_contact_link(
             )
             db.delete(existing_phone)
         existing_lid.phone_e164 = phone_e164
+        existing_lid.whatsapp_connection_id = whatsapp_connection_id
         return
 
     if existing_phone and existing_phone.lid_jid != lid_jid:
+        if not verified:
+            log.debug(
+                "Teléfono ya vinculado a otro @lid tenant=%s %s (omitido)",
+                tenant_id,
+                phone_e164,
+            )
+            return
         if existing_lid and existing_lid.id != existing_phone.id:
             db.delete(existing_lid)
         existing_phone.lid_jid = lid_jid
+        existing_phone.whatsapp_connection_id = whatsapp_connection_id
         return
 
-    if existing_lid or existing_phone:
+    if existing_lid:
+        existing_lid.whatsapp_connection_id = whatsapp_connection_id
+        return
+    if existing_phone:
+        existing_phone.whatsapp_connection_id = whatsapp_connection_id
         return
 
     db.add(
@@ -127,19 +163,26 @@ def _load_link_maps(
     phone_to_lid: dict[str, str] = {}
     rows = (
         db.query(WhatsAppContactLink)
-        .filter(
-            WhatsAppContactLink.tenant_id == tenant_id,
-            WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
-        )
+        .filter(WhatsAppContactLink.tenant_id == tenant_id)
         .all()
+    )
+    # Priorizar enlaces de la vinculación actual; fallback a enlaces de QR anteriores.
+    rows.sort(
+        key=lambda r: (
+            0 if r.whatsapp_connection_id == whatsapp_connection_id else 1,
+            str(r.updated_at or r.created_at or ""),
+        )
     )
     for row in rows:
         if is_untrusted_contact_phone(row.phone_e164):
             continue
-        lid_to_phone[row.lid_jid] = row.phone_e164
-        phone_to_lid[row.phone_e164] = row.lid_jid
+        if row.lid_jid not in lid_to_phone:
+            lid_to_phone[row.lid_jid] = row.phone_e164
         digits = phone_to_evolution_number(row.phone_e164)
-        phone_to_lid[digits] = row.lid_jid
+        if row.phone_e164 not in phone_to_lid:
+            phone_to_lid[row.phone_e164] = row.lid_jid
+        if digits not in phone_to_lid:
+            phone_to_lid[digits] = row.lid_jid
     return lid_to_phone, phone_to_lid
 
 
@@ -152,6 +195,7 @@ def _collect_candidates(
     lid_jid: str,
     instance_name: str,
     fast: bool = True,
+    push_name: str = "",
 ) -> list[Conversation]:
     from app.config import settings
     from app.infrastructure.evolution.evolution_store import fetch_lid_jid_for_phone
@@ -234,46 +278,12 @@ def _collect_candidates(
     for p in phones_to_try:
         _add(base.filter(Conversation.contact_phone == p).first())
 
-    tail = next((p for p in phones_to_try if is_valid_whatsapp_phone(p)), "")
-    if tail:
-        suffix = phone_to_evolution_number(normalize_phone(tail))[-10:]
-        if suffix:
-            for conv in base.filter(Conversation.contact_phone.like(f"%{suffix}")).limit(8):
-                if phone_match_tail(conv.contact_phone, tail):
-                    _add(conv)
-
     for jid in list(jids_to_try):
         if not jid.endswith("@lid"):
             continue
         lid_key = jid.split("@")[0]
         for conv in base.filter(Conversation.contact_phone == f"lid:{lid_key}").limit(4):
             _add(conv)
-
-    if is_valid_whatsapp_phone(phone) and instance_name:
-        norm = normalize_phone(phone)
-        try:
-            from app.application.sync.contact_identity_service import build_contact_names_lookup
-
-            lookup = build_contact_names_lookup(instance_name, use_api=False)
-            cached_name = (
-                lookup.phone_names.get(norm)
-                or lookup.phone_names.get(phone)
-                or ""
-            ).strip()
-            if cached_name:
-                for conv in base.filter(
-                    Conversation.contact_name.ilike(cached_name)
-                ).limit(6):
-                    _add(conv)
-            lid_jid = (
-                phone_to_lid.get(phone_to_evolution_number(norm))
-                or phone_to_lid.get(norm)
-                or ""
-            )
-            if lid_jid:
-                _add(base.filter(Conversation.contact_jid == lid_jid).first())
-        except Exception:
-            pass
 
     return list(found.values())
 
@@ -306,6 +316,52 @@ def _merge_to_canonical(
     return primary
 
 
+def _pick_exact_conversation(
+    candidates: list[Conversation],
+    *,
+    remote_jid: str,
+    phone: str,
+    lid_jid: str,
+) -> Optional[Conversation]:
+    """Elige UN chat — nunca fusiona. Prioridad: jid exacto → teléfono exacto."""
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    phone_targets: set[str] = set()
+    for raw in (phone, jid_to_phone(remote_jid) if remote_jid else ""):
+        if raw and is_valid_whatsapp_phone(raw):
+            phone_targets.add(normalize_phone(raw))
+
+    if phone_targets and (remote_jid.endswith("@s.whatsapp.net") or any(
+        is_valid_whatsapp_phone(p) for p in (phone,)
+    )):
+        for conv in candidates:
+            if is_valid_whatsapp_phone(conv.contact_phone):
+                if normalize_phone(conv.contact_phone) in phone_targets:
+                    return conv
+
+    jid_targets = {j for j in (remote_jid, lid_jid) if j and j.endswith("@lid")}
+    for conv in candidates:
+        if conv.contact_jid and conv.contact_jid in jid_targets:
+            return conv
+
+    for conv in candidates:
+        if is_valid_whatsapp_phone(conv.contact_phone):
+            if normalize_phone(conv.contact_phone) in phone_targets:
+                return conv
+
+    # Varios candidatos sin match exacto: no adivinar (evita Ana↔Diana).
+    log.warning(
+        "Conversación ambigua — %s candidatos jid=%s phone=%s (sin fusión)",
+        len(candidates),
+        remote_jid or lid_jid,
+        phone,
+    )
+    return None
+
+
 def resolve_canonical_conversation(
     db: Session,
     *,
@@ -316,19 +372,22 @@ def resolve_canonical_conversation(
     message_key: Optional[dict] = None,
     instance_name: str = "",
     owner_names: Optional[set[str]] = None,
+    push_name: str = "",
 ) -> tuple[Optional[Conversation], str, str]:
     """Un solo chat por persona: fusiona duplicados antes de guardar el mensaje."""
     phone, lid = extract_message_identities(
         remote_jid, lid_jid=lid_jid, message_key=message_key
     )
 
-    if lid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+    verified_lid, verified_phone = pair_lid_phone_from_message_key(message_key)
+    if verified_lid and verified_phone:
         record_contact_link(
             db,
             tenant_id=tenant_id,
             whatsapp_connection_id=whatsapp_connection_id,
-            lid_jid=lid,
-            phone_e164=phone,
+            lid_jid=verified_lid,
+            phone_e164=verified_phone,
+            verified=True,
         )
 
     candidates = _collect_candidates(
@@ -338,56 +397,30 @@ def resolve_canonical_conversation(
         phone=phone,
         lid_jid=lid,
         instance_name=instance_name,
+        push_name=push_name,
     )
 
-    if len(candidates) > 1:
-        conv = _merge_to_canonical(
-            db,
-            tenant_id=tenant_id,
-            candidates=candidates,
-            owner_names=owner_names,
-        )
-        db.flush()
-    elif len(candidates) == 1:
-        conv = candidates[0]
+    conv = _pick_exact_conversation(
+        candidates,
+        remote_jid=remote_jid,
+        phone=phone,
+        lid_jid=lid,
+    )
+
+    if conv is not None:
         from app.application.sync.contact_identity_service import apply_identity_to_conversation
 
         trusted_phone = phone if is_valid_whatsapp_phone(phone) and not is_untrusted_contact_phone(phone) else ""
+        if trusted_phone and is_lid_placeholder(conv.contact_phone):
+            trusted_phone = ""
         apply_identity_to_conversation(
             conv,
             contact_phone=trusted_phone or conv.contact_phone,
             contact_name="",
             contact_jid=lid or conv.contact_jid or "",
         )
-        if trusted_phone and (conv.contact_jid or "").endswith("@lid"):
-            record_contact_link(
-                db,
-                tenant_id=tenant_id,
-                whatsapp_connection_id=whatsapp_connection_id,
-                lid_jid=conv.contact_jid,
-                phone_e164=trusted_phone,
-            )
     else:
         return None, phone, lid
-
-    if lid.endswith("@lid") and is_valid_whatsapp_phone(phone) and not is_untrusted_contact_phone(phone):
-        record_contact_link(
-            db,
-            tenant_id=tenant_id,
-            whatsapp_connection_id=whatsapp_connection_id,
-            lid_jid=lid,
-            phone_e164=phone,
-        )
-    elif conv.contact_jid and conv.contact_jid.endswith("@lid") and is_valid_whatsapp_phone(
-        conv.contact_phone
-    ):
-        record_contact_link(
-            db,
-            tenant_id=tenant_id,
-            whatsapp_connection_id=whatsapp_connection_id,
-            lid_jid=conv.contact_jid,
-            phone_e164=normalize_phone(conv.contact_phone),
-        )
 
     return conv, phone, lid
 
@@ -401,8 +434,13 @@ def repair_duplicates_for_contact(
     lid_jid: str = "",
     instance_name: str = "",
     owner_names: Optional[set[str]] = None,
+    push_name: str = "",
 ) -> Optional[Conversation]:
-    """Fusiona duplicados solo del contacto actual (rápido, sin escanear todo el tenant)."""
+    """Sin fusión automática — devuelve match exacto si existe."""
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    if chatwoot_sync_mode():
+        return None
     candidates = _collect_candidates(
         db,
         tenant_id=tenant_id,
@@ -410,16 +448,15 @@ def repair_duplicates_for_contact(
         phone=phone,
         lid_jid=lid_jid,
         instance_name=instance_name,
+        push_name=push_name,
     )
     if not candidates:
         return None
-    if len(candidates) == 1:
-        return candidates[0]
-    return _merge_to_canonical(
-        db,
-        tenant_id=tenant_id,
-        candidates=candidates,
-        owner_names=owner_names,
+    return _pick_exact_conversation(
+        candidates,
+        remote_jid=lid_jid,
+        phone=phone,
+        lid_jid=lid_jid,
     )
 
 
@@ -432,15 +469,15 @@ def learn_link_from_key(
     remote_jid: str = "",
     lid_jid: str = "",
 ) -> None:
-    """Aprende @lid↔teléfono del key del webhook (sin crear conversación)."""
-    phone, lid = extract_message_identities(
-        remote_jid, lid_jid=lid_jid, message_key=message_key
-    )
-    if lid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+    """Aprende @lid↔teléfono solo cuando WhatsApp los envía juntos en el message key."""
+    _ = remote_jid, lid_jid
+    verified_lid, verified_phone = pair_lid_phone_from_message_key(message_key)
+    if verified_lid and verified_phone:
         record_contact_link(
             db,
             tenant_id=tenant_id,
             whatsapp_connection_id=whatsapp_connection_id,
-            lid_jid=lid,
-            phone_e164=phone,
+            lid_jid=verified_lid,
+            phone_e164=verified_phone,
+            verified=True,
         )

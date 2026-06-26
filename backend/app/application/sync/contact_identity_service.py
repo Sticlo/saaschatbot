@@ -120,8 +120,6 @@ def resolve_contact_identity(
             phone=phone,
         )
         if not saved_name and is_valid_whatsapp_phone(phone):
-            from app.shared.core.phone import phone_to_evolution_number
-
             phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
             saved_name = _pick_saved_name(
                 fetch_stored_chat_name(dsn, instance_name, phone_jid),
@@ -139,10 +137,30 @@ def resolve_contact_identity(
     owner_names = item.get("_owner_names") or set()
     if push_name and is_owner_display_name(str(push_name), owner_names):
         push_name = ""
-    # WhatsApp pushName takes priority over phone book "saved_name":
-    # pushName = what the contact set in their WA profile (reliable).
-    # saved_name = what the user typed in their phone book (can be wrong for @lid contacts).
-    name = push_name or saved_name
+
+    # Con teléfono E.164 verificado: agenda del número manda (no pushName de otro @lid).
+    phone_agenda_name = ""
+    if is_valid_whatsapp_phone(phone):
+        phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
+        phone_row = contacts_index.get(phone_jid) or {}
+        phone_agenda_name = _pick_saved_name(
+            phone_row.get("name"),
+            phone_row.get("pushName"),
+            contact_names.get(phone_jid),
+            phone_names.get(phone),
+            phone_names.get(normalize_phone(phone)),
+            phone=phone,
+        )
+        if not phone_agenda_name and dsn:
+            phone_agenda_name = _pick_saved_name(
+                fetch_stored_chat_name(dsn, instance_name, phone_jid),
+                phone=phone,
+            )
+
+    if phone_agenda_name:
+        name = phone_agenda_name
+    else:
+        name = push_name or saved_name
 
     if is_placeholder_contact_name(str(name), phone) and effective_lid and dsn:
         name = fetch_lid_push_name(dsn, instance_name, effective_lid) or name
@@ -183,23 +201,35 @@ class ContactNamesLookup:
         owner_names = owner_names or set()
 
         candidates: list[str] = []
-        if contact_jid:
-            candidates.append(self.jid_names.get(contact_jid, ""))
         if is_valid_whatsapp_phone(phone):
-            phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
+            norm = normalize_phone(phone)
+            phone_jid = f"{phone_to_evolution_number(norm)}@s.whatsapp.net"
             candidates.append(self.jid_names.get(phone_jid, ""))
+            candidates.append(self.phone_names.get(norm, ""))
             candidates.append(self.phone_names.get(phone, ""))
-            candidates.append(self.phone_names.get(normalize_phone(phone), ""))
-            lid_jid = self.phone_to_lid.get(phone_to_evolution_number(phone)) or self.phone_to_lid.get(phone)
-            if lid_jid:
-                candidates.append(self.jid_names.get(lid_jid, ""))
+            mapped_lid = self.phone_to_lid.get(norm) or self.phone_to_lid.get(
+                phone_to_evolution_number(norm)
+            )
+            if mapped_lid:
+                candidates.append(self.jid_names.get(mapped_lid, ""))
+            if contact_jid.endswith("@lid"):
+                candidates.append(self.jid_names.get(contact_jid, ""))
+            elif contact_jid:
+                candidates.append(self.jid_names.get(contact_jid, ""))
+        elif contact_jid.endswith("@lid"):
+            candidates.append(self.jid_names.get(contact_jid, ""))
+            mapped_phone = self.lid_to_phone.get(contact_jid)
+            if mapped_phone:
+                norm = normalize_phone(mapped_phone)
+                phone_jid = f"{phone_to_evolution_number(norm)}@s.whatsapp.net"
+                candidates.append(self.jid_names.get(phone_jid, ""))
+                candidates.append(self.phone_names.get(norm, ""))
+        elif contact_jid:
+            candidates.append(self.jid_names.get(contact_jid, ""))
         elif is_lid_placeholder(phone):
             lid_jid = contact_jid or lid_jid_from_phone(phone)
             if lid_jid:
                 candidates.append(self.jid_names.get(lid_jid, ""))
-                mapped_phone = self.lid_to_phone.get(lid_jid)
-                if mapped_phone:
-                    candidates.append(self.phone_names.get(mapped_phone, ""))
 
         for candidate in candidates:
             cleaned = str(candidate or "").strip()
@@ -265,13 +295,6 @@ def build_contact_names_lookup(
                 phone_names[phone] = name
     except Exception:
         pass
-
-    for lid_jid, phone in lid_to_phone.items():
-        lid_name = jid_names.get(lid_jid)
-        if lid_name and phone and phone not in phone_names:
-            phone_names[phone] = lid_name
-            phone_jid = f"{phone_to_evolution_number(phone)}@s.whatsapp.net"
-            jid_names.setdefault(phone_jid, lid_name)
 
     return ContactNamesLookup(
         jid_names=jid_names,

@@ -74,12 +74,20 @@ class Settings(BaseSettings):
     # True solo si Evolution corre dentro de Docker y la API en el host (localhost).
     evolution_in_docker: bool = False
 
-    # Chatwoot — sincronización WhatsApp vía Evolution (reemplaza sync custom).
+    # WhatsApp provider: waha (Chrome real, recomendado) | evolution
+    whatsapp_provider: str = "evolution"
+    waha_api_url: str = "http://localhost:3001"
+    waha_api_key: str = "dev-waha-key-local"
+    waha_engine: str = "WEBJS"
+
+    # Chatwoot — sincronización WhatsApp vía WAHA/Evolution ↔ Chatwoot ↔ panel
     chatwoot_enabled: bool = True
     chatwoot_url: str = "http://localhost:3000"
     chatwoot_account_id: str = "1"
     chatwoot_api_token: str = ""
-    chatwoot_days_limit_import_messages: int = 30
+    chatwoot_days_limit_import_messages: int = 3
+    chatwoot_inbox_messages_per_chat: int = 15
+    chatwoot_inbox_max_chats_per_sync: int = 12
     chatwoot_webhook_secret: str = "dev-chatwoot-webhook-local"
 
     def chatwoot_base_url(self) -> str:
@@ -88,6 +96,12 @@ class Settings(BaseSettings):
         if self.evolution_in_docker:
             return url.replace("://localhost", "://chatwoot").replace("://127.0.0.1", "://chatwoot")
         return url
+
+    def chatwoot_internal_url(self) -> str:
+        """URL que WAHA en Docker usa para llegar a Chatwoot."""
+        return self.chatwoot_url.rstrip("/").replace("://localhost", "://chatwoot").replace(
+            "://127.0.0.1", "://chatwoot"
+        )
 
     def chatwoot_webhook_url(self) -> str:
         return f"{self.evolution_webhook_base_url()}/webhooks/chatwoot"
@@ -107,6 +121,25 @@ class Settings(BaseSettings):
                 .replace("://127.0.0.1", "://host.docker.internal")
             )
         return base
+
+    @field_validator("chatwoot_days_limit_import_messages")
+    @classmethod
+    def _cap_chatwoot_history_days(cls, value: int) -> int:
+        """Evolution importa historial en bloque — >7 días satura Node/Postgres."""
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return 3
+        return max(1, min(n, 7))
+
+    @field_validator("chatwoot_inbox_messages_per_chat", "chatwoot_inbox_max_chats_per_sync")
+    @classmethod
+    def _cap_chatwoot_inbox_batch(cls, value: int) -> int:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return 15
+        return max(5, min(n, 50))
 
     @field_validator("deepseek_chat_model", "deepseek_classifier_model")
     @classmethod

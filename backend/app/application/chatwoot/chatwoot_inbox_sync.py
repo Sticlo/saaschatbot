@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -44,57 +45,29 @@ def _contact_from_conversation(cw_conv: dict) -> tuple[str, str]:
     return phone, name
 
 
-def _find_conversation_candidates(
+def _find_conversation_for_chatwoot(
     db: Session,
     *,
     tenant: Tenant,
     session: WhatsAppSession,
     cw_id: int,
     phone: str,
-    name: str,
-) -> list[Conversation]:
-    from app.shared.core.phone import is_placeholder_contact_name
-
+) -> Optional[Conversation]:
+    """Un chat de Chatwoot = una conversación (por chatwoot_conversation_id o teléfono exacto)."""
     if session.active_connection_id is None:
-        return []
+        return None
 
     base = db.query(Conversation).filter(
         Conversation.tenant_id == tenant.id,
         Conversation.whatsapp_connection_id == session.active_connection_id,
     )
-    found: dict[UUID, Conversation] = {}
-
-    def _add(conv: Optional[Conversation]) -> None:
-        if conv is not None:
-            found[conv.id] = conv
-
-    _add(
-        base.filter(Conversation.chatwoot_conversation_id == cw_id).first()
-    )
+    by_cw = base.filter(Conversation.chatwoot_conversation_id == cw_id).first()
+    if by_cw is not None:
+        return by_cw
     if phone and is_valid_whatsapp_phone(phone):
         norm = normalize_phone(phone)
-        _add(base.filter(Conversation.contact_phone == norm).first())
-        _add(base.filter(Conversation.contact_phone == phone).first())
-
-    clean_name = str(name or "").strip()
-    if clean_name and not is_placeholder_contact_name(clean_name, phone):
-        for conv in base.filter(Conversation.contact_name.ilike(clean_name)).limit(6):
-            _add(conv)
-
-    if phone and is_valid_whatsapp_phone(phone):
-        from app.application.conversations.contact_resolver_service import _collect_candidates
-
-        for conv in _collect_candidates(
-            db,
-            tenant_id=tenant.id,
-            whatsapp_connection_id=session.active_connection_id,
-            phone=normalize_phone(phone),
-            lid_jid="",
-            instance_name=session.instance_name,
-        ):
-            _add(conv)
-
-    return list(found.values())
+        return base.filter(Conversation.contact_phone == norm).first()
+    return None
 
 
 def _upsert_conversation_from_chatwoot(
@@ -115,26 +88,14 @@ def _upsert_conversation_from_chatwoot(
     if not phone:
         return None
 
-    candidates = _find_conversation_candidates(
+    conv = _find_conversation_for_chatwoot(
         db,
         tenant=tenant,
         session=session,
         cw_id=cw_id,
         phone=phone,
-        name=name,
     )
-    conv: Optional[Conversation] = None
-    if len(candidates) > 1:
-        from app.application.conversations.contact_resolver_service import _merge_to_canonical
-
-        conv = _merge_to_canonical(
-            db,
-            tenant_id=tenant.id,
-            candidates=candidates,
-        )
-    elif len(candidates) == 1:
-        conv = candidates[0]
-    else:
+    if conv is None:
         conv = Conversation(
             tenant_id=tenant.id,
             contact_phone=phone,
@@ -214,6 +175,12 @@ def _import_messages(
     return imported
 
 
+def _trim_messages(msgs: list, *, limit: int) -> list:
+    if limit <= 0 or len(msgs) <= limit:
+        return msgs
+    return msgs[-limit:]
+
+
 def sync_chatwoot_conversation(
     db: Session,
     *,
@@ -242,7 +209,10 @@ def sync_chatwoot_conversation(
     if isinstance(messages_payload, dict):
         msgs = messages_payload.get("payload") or []
 
-    imported = _import_messages(db, tenant=tenant, conv=conv, cw_messages=msgs)
+    msg_limit = settings.chatwoot_inbox_messages_per_chat
+    imported = _import_messages(
+        db, tenant=tenant, conv=conv, cw_messages=_trim_messages(msgs, limit=msg_limit)
+    )
     if imported:
         publish_conversation_updated(tenant.id, conv)
     return imported
@@ -253,13 +223,17 @@ def sync_chatwoot_inbox(
     *,
     tenant: Tenant,
     session: WhatsAppSession,
-    message_limit: int = 30,
+    message_limit: Optional[int] = None,
+    max_chats: Optional[int] = None,
 ) -> dict:
-    """Sincroniza inbox completo desde Chatwoot (igual que la vista de Chatwoot)."""
+    """Sincroniza inbox desde Chatwoot en lotes pequeños (evita saturar Evolution/Node)."""
     meta = (session.metadata_json or {}).get("chatwoot") or {}
     inbox_id = meta.get("inbox_id")
     if not inbox_id:
         return {"conversations": 0, "messages": 0}
+
+    per_chat = message_limit if message_limit is not None else settings.chatwoot_inbox_messages_per_chat
+    chat_cap = max_chats if max_chats is not None else settings.chatwoot_inbox_max_chats_per_sync
 
     try:
         conversations = chatwoot_client.list_inbox_conversations(int(inbox_id))
@@ -269,7 +243,7 @@ def sync_chatwoot_inbox(
 
     conv_count = 0
     msg_count = 0
-    for cw_conv in conversations:
+    for cw_conv in conversations[:chat_cap]:
         if not isinstance(cw_conv, dict):
             continue
         conv = _upsert_conversation_from_chatwoot(
@@ -280,12 +254,34 @@ def sync_chatwoot_inbox(
         conv_count += 1
         try:
             cw_id = int(cw_conv.get("id"))
-            raw_msgs = chatwoot_client.list_messages(cw_id, limit=message_limit)
+            raw_msgs = chatwoot_client.list_messages(cw_id, limit=per_chat)
             msgs = raw_msgs if isinstance(raw_msgs, list) else (raw_msgs.get("payload") or [])
-            msg_count += _import_messages(db, tenant=tenant, conv=conv, cw_messages=msgs)
+            msg_count += _import_messages(
+                db,
+                tenant=tenant,
+                conv=conv,
+                cw_messages=_trim_messages(msgs, limit=per_chat),
+            )
         except (ChatwootAPIError, TypeError, ValueError):
             continue
+        if conv_count % 4 == 0:
+            time.sleep(0.25)
 
     if conv_count:
         db.commit()
+        try:
+            from app.application.realtime.realtime_service import publish_panel_event
+
+            publish_panel_event(
+                tenant.id,
+                {
+                    "type": "sync.completed",
+                    "status": "completed",
+                    "source": "chatwoot",
+                    "conversations_imported": conv_count,
+                    "messages_imported": msg_count,
+                },
+            )
+        except Exception:
+            pass
     return {"conversations": conv_count, "messages": msg_count}

@@ -59,9 +59,16 @@ def serialize_conversation(
     display_name_override: str | None = None,
     last_message_preview: str = "",
 ) -> dict:
+    from app.shared.core.phone import is_placeholder_contact_name
+
     jid = getattr(conversation, "contact_jid", None) or ""
-    resolved_name = display_name_override
-    if not resolved_name:
+    if not is_placeholder_contact_name(
+        conversation.contact_name, conversation.contact_phone
+    ):
+        resolved_name = str(conversation.contact_name or "").strip()
+    elif display_name_override:
+        resolved_name = display_name_override
+    else:
         resolved_name = resolve_display_name(
             conversation.contact_name,
             conversation.contact_phone,

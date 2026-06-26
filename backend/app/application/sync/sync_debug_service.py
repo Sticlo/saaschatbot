@@ -14,6 +14,11 @@ from app.application.sync.webhook_trace_service import last_webhook_at, list_web
 from app.application.workers.queue_service import INBOUND_WEBHOOK_QUEUE, webhook_worker_is_alive
 from app.application.sync.live_pull_scheduler import live_pull_scheduler_is_alive
 from app.infrastructure.cache.redis_client import get_redis
+from app.application.chatwoot.chatwoot_service import (
+    chatwoot_sync_mode,
+    chatwoot_sync_ready,
+    chatwoot_token_configured,
+)
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.infrastructure.evolution.evolution_store import fetch_stored_counts
 
@@ -172,6 +177,18 @@ def build_sync_debug_report(
         tenant_id=tenant.id,
         connection_id=session.active_connection_id,
     )
+
+    if settings.chatwoot_enabled and not chatwoot_token_configured():
+        hints.append(
+            "CHATWOOT_ENABLED sin CHATWOOT_API_TOKEN — usando Evolution como fallback. "
+            "Configure CHATWOOT_API_TOKEN para sync vía Chatwoot."
+        )
+    elif chatwoot_sync_mode() and session and not chatwoot_sync_ready(session):
+        hints.append(
+            "Modo Chatwoot activo pero sin inbox — escanea QR de nuevo o revisa Chatwoot en :3000."
+        )
+    elif chatwoot_sync_mode():
+        hints.append("Modo Chatwoot: chats/mensajes vienen de Chatwoot (no sync Evolution custom).")
 
     timing_ms["total"] = _ms(started)
 

@@ -12,7 +12,7 @@ fi
 
 if command -v docker >/dev/null 2>&1; then
   docker compose -f "$ROOT/deploy/docker-compose.yml" up -d
-  echo "→ Postgres + Redis + Evolution levantados"
+  echo "→ Postgres + Redis + Chatwoot + WAHA levantados (Evolution opcional: --profile evolution)"
 else
   echo "⚠ Docker no encontrado. Asegúrate de tener Postgres y Redis corriendo."
   echo "  brew services start postgresql@16 redis"

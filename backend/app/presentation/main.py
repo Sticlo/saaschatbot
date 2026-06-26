@@ -33,7 +33,11 @@ PANEL_DIR = _resolve_panel_dir()
 
 
 def _ensure_webhooks_for_connected_sessions() -> None:
-    """Re-registra webhook Evolution al arrancar (Docker debe alcanzar host.docker.internal)."""
+    """Re-registra webhook Evolution al arrancar (omitido con WAHA)."""
+    from app.application.whatsapp.whatsapp_gateway import uses_waha
+
+    if uses_waha():
+        return
     try:
         from app.domain.entities import Tenant, WhatsAppSession
         from app.domain.entities.enums import WhatsAppStatus
@@ -73,16 +77,19 @@ async def lifespan(app: FastAPI):
             start_live_pull_scheduler,
             stop_live_pull_scheduler,
         )
+        from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
         start_webhook_worker()
         start_outbound_worker()
         start_ai_worker()
         start_sync_worker()
-        start_live_pull_scheduler()
+        if not chatwoot_sync_mode():
+            start_live_pull_scheduler()
         recover_pending_ai_replies()
         _ensure_webhooks_for_connected_sessions()
         yield
-        stop_live_pull_scheduler()
+        if not chatwoot_sync_mode():
+            stop_live_pull_scheduler()
         stop_ai_worker()
         stop_outbound_worker()
         stop_webhook_worker()
@@ -93,12 +100,16 @@ async def lifespan(app: FastAPI):
             stop_live_pull_scheduler,
         )
 
+        from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
         if settings.app_env.lower() in ("development", "dev", "local"):
-            start_live_pull_scheduler()
+            if not chatwoot_sync_mode():
+                start_live_pull_scheduler()
             _ensure_webhooks_for_connected_sessions()
         yield
         if settings.app_env.lower() in ("development", "dev", "local"):
-            stop_live_pull_scheduler()
+            if not chatwoot_sync_mode():
+                stop_live_pull_scheduler()
 
     try:
         get_redis().close()

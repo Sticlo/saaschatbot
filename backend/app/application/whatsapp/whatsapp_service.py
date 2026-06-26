@@ -28,9 +28,26 @@ from app.domain.entities import (
     WhatsAppStatus,
 )
 from app.application.realtime.realtime_service import publish_message_event
-from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
-from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
+from app.application.whatsapp.whatsapp_gateway import (
+    WhatsAppGatewayError,
+    connect_instance as gateway_connect,
+    connection_state as gateway_connection_state,
+    create_instance as gateway_create_instance,
+    delete_instance as gateway_delete_instance,
+    ensure_realtime_settings as gateway_ensure_realtime,
+    ensure_webhook as gateway_ensure_webhook,
+    fetch_instance as gateway_fetch_instance,
+    gateway_request,
+    instance_exists as gateway_instance_exists,
+    logout_instance as gateway_logout_instance,
+    refresh_qr as gateway_refresh_qr,
+    send_text as gateway_send_text,
+    uses_waha,
+)
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
+
+# Alias para compatibilidad con handlers que capturan EvolutionAPIError
+EvolutionAPIError = WhatsAppGatewayError
 
 log = logging.getLogger(__name__)
 
@@ -64,13 +81,15 @@ def ensure_evolution_webhook(
     *,
     force: bool = False,
 ) -> None:
-    """Re-registra webhook con URL alcanzable desde Evolution (nativo o Docker)."""
+    """Re-registra webhook con URL alcanzable desde Evolution (omitido con WAHA)."""
+    if uses_waha():
+        return
     from app.infrastructure.cache.redis_client import get_redis
 
     webhook_url = _webhook_url(tenant_id)
     if not force:
         try:
-            found = evolution_client._request(
+            found = gateway_request(
                 "GET",
                 f"/webhook/find/{session.instance_name}",
                 timeout=8.0,
@@ -80,14 +99,14 @@ def ensure_evolution_webhook(
                 expected = webhook_url.rstrip("/")
                 if stored == expected and found.get("enabled"):
                     return
-        except EvolutionAPIError:
+        except WhatsAppGatewayError:
             pass
 
     key = f"webhook:ensure:{tenant_id}"
     if not force and not get_redis().set(key, "1", nx=True, ex=120):
         return
     try:
-        evolution_client.ensure_webhook(
+        gateway_ensure_webhook(
             session.instance_name,
             webhook_url,
             settings.evolution_webhook_secret,
@@ -133,11 +152,11 @@ def _extract_qr(payload: dict) -> Optional[str]:
 
 
 def _instance_needs_clean_qr(meta: Optional[dict]) -> bool:
-    """Sesión vieja o logout de WhatsApp — el QR falla en el celular si no se limpia."""
+    """Sesión vieja o logout — el QR falla en el celular si no se limpia."""
     if not meta:
         return False
-    status = str(meta.get("connectionStatus") or "").lower()
-    if status in {"close", "closed", "disconnected"}:
+    status = str(meta.get("connectionStatus") or meta.get("status") or "").lower()
+    if status in {"close", "closed", "disconnected", "failed", "stopped"}:
         return True
     if meta.get("disconnectionReasonCode") in (401, 403, 428):
         return True
@@ -159,41 +178,43 @@ def _prepare_instance_for_new_qr(
 
     meta = None
     try:
-        meta = evolution_client.fetch_instance(session.instance_name)
-    except EvolutionAPIError:
+        meta = gateway_fetch_instance(session.instance_name)
+    except WhatsAppGatewayError:
         pass
 
     if not _instance_needs_clean_qr(meta):
         return
 
     log.info(
-        "Limpiando sesión Evolution instancia=%s (vincular celular nuevo)",
+        "Limpiando sesión WhatsApp instancia=%s (vincular celular nuevo)",
         session.instance_name,
     )
     try:
-        evolution_client.logout_instance(session.instance_name)
-    except EvolutionAPIError as exc:
+        gateway_logout_instance(session.instance_name)
+    except WhatsAppGatewayError as exc:
         log.warning("logout antes de QR %s: %s", session.instance_name, exc)
 
     try:
-        meta_after = evolution_client.fetch_instance(session.instance_name)
-    except EvolutionAPIError:
+        meta_after = gateway_fetch_instance(session.instance_name)
+    except WhatsAppGatewayError:
         meta_after = None
 
     if _instance_needs_clean_qr(meta_after):
         try:
-            evolution_client.delete_instance(session.instance_name)
-            if settings.evolution_database_url:
+            gateway_delete_instance(session.instance_name)
+            if settings.evolution_database_url and not uses_waha():
+                from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
                 purge_instance_stored_data(
                     settings.evolution_database_url, session.instance_name
                 )
-            evolution_client.create_instance(
+            gateway_create_instance(
                 session.instance_name,
                 webhook_url,
                 webhook_secret,
             )
             log.info("Instancia %s recreada para QR limpio", session.instance_name)
-        except EvolutionAPIError as exc:
+        except WhatsAppGatewayError as exc:
             log.warning("delete/recreate %s: %s", session.instance_name, exc)
 
     session.phone_number = None
@@ -215,31 +236,30 @@ def reconnect_session(db: Session, tenant: Tenant) -> WhatsAppSession:
 
 def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
     session = get_or_create_session(db, tenant)
-    client = evolution_client
 
     try:
-        if not client.instance_exists(session.instance_name):
+        if not gateway_instance_exists(session.instance_name):
             try:
-                client.create_instance(
+                gateway_create_instance(
                     session.instance_name,
                     _webhook_url(tenant.id),
                     settings.evolution_webhook_secret,
                 )
-            except EvolutionAPIError as exc:
+            except WhatsAppGatewayError as exc:
                 if exc.status_code not in (400, 403, 409):
                     raise
-                log.info("Instancia %s ya existe en Evolution, reconectando", session.instance_name)
+                log.info("Instancia %s ya existe, reconectando", session.instance_name)
         else:
             try:
-                client.ensure_webhook(
+                gateway_ensure_webhook(
                     session.instance_name,
                     _webhook_url(tenant.id),
                     settings.evolution_webhook_secret,
                 )
-            except EvolutionAPIError as exc:
+            except WhatsAppGatewayError as exc:
                 log.warning("No se pudo actualizar webhook: %s", exc)
         try:
-            client.ensure_realtime_settings(session.instance_name)
+            gateway_ensure_realtime(session.instance_name)
         except Exception:
             pass
         _prepare_instance_for_new_qr(
@@ -248,10 +268,10 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
             webhook_url=_webhook_url(tenant.id),
             webhook_secret=settings.evolution_webhook_secret,
         )
-    except EvolutionAPIError:
+    except WhatsAppGatewayError:
         raise
 
-    connect_data = client.connect_instance(session.instance_name)
+    connect_data = gateway_connect(session.instance_name)
     qr = _extract_qr(connect_data if isinstance(connect_data, dict) else {})
     if not qr and isinstance(connect_data, dict):
         qr = _extract_qr(connect_data.get("qrcode", {}))
@@ -300,8 +320,8 @@ def refresh_session_status(
     bound_before = session.bound_owner_jid
     binding_reset = False
     try:
-        state_payload = evolution_client.connection_state(session.instance_name)
-    except EvolutionAPIError:
+        state_payload = gateway_connection_state(session.instance_name)
+    except WhatsAppGatewayError:
         session.status = WhatsAppStatus.DISCONNECTED.value
         tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
         db.flush()
@@ -327,17 +347,26 @@ def refresh_session_status(
         owner = owner or state_payload.get("owner") or state_payload.get("wuid")
 
     try:
-        instance_meta = evolution_client.fetch_instance(session.instance_name)
-    except EvolutionAPIError:
+        instance_meta = gateway_fetch_instance(session.instance_name)
+    except WhatsAppGatewayError:
         instance_meta = None
 
     if instance_meta:
-        meta_status = str(instance_meta.get("connectionStatus") or "").lower()
-        if meta_status == "open":
+        meta_status = str(
+            instance_meta.get("connectionStatus") or instance_meta.get("status") or ""
+        ).lower()
+        if meta_status in {"open", "working"}:
             state = "open"
-        elif meta_status in {"close", "closed", "disconnected"}:
+        elif meta_status in {"close", "closed", "disconnected", "failed", "stopped"}:
             state = "close"
+        elif meta_status == "scan_qr_code":
+            state = "connecting"
         owner = owner or instance_meta.get("ownerJid") or instance_meta.get("owner")
+        if uses_waha() and state == "connecting":
+            qr = gateway_refresh_qr(session.instance_name)
+            if qr:
+                session.qr_base64 = qr
+                session.qr_updated_at = datetime.now(timezone.utc)
 
     mapped = resolve_whatsapp_status(str(state), state_payload if isinstance(state_payload, dict) else {})
     from app.application.conversations.whatsapp_conversation_service import (
@@ -391,7 +420,9 @@ def refresh_session_status(
         )
 
         purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
-        if settings.evolution_database_url:
+        if settings.evolution_database_url and not uses_waha():
+            from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
             purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
         session.active_connection_id = None
         session.connection_started_at = None
@@ -423,8 +454,6 @@ def refresh_session_status(
 
 
 def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) -> None:
-    from app.config import settings
-    from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
     from app.application.conversations.whatsapp_conversation_service import (
         notify_conversations_cleared,
         purge_all_tenant_whatsapp_conversations,
@@ -434,7 +463,9 @@ def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) ->
     clear_tenant_sync_state(tenant.id)
 
     purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
-    if settings.evolution_database_url:
+    if settings.evolution_database_url and not uses_waha():
+        from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
         purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
     session.active_connection_id = None
     session.connection_started_at = None
@@ -442,9 +473,9 @@ def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) ->
     notify_conversations_cleared(tenant.id)
 
     try:
-        evolution_client.logout_instance(session.instance_name)
-    except EvolutionAPIError as exc:
-        log.warning("Evolution logout failed for %s: %s", session.instance_name, exc)
+        gateway_logout_instance(session.instance_name)
+    except WhatsAppGatewayError as exc:
+        log.warning("WhatsApp logout failed for %s: %s", session.instance_name, exc)
 
     session.status = WhatsAppStatus.DISCONNECTED.value
     session.qr_base64 = None
@@ -473,31 +504,67 @@ def send_text_message(
         )
 
     recipient = evolution_send_target(conversation)
-    if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
-        alt_phone = fetch_lid_alt_phone(
-            settings.evolution_database_url,
-            session.instance_name,
-            conversation.contact_jid,
-        )
-        if alt_phone and is_valid_whatsapp_phone(alt_phone):
-            recipient = phone_to_evolution_number(alt_phone)
-            from app.application.sync.contact_identity_service import apply_identity_to_conversation
+    if not uses_waha():
+        from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
 
-            apply_identity_to_conversation(
-                conversation,
-                contact_phone=normalize_phone(alt_phone),
-                contact_name=conversation.contact_name,
-                contact_jid=conversation.contact_jid,
+        alt_phone = ""
+        if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
+            alt_phone = fetch_lid_alt_phone(
+                settings.evolution_database_url,
+                session.instance_name,
+                conversation.contact_jid,
             )
+            if not alt_phone and session.active_connection_id:
+                from app.application.conversations.contact_resolver_service import _load_link_maps
 
-    result = evolution_client.send_text(session.instance_name, recipient, text)
+                _lid_map, _ = _load_link_maps(
+                    db,
+                    tenant_id=tenant.id,
+                    whatsapp_connection_id=session.active_connection_id,
+                )
+                alt_phone = _lid_map.get(conversation.contact_jid) or ""
+            if alt_phone and is_valid_whatsapp_phone(alt_phone):
+                recipient = phone_to_evolution_number(alt_phone)
+                from app.application.sync.contact_identity_service import apply_identity_to_conversation
+                from app.application.conversations.contact_resolver_service import (
+                    record_contact_link,
+                    repair_duplicates_for_contact,
+                )
+
+                record_contact_link(
+                    db,
+                    tenant_id=tenant.id,
+                    whatsapp_connection_id=session.active_connection_id,
+                    lid_jid=conversation.contact_jid,
+                    phone_e164=normalize_phone(alt_phone),
+                    verified=True,
+                )
+                apply_identity_to_conversation(
+                    conversation,
+                    contact_phone=normalize_phone(alt_phone),
+                    contact_name=conversation.contact_name,
+                    contact_jid=conversation.contact_jid,
+                )
+                if session.active_connection_id:
+                    canonical = repair_duplicates_for_contact(
+                        db,
+                        tenant_id=tenant.id,
+                        whatsapp_connection_id=session.active_connection_id,
+                        phone=normalize_phone(alt_phone),
+                        lid_jid=conversation.contact_jid,
+                        instance_name=session.instance_name,
+                    )
+                    if canonical is not None and canonical.id != conversation.id:
+                        conversation = canonical
+
+    result = gateway_send_text(session.instance_name, recipient, text)
 
     evolution_id = None
     if isinstance(result, dict):
         evolution_id = (
             result.get("key", {}).get("id")
             if isinstance(result.get("key"), dict)
-            else result.get("messageId")
+            else result.get("messageId") or result.get("id")
         )
 
     message = Message(

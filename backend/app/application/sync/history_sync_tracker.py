@@ -147,15 +147,25 @@ def finalize_history_sync(tenant_id: uuid.UUID, *, reason: str) -> None:
 
     try:
         from app.application.sync.sync_scheduler import schedule_whatsapp_sync
+        from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
-        schedule_whatsapp_sync(
-            tenant_id,
-            wait_for_history=False,
-            import_agenda=False,
-            silent=True,
-            debounce=True,
-            delay_seconds=2,
-        )
+        if chatwoot_sync_mode():
+            schedule_whatsapp_sync(
+                tenant_id,
+                wait_for_history=False,
+                silent=True,
+                debounce=True,
+                delay_seconds=2,
+            )
+        else:
+            schedule_whatsapp_sync(
+                tenant_id,
+                wait_for_history=False,
+                import_agenda=False,
+                silent=True,
+                debounce=True,
+                delay_seconds=2,
+            )
     except Exception:
         pass
 

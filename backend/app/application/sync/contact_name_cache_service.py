@@ -46,6 +46,17 @@ def extract_name_from_record(record: dict) -> str:
     if not isinstance(record, dict):
         return ""
     last_msg = record.get("lastMessage") if isinstance(record.get("lastMessage"), dict) else {}
+    jid = str(record.get("remoteJid") or record.get("id") or "")
+    if jid.endswith("@s.whatsapp.net"):
+        # Teléfono conocido: agenda del celular manda.
+        return str(
+            record.get("name")
+            or record.get("notify")
+            or record.get("verifiedName")
+            or record.get("pushName")
+            or last_msg.get("pushName")
+            or ""
+        ).strip()
     return str(
         record.get("pushName")
         or record.get("verifiedName")
@@ -89,7 +100,20 @@ def remember_contact_name(
         get_redis().expire(key, _CACHE_TTL)
         phone_val = jid_to_phone(jid) if jid.endswith("@s.whatsapp.net") else phone
         if phone_val:
-            get_redis().hset(key, f"phone:{phone_val}", cleaned)
+            from app.shared.core.phone import is_valid_whatsapp_phone, normalize_phone
+
+            norm = normalize_phone(phone_val) if is_valid_whatsapp_phone(phone_val) else phone_val
+            phone_key = f"phone:{norm}"
+            if jid.endswith("@lid"):
+                # No propagar pushName de @lid al teléfono: contamina otros chats (Ana vs Diana).
+                pass
+            elif jid.endswith("@s.whatsapp.net"):
+                raw = get_redis().hget(key, phone_key)
+                current = (
+                    raw.decode() if isinstance(raw, bytes) else str(raw or "")
+                ).strip()
+                if not current or cleaned.lower() == current.lower():
+                    get_redis().hset(key, phone_key, cleaned)
         return True
     except Exception as exc:
         log.debug("remember_contact_name %s: %s", jid, exc)

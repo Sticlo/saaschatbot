@@ -125,6 +125,19 @@ def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str
     return "Chat"
 
 
+def _normalize_person_name(name: str) -> str:
+    return re.sub(r"[^\w\s]", "", (name or "").strip().lower())
+
+
+def names_likely_same_person(a: str, b: str) -> bool:
+    """Solo coincidencia exacta (sin subcadenas: 'ana' ⊂ 'diana' causaba merges cruzados)."""
+    na = _normalize_person_name(a)
+    nb = _normalize_person_name(b)
+    if not na or not nb:
+        return False
+    return na == nb
+
+
 def is_owner_jid(
     remote_jid: str,
     *,
@@ -149,6 +162,25 @@ def is_owner_display_name(name: str, owner_names: set[str]) -> bool:
     if not cleaned:
         return False
     return cleaned in {n.strip().lower() for n in owner_names if n and n.strip()}
+
+
+def pair_lid_phone_from_message_key(key: Optional[dict]) -> tuple[str, str]:
+    """Enlace @lid↔teléfono solo si WhatsApp los envía juntos en el mismo message key."""
+    if not key or not isinstance(key, dict):
+        return "", ""
+    lid = ""
+    phone = ""
+    for field in ("remoteJid", "remoteJidAlt"):
+        val = str(key.get(field) or "").strip()
+        if val.endswith("@lid"):
+            lid = val
+        elif val.endswith("@s.whatsapp.net"):
+            candidate = jid_to_phone(val)
+            if is_valid_whatsapp_phone(candidate):
+                phone = normalize_phone(candidate)
+    if lid and phone:
+        return lid, phone
+    return "", ""
 
 
 def phone_match_tail(a: str, b: str, tail_len: int = 10) -> bool:
