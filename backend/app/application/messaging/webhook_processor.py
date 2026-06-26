@@ -19,6 +19,31 @@ from app.application.workers.queue_service import build_dedup_id, is_duplicate_w
 log = logging.getLogger(__name__)
 
 
+def _commit_and_publish_message(
+    db,
+    *,
+    tenant: Tenant,
+    message,
+    event_type: str,
+) -> None:
+    """Confirma en BD y luego emite evento realtime (orden WhatsApp Web)."""
+    from app.domain.entities import Conversation
+    from app.application.realtime.realtime_service import (
+        publish_conversation_updated,
+        publish_message_event,
+    )
+
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == message.conversation_id)
+        .first()
+    )
+    db.commit()
+    if conv is not None:
+        publish_message_event(tenant, conv, message, event_type=event_type)
+        publish_conversation_updated(tenant.id, conv)
+
+
 def _payload_instance(payload: dict) -> str:
     return str(
         payload.get("instance")
@@ -106,33 +131,58 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 mimetype=item.get("mimetype") or "",
                             )
 
-                    if item.get("from_me"):
-                        save_outbound_from_phone(
-                            db,
-                            tenant=tenant,
-                            evolution_message_id=item["message_id"],
-                            remote_jid=item["remote_jid"],
-                            body=item["body"],
-                            message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
-                            lid_jid=item.get("lid_jid") or "",
-                            whatsapp_connection_id=connection_id,
-                            instance_name=session.instance_name,
-                        )
-                    else:
-                        msg = save_inbound_message(
-                            db,
-                            tenant=tenant,
-                            evolution_message_id=item["message_id"],
-                            remote_jid=item["remote_jid"],
-                            body=item["body"],
-                            push_name=item.get("push_name") or "",
-                            message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
-                            lid_jid=item.get("lid_jid") or "",
-                            whatsapp_connection_id=connection_id,
-                            instance_name=session.instance_name,
-                        )
+                    try:
+                        if item.get("from_me"):
+                            msg = save_outbound_from_phone(
+                                db,
+                                tenant=tenant,
+                                evolution_message_id=item["message_id"],
+                                remote_jid=item["remote_jid"],
+                                body=item["body"],
+                                message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
+                                lid_jid=item.get("lid_jid") or "",
+                                whatsapp_connection_id=connection_id,
+                                instance_name=session.instance_name,
+                                publish=False,
+                            )
+                            event_type = "message.out"
+                        else:
+                            msg = save_inbound_message(
+                                db,
+                                tenant=tenant,
+                                evolution_message_id=item["message_id"],
+                                remote_jid=item["remote_jid"],
+                                body=item["body"],
+                                push_name=item.get("push_name") or "",
+                                message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
+                                lid_jid=item.get("lid_jid") or "",
+                                whatsapp_connection_id=connection_id,
+                                instance_name=session.instance_name,
+                                publish=False,
+                            )
+                            event_type = "message.in"
+
                         if msg is not None:
-                            pending_ai_jobs.append((tenant.id, msg.conversation_id, msg.id))
+                            _commit_and_publish_message(
+                                db,
+                                tenant=tenant,
+                                message=msg,
+                                event_type=event_type,
+                            )
+                            if event_type == "message.in":
+                                pending_ai_jobs.append((tenant.id, msg.conversation_id, msg.id))
+                    except Exception:
+                        log.exception(
+                            "Error guardando mensaje tenant=%s id=%s",
+                            tenant_id,
+                            msg_id,
+                        )
+                        db.rollback()
+            if pending_ai_jobs:
+                from app.application.ai.ai_queue_service import flush_pending_ai_replies
+
+                flush_pending_ai_replies(pending_ai_jobs)
+            return
         elif event in ("messages.set",):
             # Historial masivo lo importa el sync automático; evita duplicados con messages.upsert.
             from app.application.sync.sync_scheduler import schedule_whatsapp_sync

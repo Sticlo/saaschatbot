@@ -772,3 +772,49 @@ textarea { resize: vertical; min-height: 44px; }
   gap: 0.5rem;
   margin-top: 0.75rem;
 }
+
+.sync-status {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: var(--surface-2, #1e2a2e);
+  color: var(--muted, #8a9aa3);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-status.ok {
+  color: #6ee7b7;
+}
+
+.sync-status.warn {
+  color: #fcd34d;
+}
+
+.sync-status.err {
+  color: #f87171;
+}
+
+.debug-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.debug-tab {
+  border: 1px solid var(--border, #2a3a40);
+  background: transparent;
+  color: var(--muted, #8a9aa3);
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.debug-tab.active {
+  background: var(--accent, #0d9488);
+  color: #fff;
+  border-color: var(--accent, #0d9488);
+}

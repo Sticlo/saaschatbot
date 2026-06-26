@@ -154,7 +154,7 @@ def _nudge_history_sync(instance_name: str, *, tenant_id) -> dict[str, int]:
     """Activa webhook de historial, syncFullHistory y reinicia Evolution."""
     from app.config import settings
 
-    webhook_url = f"{settings.app_public_url.rstrip('/')}/webhooks/evolution/{tenant_id}"
+    webhook_url = f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
     dsn = settings.evolution_database_url
     baseline = fetch_stored_counts(dsn, instance_name)
 

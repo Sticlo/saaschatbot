@@ -197,3 +197,19 @@ def test_connect_whatsapp_returns_qr(mock_evo, client: TestClient):
     body = response.json()
     assert body["status"] == "connecting"
     assert body["qr_base64"] is not None
+
+
+def test_evolution_webhook_base_url_rewrites_localhost_for_docker():
+    from app.config import Settings
+
+    s = Settings(
+        app_public_url="http://localhost:8000",
+        evolution_api_url="http://localhost:8080",
+    )
+    assert s.evolution_webhook_base_url() == "http://host.docker.internal:8000"
+
+    s2 = Settings(
+        app_public_url="https://api.midominio.com",
+        evolution_api_url="http://localhost:8080",
+    )
+    assert s2.evolution_webhook_base_url() == "https://api.midominio.com"

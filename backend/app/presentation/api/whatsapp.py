@@ -14,6 +14,7 @@ from app.presentation.schemas.whatsapp import (
     WhatsAppChatsDebugResponse,
     WhatsAppConnectResponse,
     WhatsAppStatusResponse,
+    WhatsAppSyncDebugResponse,
     WhatsAppSyncResponse,
 )
 from app.application.sync.sync_scheduler import (
@@ -146,6 +147,11 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
     if refresh and refresh.should_sync:
         ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
+    if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
+        from app.application.whatsapp.whatsapp_service import ensure_evolution_webhook
+
+        ensure_evolution_webhook(session, tenant.id)
+
     return _session_response(session)
 
 
@@ -218,6 +224,27 @@ def debug_whatsapp_chats(
         sample_limit=max(5, min(sample_limit, 50)),
     )
     return WhatsAppChatsDebugResponse.model_validate(report)
+
+
+@router.get("/debug/sync", response_model=WhatsAppSyncDebugResponse)
+def debug_whatsapp_sync(
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    """Diagnóstico de sincronización en tiempo real (webhooks, cola, mensajes)."""
+    from app.application.sync.sync_debug_service import build_sync_debug_report
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if tenant is None or session is None:
+        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
+
+    report = build_sync_debug_report(db, tenant=tenant, session=session)
+    return WhatsAppSyncDebugResponse.model_validate(report)
 
 
 @router.post("/enrich-contacts", response_model=WhatsAppSyncResponse)

@@ -72,6 +72,19 @@ class Settings(BaseSettings):
     app_public_url: str = "http://host.docker.internal:8000"
     evolution_webhook_secret: str = "change-me-webhook-secret"
 
+    def evolution_webhook_base_url(self) -> str:
+        """URL que Evolution (en Docker) puede alcanzar para enviar webhooks."""
+        base = self.app_public_url.rstrip("/")
+        evo = (self.evolution_api_url or "").lower()
+        if ("localhost" in base or "127.0.0.1" in base) and (
+            "localhost" in evo or "127.0.0.1" in evo
+        ):
+            return (
+                base.replace("://localhost", "://host.docker.internal")
+                .replace("://127.0.0.1", "://host.docker.internal")
+            )
+        return base
+
     @field_validator("deepseek_chat_model", "deepseek_classifier_model")
     @classmethod
     def _force_cheap_deepseek_model(cls, value: str) -> str:

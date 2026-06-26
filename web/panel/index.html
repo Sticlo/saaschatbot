@@ -37,6 +37,7 @@
         <div class="topbar-left">
           <strong id="business-name">—</strong>
           <span id="ws-status" class="badge offline">Sin tiempo real</span>
+          <span id="sync-status" class="sync-status" title="Estado de sincronización con el celular">Sync: —</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
           <button id="wa-connect-btn" class="btn primary small hidden">Conectar WhatsApp</button>
           <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
@@ -201,20 +202,30 @@
       <div class="modal-card debug-modal-card">
         <button id="debug-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
         <div class="debug-modal-header">
-          <h3>Debug — nombres de chats</h3>
-          <p class="muted small">Diagnóstico de importación, tiempos y por qué falta un nombre.</p>
+          <h3>Diagnóstico</h3>
+          <div class="debug-tabs">
+            <button type="button" id="debug-tab-sync" class="debug-tab active">Sync tiempo real</button>
+            <button type="button" id="debug-tab-names" class="debug-tab">Nombres</button>
+          </div>
         </div>
+        <div id="debug-sync-panel">
+          <div id="debug-sync-summary" class="debug-summary hidden"></div>
+          <div id="debug-sync-trace" class="debug-sample hidden"></div>
+        </div>
+        <div id="debug-names-panel" class="hidden">
         <div id="debug-loading" class="debug-loading hidden">
           <p class="muted">Ejecutando diagnóstico… puede tardar 10–30 s.</p>
         </div>
         <div id="debug-summary" class="debug-summary hidden"></div>
         <div id="debug-sample" class="debug-sample hidden"></div>
+        </div>
         <label class="debug-json-label">
           Reporte completo (JSON)
           <textarea id="debug-json" class="debug-json" rows="10" readonly spellcheck="false"></textarea>
         </label>
         <div class="debug-actions">
           <button type="button" id="debug-run-btn" class="btn primary small">Ejecutar diagnóstico</button>
+          <button type="button" id="debug-run-sync-btn" class="btn primary small">Diagnóstico sync</button>
           <button type="button" id="debug-copy-btn" class="btn ghost small">Copiar reporte</button>
           <button type="button" id="debug-close-btn" class="btn ghost small">Cerrar</button>
         </div>
@@ -236,6 +247,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=29"></script>
+  <script src="/static/panel/app.js?v=31"></script>
 </body>
 </html>

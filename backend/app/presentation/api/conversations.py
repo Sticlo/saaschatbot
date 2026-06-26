@@ -16,6 +16,7 @@ from app.domain.entities.enums import MessageSource
 from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 from app.presentation.schemas.whatsapp import (
     ConversationAiUpdate,
+    ConversationLiveSyncResponse,
     ConversationModeUpdate,
     ConversationResponse,
     MessageResponse,
@@ -180,6 +181,51 @@ def list_messages(
         conversation.unread_count = 0
         db.commit()
     return messages
+
+
+@router.post("/{conversation_id}/sync-live", response_model=ConversationLiveSyncResponse)
+def sync_live_conversation(
+    conversation_id: uuid.UUID,
+    current: RequireViewer,
+    db: Session = Depends(get_db),
+):
+    """Pull mensajes recientes desde Evolution para el chat abierto (fallback sin webhook)."""
+    from app.domain.entities.enums import WhatsAppStatus
+    from app.application.sync.live_sync_service import pull_live_conversation_messages
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    if tenant is None or session is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
+        raise HTTPException(status_code=409, detail="WhatsApp no conectado")
+
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == current.tenant_id,
+        )
+        .first()
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    imported, messages = pull_live_conversation_messages(
+        db,
+        tenant=tenant,
+        session=session,
+        conversation=conversation,
+    )
+    return ConversationLiveSyncResponse(
+        imported=imported,
+        message_count=len(messages),
+        messages=[MessageResponse.model_validate(m) for m in messages],
+    )
 
 
 @router.post("/{conversation_id}/messages", response_model=MessageResponse, status_code=201)

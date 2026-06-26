@@ -40,6 +40,8 @@ services:
     image: evoapicloud/evolution-api:v2.2.3
     container_name: saaschatbot_evolution
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     environment:

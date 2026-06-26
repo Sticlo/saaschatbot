@@ -387,6 +387,7 @@ def save_inbound_message(
     lid_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
     instance_name: str = "",
+    publish: bool = True,
 ) -> Optional[Message]:
     if not body.strip() or whatsapp_connection_id is None:
         return None
@@ -448,9 +449,10 @@ def save_inbound_message(
         status=MessageStatus.RECEIVED.value,
         evolution_message_id=evolution_message_id,
         increment_unread=True,
+        publish=publish,
     )
 
-    if conversation.bait_sent and not conversation.ai_active:
+    if publish and conversation.bait_sent and not conversation.ai_active:
         conversation.ai_active = True
         from app.application.realtime.realtime_service import publish_conversation_updated
 
@@ -542,6 +544,7 @@ def save_outbound_from_phone(
     lid_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
     instance_name: str = "",
+    publish: bool = True,
 ) -> Optional[Message]:
     """Sincroniza mensajes enviados desde el celular (fromMe=true)."""
     if not body.strip() or whatsapp_connection_id is None:
@@ -571,21 +574,22 @@ def save_outbound_from_phone(
             .first()
         )
         if existing:
-            from app.application.realtime.realtime_service import (
-                publish_conversation_updated,
-                publish_message_event,
-            )
-
-            conv = (
-                db.query(Conversation)
-                .filter(Conversation.id == existing.conversation_id)
-                .first()
-            )
-            if conv is not None:
-                publish_message_event(
-                    tenant, conv, existing, event_type="message.out"
+            if publish:
+                from app.application.realtime.realtime_service import (
+                    publish_conversation_updated,
+                    publish_message_event,
                 )
-                publish_conversation_updated(tenant.id, conv)
+
+                conv = (
+                    db.query(Conversation)
+                    .filter(Conversation.id == existing.conversation_id)
+                    .first()
+                )
+                if conv is not None:
+                    publish_message_event(
+                        tenant, conv, existing, event_type="message.out"
+                    )
+                    publish_conversation_updated(tenant.id, conv)
             return existing
 
     conversation, phone, contact_jid = resolve_canonical_conversation(
@@ -653,20 +657,21 @@ def save_outbound_from_phone(
         publish=False,
     )
 
-    db.refresh(message)
-    conv = (
-        db.query(Conversation)
-        .filter(Conversation.id == message.conversation_id)
-        .first()
-    )
-    if conv is not None:
-        from app.application.realtime.realtime_service import (
-            publish_conversation_updated,
-            publish_message_event,
+    if publish:
+        db.refresh(message)
+        conv = (
+            db.query(Conversation)
+            .filter(Conversation.id == message.conversation_id)
+            .first()
         )
+        if conv is not None:
+            from app.application.realtime.realtime_service import (
+                publish_conversation_updated,
+                publish_message_event,
+            )
 
-        publish_message_event(tenant, conv, message, event_type="message.out")
-        publish_conversation_updated(tenant.id, conv)
+            publish_message_event(tenant, conv, message, event_type="message.out")
+            publish_conversation_updated(tenant.id, conv)
 
     return message
 
@@ -833,13 +838,13 @@ def parse_messages_upsert(data: Any) -> list[dict]:
             if isinstance(mdata, dict) and mdata.get("mimetype"):
                 mimetype = mdata["mimetype"]
                 break
-        if phone_jid and msg_id and body:
+        if phone_jid and msg_id:
             parsed.append(
                 {
                     "remote_jid": phone_jid,
                     "lid_jid": lid_jid,
                     "message_id": str(msg_id),
-                    "body": body,
+                    "body": body or "[mensaje]",
                     "push_name": push_name,
                     "from_me": from_me,
                     "key": key,

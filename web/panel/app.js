@@ -98,11 +98,13 @@
   function resetPanelState() {
     stopWaPoll();
     stopWaHeartbeat();
+    stopLivePoll();
     state.user = null;
     state.tenant = null;
     state.conversations = [];
     state.activeId = null;
     state.messages = [];
+    state._messagesSig = "";
     state.canWrite = false;
     state.canManageGlobal = false;
     state.canConnectWa = false;
@@ -177,6 +179,104 @@
   let waPollTimer = null;
   let syncPollTimer = null;
   let waHeartbeatTimer = null;
+  let livePollTimer = null;
+  let convPollTimer = null;
+  let syncHealthTimer = null;
+
+  function updateSyncStatus(parts) {
+    const el = $("sync-status");
+    if (!el) return;
+    const ws = state.ws && state.ws.readyState === WebSocket.OPEN ? "WS✓" : "WS✗";
+    const pull = parts.pull || state._lastPull || "—";
+    const wh = parts.webhook || state._lastWebhook || "—";
+    el.textContent = `Sync: ${ws} · Pull ${pull} · WH ${wh}`;
+    el.classList.remove("ok", "warn", "err");
+    if (String(pull).startsWith("ERR") || String(wh).includes("nunca")) {
+      el.classList.add("err");
+    } else if (String(pull).includes("+") || ws === "WS✓") {
+      el.classList.add("ok");
+    } else {
+      el.classList.add("warn");
+    }
+  }
+
+  function stopLivePoll() {
+    if (livePollTimer) {
+      clearInterval(livePollTimer);
+      livePollTimer = null;
+    }
+    if (convPollTimer) {
+      clearInterval(convPollTimer);
+      convPollTimer = null;
+    }
+    if (syncHealthTimer) {
+      clearInterval(syncHealthTimer);
+      syncHealthTimer = null;
+    }
+  }
+
+  async function pullActiveChat() {
+    if (!state.activeId || state.wa.status !== "connected") return;
+    try {
+      const data = await api(`/conversations/${state.activeId}/sync-live`, { method: "POST" }, 20000);
+      const pullLabel = data.imported > 0 ? `+${data.imported}` : "ok";
+      state._lastPull = pullLabel;
+      updateSyncStatus({ pull: pullLabel });
+      const msgs = dedupeMessages(data.messages || []);
+      const sig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+      if (sig !== state._messagesSig) {
+        state._messagesSig = sig;
+        state.messages = msgs;
+        renderMessages();
+      }
+    } catch (err) {
+      state._lastPull = `ERR`;
+      updateSyncStatus({ pull: `ERR` });
+      console.warn("sync-live:", err.message);
+    }
+  }
+
+  async function refreshSyncHealth() {
+    if (!state.user || state.wa.status !== "connected") return;
+    try {
+      const report = await api("/whatsapp/debug/sync", {}, 12000);
+      const lastWh = report.webhook?.last_received_at;
+      state._lastWebhook = lastWh
+        ? new Date(lastWh).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })
+        : "nunca";
+      if (report.webhook?.url_mismatch) state._lastWebhook = "URL mal";
+      updateSyncStatus({ webhook: state._lastWebhook });
+      if (report.errors?.length) console.warn("sync debug:", report.errors);
+    } catch (err) {
+      console.warn("sync health:", err.message);
+    }
+  }
+
+  function startLivePoll() {
+    stopLivePoll();
+    updateSyncStatus({});
+    refreshSyncHealth();
+    livePollTimer = setInterval(() => {
+      if (!state.user || state.wa.status !== "connected") {
+        stopLivePoll();
+        return;
+      }
+      pullActiveChat();
+    }, 2000);
+    convPollTimer = setInterval(async () => {
+      if (!state.user || state.wa.status !== "connected") return;
+      try {
+        const rows = await fetchConversations();
+        if (rows.length) {
+          state.conversations = rows;
+          renderConversationList();
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 8000);
+    syncHealthTimer = setInterval(refreshSyncHealth, 20000);
+  }
 
   function stopWaPoll() {
     if (waPollTimer) {
@@ -315,6 +415,7 @@
     if (state.wa.status === "connected") {
       hideQrModal();
       stopWaPoll();
+      startLivePoll();
       if (phoneChanged) {
         prepareForNewDevice();
         triggerAutoSync();
@@ -334,6 +435,7 @@
     } else {
       hideQrModal();
       stopWaPoll();
+      stopLivePoll();
       state.syncInProgress = false;
       state.autoSyncRequested = false;
       clearConversations();
@@ -888,7 +990,11 @@
 
     try {
       state.messages = dedupeMessages(await api(`/conversations/${id}/messages`));
+      state._messagesSig = state.messages
+        .map((m) => m.id || `${m.body}|${m.created_at}`)
+        .join("\n");
       renderMessages();
+      if (state.wa.status === "connected") pullActiveChat();
       if (conv.unread_count) {
         conv.unread_count = 0;
         renderConversationList();
@@ -936,6 +1042,7 @@
       renderAiAlerts();
       connectWs();
       startWaHeartbeat();
+      if (state.wa.status === "connected") startLivePoll();
     } catch (err) {
       conversationList.innerHTML = `<li class="conversation-item"><span class="error">${escapeHtml(err.message)}</span></li>`;
       throw err;
@@ -951,7 +1058,10 @@
     const ws = new WebSocket(url);
     state.ws = ws;
 
-    ws.onopen = () => setWsBadge(true);
+    ws.onopen = () => {
+      setWsBadge(true);
+      updateSyncStatus({});
+    };
     ws.onclose = () => {
       setWsBadge(false);
       if (state.user) setTimeout(connectWs, 3000);
@@ -979,6 +1089,7 @@
     state.conversations = [];
     state.activeId = null;
     state.messages = [];
+    state._messagesSig = "";
     state.searchPool = null;
     mediaCache.clear();
     renderConversationList();
@@ -1026,6 +1137,9 @@
             );
             if (!exists) {
               state.messages.push(event.message);
+              state._messagesSig = state.messages
+                .map((m) => m.id || `${m.body}|${m.created_at}`)
+                .join("\n");
               renderMessages();
             }
           }
@@ -1209,9 +1323,22 @@
   });
 
   let debugReport = null;
+  let debugSyncReport = null;
+  let debugTab = "sync";
+
+  function setDebugTab(tab) {
+    debugTab = tab;
+    $("debug-tab-sync").classList.toggle("active", tab === "sync");
+    $("debug-tab-names").classList.toggle("active", tab === "names");
+    $("debug-sync-panel").classList.toggle("hidden", tab !== "sync");
+    $("debug-names-panel").classList.toggle("hidden", tab !== "names");
+    $("debug-run-btn").classList.toggle("hidden", tab !== "names");
+    $("debug-run-sync-btn").classList.toggle("hidden", tab !== "sync");
+  }
 
   function showDebugModal() {
     $("debug-modal").classList.remove("hidden");
+    setDebugTab(debugTab);
   }
 
   function hideDebugModal() {
@@ -1273,6 +1400,69 @@
     $("debug-sample").classList.remove("hidden");
   }
 
+  function renderSyncDebug(report) {
+    const wh = report.webhook || {};
+    const urls = report.urls || {};
+    const msgs = report.messages || {};
+    const cards = [
+      { label: "Último webhook", value: wh.last_received_at || "nunca" },
+      { label: "Cola webhook", value: `${wh.queue_depth ?? 0} pendiente(s)` },
+      { label: "Worker webhook", value: wh.worker_alive ? "activo" : "inactivo" },
+      { label: "URL Evolution", value: wh.evolution_config?.url || "—" },
+      { label: "URL esperada", value: urls.webhook_expected || "—" },
+      { label: "Msgs últimos 15 min", value: msgs.last_15_minutes ?? 0 },
+      { label: "Último mensaje", value: msgs.last_message_preview || "—" },
+    ];
+    $("debug-sync-summary").innerHTML = cards.map((c) => (
+      `<div class="debug-stat"><strong>${escapeHtml(String(c.value))}</strong><span>${escapeHtml(c.label)}</span></div>`
+    )).join("");
+    $("debug-sync-summary").classList.remove("hidden");
+
+    const trace = wh.recent_trace || [];
+    if (!trace.length) {
+      $("debug-sync-trace").innerHTML = '<p class="muted small">Sin webhooks registrados aún. Escribe desde el celular y vuelve a ejecutar.</p>';
+    } else {
+      const rows = trace.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.at || "")}</td>
+          <td>${escapeHtml(row.event || "")}</td>
+          <td>${escapeHtml(row.result || "")}</td>
+          <td>${escapeHtml(row.message_id || "")}</td>
+          <td class="reason">${escapeHtml(row.detail || "")}</td>
+        </tr>`).join("");
+      $("debug-sync-trace").innerHTML = `
+        <table class="debug-table">
+          <thead><tr><th>Hora</th><th>Evento</th><th>Resultado</th><th>Msg ID</th><th>Detalle</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+    $("debug-sync-trace").classList.remove("hidden");
+  }
+
+  async function runSyncDebug() {
+    const runBtn = $("debug-run-sync-btn");
+    runBtn.disabled = true;
+    $("debug-sync-summary").classList.add("hidden");
+    $("debug-sync-trace").classList.add("hidden");
+    try {
+      const report = await api("/whatsapp/debug/sync", {}, 20000);
+      debugSyncReport = report;
+      renderSyncDebug(report);
+      $("debug-json").value = JSON.stringify(report, null, 2);
+      if (report.hints?.length) {
+        console.info("Sync hints:", report.hints);
+      }
+      if (report.errors?.length) {
+        console.warn("Sync errors:", report.errors);
+      }
+    } catch (err) {
+      $("debug-json").value = JSON.stringify({ error: err.message }, null, 2);
+      alert(err.message);
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
   async function runChatsDebug() {
     const runBtn = $("debug-run-btn");
     const copyBtn = $("debug-copy-btn");
@@ -1303,14 +1493,19 @@
 
   $("debug-chats").addEventListener("click", () => {
     showDebugModal();
-    if (!debugReport) runChatsDebug();
+    if (!debugSyncReport) runSyncDebug();
   });
+  $("debug-tab-sync").addEventListener("click", () => setDebugTab("sync"));
+  $("debug-tab-names").addEventListener("click", () => setDebugTab("names"));
+  $("debug-run-sync-btn").addEventListener("click", runSyncDebug);
   $("debug-modal-close").addEventListener("click", hideDebugModal);
   $("debug-modal-backdrop").addEventListener("click", hideDebugModal);
   $("debug-close-btn").addEventListener("click", hideDebugModal);
   $("debug-run-btn").addEventListener("click", runChatsDebug);
   $("debug-copy-btn").addEventListener("click", async () => {
-    const text = $("debug-json").value || (debugReport ? JSON.stringify(debugReport, null, 2) : "");
+    const text = $("debug-json").value
+      || (debugTab === "sync" && debugSyncReport ? JSON.stringify(debugSyncReport, null, 2) : "")
+      || (debugReport ? JSON.stringify(debugReport, null, 2) : "");
     if (!text) {
       alert("Ejecuta el diagnóstico primero.");
       return;
@@ -1479,6 +1674,9 @@
       const exists = state.messages.some((m) => m.id === msg.id);
       if (!exists) {
         state.messages.push(msg);
+        state._messagesSig = state.messages
+          .map((m) => m.id || `${m.body}|${m.created_at}`)
+          .join("\n");
         renderMessages();
       }
     } catch (err) {

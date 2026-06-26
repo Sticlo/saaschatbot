@@ -55,7 +55,25 @@ class SessionRefreshResult:
 
 
 def _webhook_url(tenant_id: uuid.UUID) -> str:
-    return f"{settings.app_public_url.rstrip('/')}/webhooks/evolution/{tenant_id}"
+    return f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
+
+
+def ensure_evolution_webhook(session: WhatsAppSession, tenant_id: uuid.UUID) -> None:
+    """Re-registra webhook con URL alcanzable desde el contenedor Evolution."""
+    from app.infrastructure.cache.redis_client import get_redis
+
+    key = f"webhook:ensure:{tenant_id}"
+    if not get_redis().set(key, "1", nx=True, ex=120):
+        return
+    try:
+        evolution_client.ensure_webhook(
+            session.instance_name,
+            _webhook_url(tenant_id),
+            settings.evolution_webhook_secret,
+        )
+        log.info("Webhook Evolution actualizado instancia=%s", session.instance_name)
+    except EvolutionAPIError as exc:
+        log.warning("ensure_webhook %s: %s", session.instance_name, exc)
 
 
 def get_or_create_session(db: Session, tenant: Tenant) -> WhatsAppSession:

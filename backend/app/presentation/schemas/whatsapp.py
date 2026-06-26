@@ -118,3 +118,20 @@ class WhatsAppChatsDebugResponse(BaseModel):
     sync_queue: dict
     sample_missing_names: list[dict]
     hints: list[str]
+
+
+class WhatsAppSyncDebugResponse(BaseModel):
+    generated_at: str
+    timing_ms: dict[str, int]
+    errors: list[str]
+    hints: list[str]
+    session: dict
+    urls: dict
+    webhook: dict
+    messages: dict
+
+
+class ConversationLiveSyncResponse(BaseModel):
+    imported: int
+    message_count: int
+    messages: list[MessageResponse]

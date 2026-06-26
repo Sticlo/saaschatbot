@@ -17,6 +17,10 @@ _worker_thread: Optional[threading.Thread] = None
 _worker_stop = threading.Event()
 
 
+def webhook_worker_is_alive() -> bool:
+    return _worker_thread is not None and _worker_thread.is_alive()
+
+
 def enqueue_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
     item = json.dumps({"tenant_id": str(tenant_id), "payload": payload})
     get_redis().lpush(INBOUND_WEBHOOK_QUEUE, item)

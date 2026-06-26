@@ -151,6 +151,10 @@ def health():
         workers_webhook = count_active_workers("webhook")
         workers_outbound = count_active_workers("outbound")
         workers_ai = count_active_workers("ai")
+        if workers_webhook == 0 and settings.embed_workers_in_api:
+            from app.application.workers.queue_service import webhook_worker_is_alive
+
+            workers_webhook = 1 if webhook_worker_is_alive() else 0
         if workers_ai == 0 and settings.embed_workers_in_api:
             workers_ai = 1 if ai_worker_is_alive() else 0
         ai_slots_active = count_active_ai_slots()
