@@ -25,6 +25,51 @@ from app.shared.core.phone import (
 
 log = logging.getLogger(__name__)
 
+_RECENT_OUTBOUND_WINDOW_SECONDS = 300
+
+
+def infer_phone_from_recent_outbound(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    whatsapp_connection_id: UUID,
+    window_seconds: int = _RECENT_OUTBOUND_WINDOW_SECONDS,
+) -> Optional[str]:
+    """Si el negocio acaba de escribir a un solo cliente (teléfono), el @lid entrante es ese chat.
+
+    Solo devuelve teléfono cuando hay exactamente un destino reciente — evita mezclar clientes.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.domain.entities import Conversation, Message
+    from app.domain.entities.enums import MessageDirection
+
+    since = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    rows = (
+        db.query(Conversation.contact_phone)
+        .join(Message, Message.conversation_id == Conversation.id)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == whatsapp_connection_id,
+            Message.tenant_id == tenant_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.created_at >= since,
+        )
+        .distinct()
+        .all()
+    )
+    phones: list[str] = []
+    for (raw_phone,) in rows:
+        if raw_phone and is_valid_whatsapp_phone(raw_phone) and not is_untrusted_contact_phone(
+            raw_phone
+        ):
+            norm = normalize_phone(raw_phone)
+            if norm not in phones:
+                phones.append(norm)
+    if len(phones) == 1:
+        return phones[0]
+    return None
+
 
 def extract_message_identities(
     remote_jid: str,
@@ -186,6 +231,160 @@ def _load_link_maps(
     return lid_to_phone, phone_to_lid
 
 
+def _enrich_lid_phone_maps(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    whatsapp_connection_id: UUID,
+    lid_jid: str,
+    instance_name: str,
+    lid_to_phone: dict[str, str],
+    phones_to_try: list[str],
+) -> None:
+    """Amplía mapas @lid↔teléfono desde BD local, Evolution, timeline y envíos recientes."""
+    from app.config import settings
+    from app.infrastructure.evolution.evolution_store import (
+        fetch_bidirectional_lid_mappings,
+        fetch_lid_alt_phone,
+        infer_phone_for_lid_from_timeline,
+    )
+
+    if not lid_jid or not lid_jid.endswith("@lid"):
+        return
+
+    alt_phone = ""
+    if instance_name and settings.evolution_database_url:
+        alt_phone = (
+            fetch_lid_alt_phone(settings.evolution_database_url, instance_name, lid_jid)
+            or infer_phone_for_lid_from_timeline(
+                settings.evolution_database_url, instance_name, lid_jid
+            )
+            or ""
+        )
+
+    if not alt_phone:
+        alt_phone = infer_phone_from_recent_outbound(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+        ) or ""
+
+    if alt_phone and is_valid_whatsapp_phone(alt_phone) and not is_untrusted_contact_phone(alt_phone):
+        norm = normalize_phone(alt_phone)
+        lid_to_phone.setdefault(lid_jid, norm)
+        if norm not in phones_to_try:
+            phones_to_try.append(norm)
+        record_contact_link(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            lid_jid=lid_jid,
+            phone_e164=norm,
+            verified=False,
+        )
+
+    if instance_name and settings.evolution_database_url:
+        evo_lid, evo_phone = fetch_bidirectional_lid_mappings(
+            settings.evolution_database_url, instance_name
+        )
+        lid_to_phone.update(evo_lid)
+        for p in list(phones_to_try):
+            if not is_valid_whatsapp_phone(p):
+                continue
+            norm = normalize_phone(p)
+            lid = evo_phone.get(norm) or evo_phone.get(phone_to_evolution_number(norm))
+            if lid and lid not in lid_to_phone:
+                lid_to_phone[lid] = norm
+
+
+def _trusted_phones_for_conversation(
+    conv: Conversation,
+    lid_to_phone: dict[str, str],
+) -> set[str]:
+    phones: set[str] = set()
+    if is_valid_whatsapp_phone(conv.contact_phone) and not is_untrusted_contact_phone(
+        conv.contact_phone
+    ):
+        phones.add(normalize_phone(conv.contact_phone))
+    jid = str(conv.contact_jid or "")
+    if jid.endswith("@lid"):
+        mapped = lid_to_phone.get(jid)
+        if mapped and is_valid_whatsapp_phone(mapped):
+            phones.add(normalize_phone(mapped))
+    if is_lid_placeholder(conv.contact_phone):
+        derived = lid_jid_from_lid_phone(conv.contact_phone)
+        mapped = lid_to_phone.get(derived)
+        if mapped and is_valid_whatsapp_phone(mapped):
+            phones.add(normalize_phone(mapped))
+    return phones
+
+
+def _merge_if_same_person(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    whatsapp_connection_id: UUID,
+    candidates: list[Conversation],
+    phone: str,
+    lid_jid: str,
+    instance_name: str,
+    owner_names: Optional[set[str]] = None,
+) -> Optional[Conversation]:
+    """Fusiona duplicados @lid + teléfono solo si comparten el mismo número confiable."""
+    if len(candidates) < 2:
+        return None
+
+    lid_to_phone, _ = _load_link_maps(
+        db,
+        tenant_id=tenant_id,
+        whatsapp_connection_id=whatsapp_connection_id,
+    )
+    phones_probe: list[str] = []
+    if phone:
+        phones_probe.append(phone)
+    _enrich_lid_phone_maps(
+        db,
+        tenant_id=tenant_id,
+        whatsapp_connection_id=whatsapp_connection_id,
+        lid_jid=lid_jid,
+        instance_name=instance_name,
+        lid_to_phone=lid_to_phone,
+        phones_to_try=phones_probe,
+    )
+
+    anchor: set[str] = set()
+    if phone and is_valid_whatsapp_phone(phone) and not is_untrusted_contact_phone(phone):
+        anchor.add(normalize_phone(phone))
+    if lid_jid and lid_jid in lid_to_phone:
+        mapped = lid_to_phone[lid_jid]
+        if is_valid_whatsapp_phone(mapped):
+            anchor.add(normalize_phone(mapped))
+
+    per_conv = [_trusted_phones_for_conversation(c, lid_to_phone) for c in candidates]
+    if anchor:
+        if not all(ps.intersection(anchor) for ps in per_conv if ps):
+            return None
+        shared = set.intersection(*[ps | anchor for ps in per_conv if ps]) if per_conv else anchor
+    else:
+        shared = set.intersection(*per_conv) if all(per_conv) else set()
+
+    if len(shared) != 1:
+        return None
+
+    log.info(
+        "Fusionando %s chats duplicados tenant=%s phone=%s",
+        len(candidates),
+        tenant_id,
+        next(iter(shared)),
+    )
+    return _merge_to_canonical(
+        db,
+        tenant_id=tenant_id,
+        candidates=candidates,
+        owner_names=owner_names,
+    )
+
+
 def _collect_candidates(
     db: Session,
     *,
@@ -220,6 +419,16 @@ def _collect_candidates(
         db,
         tenant_id=tenant_id,
         whatsapp_connection_id=whatsapp_connection_id,
+    )
+
+    _enrich_lid_phone_maps(
+        db,
+        tenant_id=tenant_id,
+        whatsapp_connection_id=whatsapp_connection_id,
+        lid_jid=lid_jid,
+        instance_name=instance_name,
+        lid_to_phone=lid_to_phone,
+        phones_to_try=phones_to_try,
     )
 
     if not fast and instance_name and settings.evolution_database_url:
@@ -380,6 +589,7 @@ def resolve_canonical_conversation(
     )
 
     verified_lid, verified_phone = pair_lid_phone_from_message_key(message_key)
+    has_verified_pair = bool(verified_lid and verified_phone)
     if verified_lid and verified_phone:
         record_contact_link(
             db,
@@ -400,12 +610,33 @@ def resolve_canonical_conversation(
         push_name=push_name,
     )
 
-    conv = _pick_exact_conversation(
-        candidates,
-        remote_jid=remote_jid,
-        phone=phone,
-        lid_jid=lid,
-    )
+    if len(candidates) > 1 and not has_verified_pair:
+        merged = _merge_if_same_person(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            candidates=candidates,
+            phone=phone,
+            lid_jid=lid,
+            instance_name=instance_name,
+            owner_names=owner_names,
+        )
+        if merged is not None:
+            conv = merged
+        else:
+            conv = _pick_exact_conversation(
+                candidates,
+                remote_jid=remote_jid,
+                phone=phone,
+                lid_jid=lid,
+            )
+    else:
+        conv = _pick_exact_conversation(
+            candidates,
+            remote_jid=remote_jid,
+            phone=phone,
+            lid_jid=lid,
+        )
 
     if conv is not None:
         from app.application.sync.contact_identity_service import apply_identity_to_conversation
@@ -448,16 +679,81 @@ def repair_duplicates_for_contact(
         phone=phone,
         lid_jid=lid_jid,
         instance_name=instance_name,
+        fast=False,
         push_name=push_name,
     )
     if not candidates:
         return None
+    if len(candidates) > 1:
+        merged = _merge_if_same_person(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            candidates=candidates,
+            phone=phone,
+            lid_jid=lid_jid,
+            instance_name=instance_name,
+            owner_names=owner_names,
+        )
+        if merged is not None:
+            return merged
     return _pick_exact_conversation(
         candidates,
         remote_jid=lid_jid,
         phone=phone,
         lid_jid=lid_jid,
     )
+
+
+def proactive_repair_all_lid_duplicates(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    whatsapp_connection_id: UUID,
+    instance_name: str = "",
+    owner_names: Optional[set[str]] = None,
+) -> int:
+    """Recorre chats @lid y los fusiona con su par teléfono cuando la señal es unívoca."""
+    from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+    if chatwoot_sync_mode():
+        return 0
+
+    rows = (
+        db.query(Conversation)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == whatsapp_connection_id,
+        )
+        .all()
+    )
+    merged = 0
+    seen_lids: set[str] = set()
+    for conv in rows:
+        lid = str(conv.contact_jid or "")
+        if not lid.endswith("@lid") and is_lid_placeholder(conv.contact_phone):
+            lid = lid_jid_from_lid_phone(conv.contact_phone)
+        if not lid or lid in seen_lids:
+            continue
+        seen_lids.add(lid)
+        canonical = repair_duplicates_for_contact(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            phone="",
+            lid_jid=lid,
+            instance_name=instance_name,
+            owner_names=owner_names,
+        )
+        if canonical is not None and canonical.id != conv.id:
+            merged += 1
+    if merged:
+        log.info(
+            "Reparación proactiva @lid fusionó %s chats tenant=%s",
+            merged,
+            tenant_id,
+        )
+    return merged
 
 
 def learn_link_from_key(

@@ -380,6 +380,72 @@ def fetch_lid_jid_for_phone(dsn: str, instance_name: str, phone_e164: str) -> Op
     return None
 
 
+def infer_phone_for_lid_from_timeline(
+    dsn: str,
+    instance_name: str,
+    lid_jid: str,
+    *,
+    outbound_gap_seconds: int = 180,
+) -> Optional[str]:
+    """Infiere teléfono cuando WhatsApp cambia de @s.whatsapp.net a @lid en el mismo hilo.
+
+    Requiere un único chat @s.whatsapp.net con mensaje saliente (fromMe) justo antes
+    del primer mensaje @lid — evita fusiones Ana/Diana por nombre.
+    """
+    if not dsn or not lid_jid.endswith("@lid"):
+        return None
+    try:
+        from app.shared.core.phone import is_valid_whatsapp_phone, jid_to_phone, normalize_phone
+
+        with psycopg.connect(_normalize_dsn(dsn), **_CONNECT_KWARGS) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT MIN(m."messageTimestamp")
+                    FROM "Message" m
+                    JOIN "Instance" i ON i.id = m."instanceId"
+                    WHERE i.name = %s AND m.key->>'remoteJid' = %s
+                    """,
+                    (instance_name, lid_jid),
+                )
+                row = cur.fetchone()
+                if not row or row[0] is None:
+                    return None
+                first_lid_ts = int(row[0])
+
+                cur.execute(
+                    """
+                    SELECT DISTINCT m.key->>'remoteJid'
+                    FROM "Message" m
+                    JOIN "Instance" i ON i.id = m."instanceId"
+                    WHERE i.name = %s
+                      AND m.key->>'remoteJid' LIKE '%%@s.whatsapp.net'
+                      AND m.key->>'fromMe' = 'true'
+                      AND m."messageTimestamp" BETWEEN %s AND %s
+                    """,
+                    (
+                        instance_name,
+                        first_lid_ts - outbound_gap_seconds,
+                        first_lid_ts,
+                    ),
+                )
+                phone_jids = [str(r[0]) for r in cur.fetchall() if r and r[0]]
+
+        phones: list[str] = []
+        for jid in phone_jids:
+            phone = jid_to_phone(jid)
+            if phone and is_valid_whatsapp_phone(phone):
+                norm = normalize_phone(phone)
+                if norm not in phones:
+                    phones.append(norm)
+        if len(phones) == 1:
+            return phones[0]
+        return None
+    except Exception as exc:
+        log.warning("No se pudo inferir teléfono por timeline lid=%s: %s", lid_jid, exc)
+        return None
+
+
 def fetch_lid_alt_phone(dsn: str, instance_name: str, lid_jid: str) -> Optional[str]:
     """Si un chat usa @lid, busca remoteJidAlt con teléfono real en mensajes Evolution."""
     if not dsn or not lid_jid or not lid_jid.endswith("@lid"):

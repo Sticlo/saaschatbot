@@ -1137,6 +1137,19 @@ def sync_whatsapp_chats(
         merged += deep_merged
         if deep_merged:
             log.info("repair_duplicate_conversations fusionó %s chats en sync completo", deep_merged)
+
+        from app.application.conversations.contact_resolver_service import (
+            proactive_repair_all_lid_duplicates,
+        )
+
+        lid_merged = proactive_repair_all_lid_duplicates(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=connection_id,
+            instance_name=session.instance_name,
+            owner_names=owner_names,
+        )
+        merged += lid_merged
     except Exception as exc:
         log.warning("repair_duplicate_conversations falló en sync completo: %s", exc)
 

@@ -844,6 +844,33 @@ def import_evolution_chat_or_contact(
         contact_jid=contact_jid,
         is_archived=bool(archived_raw) if archived_raw is not None else None,
     )
+
+    if is_valid_whatsapp_phone(phone) and instance_name:
+        from app.config import settings as app_settings
+        from app.application.conversations.contact_resolver_service import record_contact_link
+        from app.infrastructure.evolution.evolution_store import fetch_lid_jid_for_phone
+
+        if app_settings.evolution_database_url:
+            discovered_lid = fetch_lid_jid_for_phone(
+                app_settings.evolution_database_url, instance_name, phone
+            )
+            if discovered_lid:
+                record_contact_link(
+                    db,
+                    tenant_id=tenant.id,
+                    whatsapp_connection_id=whatsapp_connection_id,
+                    lid_jid=discovered_lid,
+                    phone_e164=normalize_phone(phone),
+                    verified=False,
+                )
+                if not contact_jid:
+                    apply_identity_to_conversation(
+                        conversation,
+                        contact_phone=phone,
+                        contact_name=str(name),
+                        contact_jid=discovered_lid,
+                    )
+
     ts_raw = (
         record.get("lastMessageTimestamp")
         or record.get("conversationTimestamp")

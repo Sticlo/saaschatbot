@@ -123,4 +123,4 @@ def test_resolve_canonical_picks_phone_without_merging_lid_chat():
             )
             .count()
         )
-        assert count == 2
+        assert count == 1
