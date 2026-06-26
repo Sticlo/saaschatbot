@@ -197,6 +197,49 @@ class EvolutionClient:
             "POST", f"/message/sendText/{instance_name}", json=payload, timeout=30.0
         )
 
+    def send_media(
+        self,
+        instance_name: str,
+        number: str,
+        *,
+        media_b64: str,
+        mimetype: str,
+        caption: str = "",
+        filename: str = "image.jpg",
+    ) -> dict:
+        payload = {
+            "number": number,
+            "mediatype": "image",
+            "mimetype": mimetype,
+            "caption": caption,
+            "media": media_b64,
+            "fileName": filename,
+        }
+        return self._request(
+            "POST", f"/message/sendMedia/{instance_name}", json=payload, timeout=45.0
+        )
+
+    def send_buttons(
+        self,
+        instance_name: str,
+        number: str,
+        *,
+        title: str,
+        description: str,
+        footer: str,
+        buttons: list[dict],
+    ) -> dict:
+        payload = {
+            "number": number,
+            "title": title[:60],
+            "description": description[:1024],
+            "footer": footer[:60],
+            "buttons": buttons,
+        }
+        return self._request(
+            "POST", f"/message/sendButtons/{instance_name}", json=payload, timeout=45.0
+        )
+
     def ensure_realtime_settings(self, instance_name: str) -> None:
         """Evita descarga masiva de historial al conectar (modo WhatsApp Web)."""
         try:

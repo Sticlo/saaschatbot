@@ -238,6 +238,93 @@ def send_text(session_name: str, recipient: str, text: str) -> dict:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
+def _resolve_chat_id(recipient: str) -> tuple[str, str]:
+    from app.shared.core.phone import phone_to_evolution_number
+
+    if uses_waha():
+        chat_id = recipient if "@" in recipient else f"{phone_to_evolution_number(recipient)}@c.us"
+        return chat_id, recipient
+    return recipient, recipient
+
+
+def send_image(
+    session_name: str,
+    recipient: str,
+    *,
+    data_b64: str,
+    mimetype: str,
+    filename: str,
+    caption: str = "",
+) -> dict:
+    if uses_waha():
+        from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
+
+        chat_id, _ = _resolve_chat_id(recipient)
+        try:
+            return waha_client.send_image(
+                session_name,
+                chat_id,
+                data_b64=data_b64,
+                mimetype=mimetype,
+                filename=filename,
+                caption=caption,
+            )
+        except WahaAPIError as exc:
+            raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        return evolution_client.send_media(
+            session_name,
+            recipient,
+            media_b64=data_b64,
+            mimetype=mimetype,
+            caption=caption,
+            filename=filename,
+        )
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
+def send_buttons(
+    session_name: str,
+    recipient: str,
+    *,
+    title: str,
+    description: str,
+    footer: str,
+    buttons: list[dict],
+) -> dict:
+    if uses_waha():
+        from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
+
+        chat_id, _ = _resolve_chat_id(recipient)
+        try:
+            return waha_client.send_buttons(
+                session_name,
+                chat_id,
+                title=title,
+                body=description,
+                footer=footer,
+                buttons=buttons,
+            )
+        except WahaAPIError as exc:
+            raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        return evolution_client.send_buttons(
+            session_name,
+            recipient,
+            title=title,
+            description=description,
+            footer=footer,
+            buttons=buttons,
+        )
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
 def refresh_qr(name: str) -> Optional[str]:
     if not uses_waha():
         return None

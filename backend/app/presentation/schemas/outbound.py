@@ -39,6 +39,7 @@ class EnqueueCampaignRequest(BaseModel):
     limit: Optional[int] = Field(None, ge=1, le=100)
     name: str = "Campaña"
     message_template: Optional[str] = None
+    bait_template_id: Optional[uuid.UUID] = None
 
 
 class EnqueueCampaignResponse(BaseModel):

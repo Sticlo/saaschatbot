@@ -7,7 +7,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
   <title>SaasChatbot — Panel</title>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=12" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=25" />
 </head>
 <body>
   <div id="app">
@@ -60,7 +60,8 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-outbound" class="sidebar-mode-tab">Carnadas</button>
+            <button type="button" id="mode-clients" class="sidebar-mode-tab">Buscar clientes</button>
+            <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA</button>
           </div>
 
           <div id="sidebar-chats">
@@ -75,18 +76,11 @@
               <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
             </div>
             <div class="chat-tabs">
-              <button type="button" id="tab-chats-active" class="chat-tab active">Activos</button>
-              <button type="button" id="tab-chats-archived" class="chat-tab">Archivados</button>
+              <button type="button" id="tab-chats-all" class="chat-tab active">Todos</button>
+              <button type="button" id="tab-chats-interested" class="chat-tab">Interesados</button>
+              <button type="button" id="tab-chats-not-interested" class="chat-tab">No interesados</button>
             </div>
             <ul id="conversation-list" class="conversation-list"></ul>
-          </div>
-
-          <div id="sidebar-outbound" class="hidden">
-            <div class="sidebar-header">
-              <h2>Leads</h2>
-              <button id="refresh-outbound" class="btn ghost small" title="Actualizar">↻</button>
-            </div>
-            <ul id="leads-list" class="conversation-list leads-list"></ul>
           </div>
         </aside>
 
@@ -98,30 +92,39 @@
               <button id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
               <p id="wa-setup-error" class="error hidden"></p>
             </div>
-            <p id="empty-chat-label">Selecciona una conversación</p>
           </div>
 
           <div id="active-chat" class="hidden">
             <div class="chat-header">
-              <div>
+              <div class="chat-header-main">
                 <h3 id="chat-title">—</h3>
-                <span id="chat-phone" class="muted"></span>
+                <span id="chat-phone" class="chat-contact-phone muted"></span>
                 <p id="chat-ai-hint" class="chat-ai-hint hidden"></p>
               </div>
-              <div class="chat-toggles">
-                <label class="toggle-row">
-                  <span>Modo manual</span>
-                  <input type="checkbox" id="toggle-mode-manual" />
-                </label>
-                <label class="toggle-row">
-                  <span>IA activa</span>
-                  <input type="checkbox" id="toggle-ai-chat" />
-                </label>
-                <button type="button" id="ai-retry-btn" class="btn ghost small" title="Reintentar respuesta IA">↻ IA</button>
+              <div class="chat-header-actions">
+                <div class="chat-interest-btns">
+                  <button type="button" id="mark-interested-btn" class="interest-btn">Interesado</button>
+                  <button type="button" id="mark-not-interested-btn" class="interest-btn">No interesado</button>
+                </div>
+                <div class="chat-toggles">
+                  <label class="toggle-row">
+                    <span>Modo manual</span>
+                    <input type="checkbox" id="toggle-mode-manual" />
+                  </label>
+                  <label class="toggle-row">
+                    <span>IA activa</span>
+                    <input type="checkbox" id="toggle-ai-chat" />
+                  </label>
+                  <button type="button" id="ai-retry-btn" class="btn ghost small" title="Reintentar respuesta IA">↻ IA</button>
+                </div>
               </div>
             </div>
 
             <div id="messages" class="messages"></div>
+
+            <div id="quick-shortcuts-wrap" class="quick-shortcuts-wrap hidden">
+              <div id="quick-shortcuts-bar" class="quick-shortcuts-bar"></div>
+            </div>
 
             <form id="send-form" class="composer">
               <textarea id="message-input" rows="2" placeholder="Escribe un mensaje…" maxlength="4096"></textarea>
@@ -129,68 +132,162 @@
             </form>
           </div>
 
-          <div id="outbound-panel" class="outbound-panel hidden">
-            <div class="outbound-header">
-              <h2>Carnadas automáticas</h2>
-              <p class="muted">Envía mensajes iniciales a tus leads con delays para reducir riesgo de ban.</p>
-            </div>
+          <div id="ai-setup-panel" class="ai-setup-panel hidden">
+            <header class="ai-setup-hero">
+              <div class="ai-setup-hero-icon" aria-hidden="true">✨</div>
+              <h2>Cuéntanos de tu negocio</h2>
+              <p>La IA responderá tus chats de WhatsApp. Responde en tus propias palabras — nosotros nos encargamos del resto.</p>
+            </header>
 
-            <div id="outbound-disclaimer-banner" class="outbound-banner warning hidden">
-              <p>Debes aceptar el disclaimer de uso responsable antes de enviar carnadas.</p>
-              <button type="button" id="accept-disclaimer-btn" class="btn primary small">Aceptar y continuar</button>
-            </div>
+            <div class="ai-setup-layout">
+              <section class="ai-setup-form-card">
+                <div class="ai-step">
+                  <span class="ai-step-num">1</span>
+                  <label class="ai-field">
+                    <span>¿A qué se dedica tu negocio?</span>
+                    <span class="ai-field-hint">Ej: restaurante, peluquería, tienda online…</span>
+                    <input type="text" id="biz-industry" maxlength="255" placeholder="Restaurante de comida rápida" />
+                  </label>
+                </div>
 
-            <div class="outbound-grid">
-              <section class="outbound-card">
-                <h3>Tu plan</h3>
-                <div id="outbound-limits" class="outbound-stats">
-                  <p class="muted">Cargando…</p>
+                <div class="ai-step">
+                  <span class="ai-step-num">2</span>
+                  <label class="ai-field">
+                    <span>¿Qué vendes u ofreces?</span>
+                    <span class="ai-field-hint">Lo principal que tus clientes te piden.</span>
+                    <textarea id="biz-products" rows="3" maxlength="2000" placeholder="Almuerzos, menú del día, domicilios en la zona…"></textarea>
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">3</span>
+                  <label class="ai-field">
+                    <span>¿A quién le vendes?</span>
+                    <span class="ai-field-hint">Tu cliente típico.</span>
+                    <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">4</span>
+                  <label class="ai-field">
+                    <span>¿Precios o rangos?</span>
+                    <span class="ai-field-hint">Para que la IA no invente valores.</span>
+                    <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">5</span>
+                  <label class="ai-field">
+                    <span>¿Dónde estás y cuándo atiendes?</span>
+                    <span class="ai-field-hint">Ciudad, barrio u horario.</span>
+                    <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">6</span>
+                  <label class="ai-field">
+                    <span>¿Cómo quieres que hable?</span>
+                    <span class="ai-field-hint">Formal, cercano, divertido…</span>
+                    <input type="text" id="biz-tone" maxlength="120" placeholder="Cercano y amable, como un amigo" />
+                  </label>
+                </div>
+
+                <div class="ai-step ai-step-last">
+                  <span class="ai-step-num">7</span>
+                  <label class="ai-field">
+                    <span>¿Algo que no debe decir?</span>
+                    <span class="ai-field-hint">Opcional — descuentos, promesas, etc.</span>
+                    <textarea id="biz-restrictions" rows="2" maxlength="1000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
+                  </label>
+                </div>
+
+                <div class="ai-save-row">
+                  <button type="button" id="biz-save-btn" class="btn primary ai-save-btn">Guardar mi negocio</button>
+                  <p id="biz-save-status" class="ai-save-status muted small"></p>
                 </div>
               </section>
 
-              <section class="outbound-card">
-                <h3>Cola de envío</h3>
-                <div id="outbound-queue-stats" class="outbound-stats">
-                  <p class="muted">Cargando…</p>
-                </div>
-                <div class="outbound-actions">
-                  <button type="button" id="outbound-pause-btn" class="btn ghost small hidden">Pausar envíos</button>
-                  <button type="button" id="outbound-resume-btn" class="btn ghost small hidden">Reanudar envíos</button>
-                </div>
-              </section>
+              <aside class="ai-setup-preview-card">
+                <div class="ai-preview-badge">Vista previa</div>
+                <h3>Tu IA responderá sabiendo esto</h3>
+                <p class="ai-preview-note">Actualiza cuando quieras — tus chats usarán la info más reciente.</p>
+                <ul id="biz-summary-list" class="biz-summary-list">
+                  <li class="muted">Completa las preguntas y pulsa guardar.</li>
+                </ul>
+              </aside>
             </div>
 
-            <section class="outbound-card">
-              <h3>Importar leads</h3>
-              <p class="muted small">Un teléfono por línea. Opcional: <code>3001234567, Nombre</code></p>
-              <textarea id="leads-import-input" rows="5" placeholder="3001234567, Juan&#10;3009876543, María&#10;573001112233"></textarea>
-              <div class="outbound-actions">
-                <button type="button" id="import-leads-btn" class="btn primary">Importar leads</button>
-                <span id="import-leads-result" class="muted small"></span>
+            <section class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Atajos rápidos</h3>
+                <p class="muted small">Los mismos para <strong>todos tus chats</strong> — menú, precios, fotos… Un clic envía al cliente que estés atendiendo.</p>
               </div>
+              <ul id="ai-shortcuts-summary" class="ai-shortcuts-summary">
+                <li class="muted">Cargando…</li>
+              </ul>
+              <button type="button" id="ai-shortcuts-config-btn" class="btn ghost small">Configurar atajos</button>
+            </section>
+          </div>
+
+          <div id="clients-panel" class="clients-panel hidden">
+            <header class="clients-hero">
+              <div class="clients-hero-icon" aria-hidden="true">🗺️</div>
+              <h2>Buscar clientes</h2>
+              <p>Cuéntanos tu negocio y la IA encuentra posibles clientes en Google Maps para que los contactes en frío.</p>
+              <p class="clients-quota-badge">Hasta <strong>100 contactos nuevos</strong> por día</p>
+            </header>
+
+            <section class="clients-form-card maps-search-form">
+              <h3>¿De qué es tu negocio?</h3>
+              <p class="clients-field-hint">Ejemplo: <strong>lavandería industrial</strong>, <strong>software contable</strong>, <strong>distribuidora de café</strong>…</p>
+              <textarea id="maps-business-input" rows="3" placeholder="Ej: Lavandería que lava ropa de hoteles y restaurantes en Medellín"></textarea>
+
+              <label class="maps-city-label">
+                ¿En qué ciudad o zona buscas?
+                <input type="text" id="maps-city-input" placeholder="Medellín, Bogotá, Cali…" autocomplete="off" />
+              </label>
+
+              <div class="maps-form-actions">
+                <button type="button" id="maps-search-btn" class="btn primary">Buscar clientes con IA</button>
+                <button type="button" id="maps-reset-btn" class="btn ghost hidden">Nueva búsqueda</button>
+              </div>
+              <p id="maps-search-status" class="clients-status muted small"></p>
             </section>
 
-            <section class="outbound-card">
-              <h3>Lanzar campaña</h3>
-              <div class="outbound-form-row">
-                <label>
-                  Nombre
-                  <input type="text" id="campaign-name" value="Campaña" maxlength="100" />
-                </label>
-                <label>
-                  Cantidad
-                  <input type="number" id="campaign-limit" min="1" max="100" value="10" />
-                </label>
+            <section id="maps-plan-card" class="clients-form-card maps-plan-card hidden">
+              <div class="maps-plan-header">
+                <span class="maps-plan-badge">Plan de la IA</span>
+                <h3 id="maps-plan-title">Clientes potenciales para tu negocio</h3>
               </div>
-              <label>
-                Mensaje (opcional — usa plantilla del perfil si vacío)
-                <textarea id="campaign-template" rows="3" placeholder="Hola{name_part}! Vi tu negocio…"></textarea>
-              </label>
-              <p class="muted small">Variables: <code>{name_part}</code> primer nombre, <code>{name}</code> nombre completo, <code>{business}</code> tu negocio.</p>
-              <div class="outbound-actions">
-                <button type="button" id="start-campaign-btn" class="btn primary">Encolar carnadas</button>
-                <span id="campaign-result" class="muted small"></span>
+              <p id="maps-plan-summary" class="maps-plan-summary muted"></p>
+              <ul id="maps-plan-list" class="maps-plan-list"></ul>
+            </section>
+
+            <section id="maps-results-card" class="clients-list-card maps-results-card hidden">
+              <div class="maps-results-header">
+                <div>
+                  <h3 id="maps-results-title">Resultados</h3>
+                  <p id="maps-results-meta" class="muted small"></p>
+                </div>
+                <button type="button" id="maps-download-btn" class="btn primary small">Descargar Excel</button>
               </div>
+              <div class="maps-results-table-wrap">
+                <table class="maps-results-table">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Teléfono</th>
+                      <th>Dirección</th>
+                      <th>Tipo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="maps-results-body"></tbody>
+                </table>
+              </div>
+              <p class="maps-results-footnote muted small">Vista previa — cuando conectemos el scraper verás datos reales de Google Maps.</p>
             </section>
           </div>
         </main>
@@ -233,6 +330,22 @@
       </div>
     </div>
 
+    <!-- Modal atajos rápidos -->
+    <div id="shortcuts-modal" class="modal hidden">
+      <div class="modal-backdrop" id="shortcuts-modal-backdrop"></div>
+      <div class="modal-card shortcuts-modal-card">
+        <button id="shortcuts-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
+        <h3>Atajos rápidos del negocio</h3>
+        <p class="muted small">Son los mismos en <strong>todos tus chats</strong>. Aparecen arriba del mensaje cuando atiendes a un cliente.</p>
+        <div id="shortcuts-editor-list" class="shortcuts-editor-list"></div>
+        <button type="button" id="shortcuts-add-btn" class="btn ghost small">+ Agregar atajo</button>
+        <div class="shortcuts-modal-actions">
+          <button type="button" id="shortcuts-save-btn" class="btn primary">Guardar</button>
+          <button type="button" id="shortcuts-cancel-btn" class="btn ghost">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Modal QR WhatsApp -->
     <div id="qr-modal" class="modal hidden">
       <div class="modal-backdrop" id="qr-modal-backdrop"></div>
@@ -248,6 +361,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=42"></script>
+  <script src="/static/panel/app.js?v=60"></script>
 </body>
 </html>

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.core.phone import format_display_phone, resolve_display_name
+from app.shared.core.phone import format_contact_display_phone, resolve_display_name
 
 
 class WhatsAppConnectResponse(BaseModel):
@@ -32,6 +32,10 @@ class SendMessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4096)
 
 
+class SendShortcutRequest(BaseModel):
+    shortcut_id: str = Field(min_length=1, max_length=64)
+
+
 class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,6 +48,7 @@ class ConversationResponse(BaseModel):
     ai_active: bool
     bait_sent: bool
     status: str
+    interest_status: Optional[str] = None
     is_archived: bool = False
     unread_count: int
     last_message_at: Optional[datetime]
@@ -58,6 +63,7 @@ def serialize_conversation(
     *,
     display_name_override: str | None = None,
     last_message_preview: str = "",
+    linked_phone: str | None = None,
 ) -> dict:
     from app.shared.core.phone import is_placeholder_contact_name
 
@@ -77,7 +83,11 @@ def serialize_conversation(
     response = ConversationResponse.model_validate(conversation).model_copy(
         update={
             "display_name": resolved_name,
-            "display_phone": format_display_phone(conversation.contact_phone),
+            "display_phone": format_contact_display_phone(
+                conversation.contact_phone,
+                contact_jid=jid,
+                linked_phone=linked_phone or "",
+            ),
             "last_message_preview": last_message_preview,
         }
     )
@@ -104,6 +114,10 @@ class ConversationModeUpdate(BaseModel):
 
 class ConversationAiUpdate(BaseModel):
     ai_active: bool
+
+
+class ConversationInterestUpdate(BaseModel):
+    interest_status: Optional[Literal["interested", "not_interested"]] = None
 
 
 class WhatsAppSyncResponse(BaseModel):

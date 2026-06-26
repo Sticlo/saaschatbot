@@ -14,7 +14,7 @@
     canManageGlobal: false,
     canConnectWa: false,
     wa: { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null },
-    chatListTab: "active",
+    chatListTab: "all",
     syncInProgress: false,
     autoSyncRequested: false,
     syncWatchdog: null,
@@ -22,7 +22,10 @@
     searchPool: null,
     searchTimer: null,
     panelMode: "chats",
-    outbound: { limits: null, queue: null, leads: [] },
+    aiProfile: null,
+    clients: { plan: null, leads: [], business: "", city: "" },
+    quickShortcuts: [],
+    shortcutsDraft: [],
     aiStatus: null,
   };
 
@@ -54,12 +57,15 @@
   async function api(path, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const isForm = options.body instanceof FormData;
     try {
       const res = await fetch(`${API}${path}`, {
         ...options,
         credentials: "include",
         signal: controller.signal,
-        headers: { ...headers(), ...(options.headers || {}) },
+        headers: isForm
+          ? { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}), ...(options.headers || {}) }
+          : { ...headers(), ...(options.headers || {}) },
       });
       if (res.status === 401) {
         logout();
@@ -116,7 +122,10 @@
     state.canEnqueueOutbound = false;
     state.canImportLeads = false;
     state.panelMode = "chats";
-    state.outbound = { limits: null, queue: null, leads: [] };
+    state.aiProfile = null;
+    state.clients = { leads: [], limits: null, search: "" };
+    state.quickShortcuts = [];
+    state.shortcutsDraft = [];
     state.wa = { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null };
     setWsBadge(false);
     updateWaBadge("disconnected");
@@ -124,12 +133,13 @@
     conversationList.innerHTML = "";
     emptyChat.classList.remove("hidden");
     activeChat.classList.add("hidden");
-    $("outbound-panel").classList.add("hidden");
+    $("ai-setup-panel").classList.add("hidden");
+    $("clients-panel").classList.add("hidden");
     $("sidebar-chats").classList.remove("hidden");
-    $("sidebar-outbound").classList.add("hidden");
     $("mode-chats").classList.add("active");
-    $("mode-outbound").classList.remove("active");
-    $("chat-area").classList.remove("outbound-mode");
+    $("mode-clients").classList.remove("active");
+    $("mode-ai").classList.remove("active");
+    $("chat-area").classList.remove("ai-setup-mode", "clients-mode");
     $("business-name").textContent = "—";
     $("user-label").textContent = "";
   }
@@ -504,7 +514,6 @@
       cwLink.classList.toggle("hidden", !showCw);
       if (showCw) cwLink.href = state.wa.chatwoot_inbox_url;
     }
-    $("empty-chat-label").classList.toggle("hidden", needsConnect && !state.conversations.length);
   }
 
   function showQrModal() {
@@ -566,11 +575,29 @@
     return c.display_name || c.contact_name || c.display_phone || c.contact_phone || "Contacto";
   }
 
+  function applyChatContactPhone(conv) {
+    const phoneEl = $("chat-phone");
+    if (!phoneEl) return;
+    phoneEl.textContent = convDisplayPhone(conv);
+    phoneEl.title = "";
+  }
+
   function refreshActiveChatHeader(conv) {
     if (!conv || conv.id !== state.activeId) return;
     $("chat-title").textContent = convTitle(conv);
-    $("chat-phone").textContent = convSubtitle(conv);
+    applyChatContactPhone(conv);
     syncChatToggles(conv);
+  }
+
+  function convDisplayPhone(c) {
+    if (c.display_phone) return c.display_phone;
+    const phone = c.contact_phone || "";
+    if (phone.startsWith("lid:")) {
+      const tail = phone.slice(4);
+      const ref = tail.length >= 5 ? tail.slice(-5) : tail;
+      return ref ? `Sin número · ref ····${ref}` : "Sin número visible";
+    }
+    return phone;
   }
 
   function convSubtitle(c) {
@@ -625,35 +652,43 @@
     state.conversations = sortConversations(rows);
   }
 
+  function getConversationInterest(conv) {
+    if (conv.interest_status === "interested") return "interested";
+    if (conv.interest_status === "not_interested") return "not_interested";
+    if (conv.status === "excluded") return "not_interested";
+    if (conv.bait_sent && !conv.ai_active) return "not_interested";
+    if (conv.bait_sent && conv.ai_active) return "interested";
+    if (conv.ai_active) return "interested";
+    return null;
+  }
+
+  function matchesInterestTab(conv, tab) {
+    if (tab === "all") return true;
+    const interest = getConversationInterest(conv);
+    if (tab === "interested") return interest === "interested";
+    if (tab === "not_interested") return interest === "not_interested";
+    return true;
+  }
+
   async function fetchConversations() {
-    const archived = state.chatListTab === "archived";
-    return sortConversations(await api(`/conversations?archived=${archived}`));
+    const rows = sortConversations(await api("/conversations?archived=false"));
+    if (state.chatListTab === "all") return rows;
+    return rows.filter((c) => matchesInterestTab(c, state.chatListTab));
   }
 
   async function fetchAllConversationsForSearch() {
-    const [active, archived] = await Promise.all([
-      api("/conversations?archived=false"),
-      api("/conversations?archived=true"),
-    ]);
-    const seen = new Set();
-    const merged = [];
-    for (const row of active.concat(archived)) {
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      merged.push(row);
-    }
-    return merged;
+    return sortConversations(await api("/conversations?archived=false"));
   }
 
   function setChatListTab(tab) {
     state.chatListTab = tab;
-    $("tab-chats-active").classList.toggle("active", tab === "active");
-    $("tab-chats-archived").classList.toggle("active", tab === "archived");
+    $("tab-chats-interested").classList.toggle("active", tab === "interested");
+    $("tab-chats-not-interested").classList.toggle("active", tab === "not_interested");
+    $("tab-chats-all").classList.toggle("active", tab === "all");
   }
 
   function upsertConversation(conv) {
-    const inArchivedTab = state.chatListTab === "archived";
-    const belongsHere = !!conv.is_archived === inArchivedTab;
+    const belongsHere = matchesInterestTab(conv, state.chatListTab);
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
     if (!belongsHere) {
       if (idx >= 0) {
@@ -684,12 +719,18 @@
         : '<span class="muted">Importando chats y contactos de tu celular…</span>';
       conversationList.appendChild(syncLi);
     }
-    const emptyLabel =
-      state.chatListTab === "archived" ? "Sin chats archivados" : "Sin conversaciones";
+    const emptyLabels = {
+      interested: "Sin contactos interesados",
+      not_interested: "Sin contactos no interesados",
+      all: "Sin conversaciones",
+    };
+    const emptyLabel = emptyLabels[state.chatListTab] || emptyLabels.all;
 
     let list = state.searchQuery && state.searchPool ? state.searchPool : state.conversations;
     if (state.searchQuery) {
       list = list.filter((c) => matchesSearch(c, state.searchQuery));
+    } else if (state.chatListTab !== "all") {
+      list = list.filter((c) => matchesInterestTab(c, state.chatListTab));
     } else {
       list = sortConversations(list);
     }
@@ -705,6 +746,8 @@
       li.className = "conversation-item" + (c.id === state.activeId ? " active" : "");
       li.dataset.id = c.id;
       const tags = [];
+      if (c.interest_status === "interested") tags.push('<span class="interest-tag interested">interesado</span>');
+      else if (c.interest_status === "not_interested") tags.push('<span class="interest-tag not">no interesado</span>');
       if (c.mode === "manual") tags.push('<span class="mode-tag">manual</span>');
       if (c.ai_active) tags.push('<span class="ai-tag">IA</span>');
       const subtitle = convSubtitle(c);
@@ -863,19 +906,20 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function statRow(label, value, valueClass = "") {
-    return `<div class="outbound-stat-row"><span>${escapeHtml(label)}</span><strong class="${valueClass}">${escapeHtml(String(value))}</strong></div>`;
-  }
-
   function switchPanelMode(mode) {
     state.panelMode = mode;
     const isChats = mode === "chats";
+    const isClients = mode === "clients";
+    const isAi = mode === "ai";
+
     $("mode-chats").classList.toggle("active", isChats);
-    $("mode-outbound").classList.toggle("active", !isChats);
+    $("mode-clients").classList.toggle("active", isClients);
+    $("mode-ai").classList.toggle("active", isAi);
     $("sidebar-chats").classList.toggle("hidden", !isChats);
-    $("sidebar-outbound").classList.toggle("hidden", isChats);
-    $("chat-area").classList.toggle("outbound-mode", !isChats);
-    $("outbound-panel").classList.toggle("hidden", isChats);
+    $("chat-area").classList.toggle("ai-setup-mode", isAi);
+    $("chat-area").classList.toggle("clients-mode", isClients);
+    $("ai-setup-panel").classList.toggle("hidden", !isAi);
+    $("clients-panel").classList.toggle("hidden", !isClients);
 
     if (isChats) {
       if (state.activeId) {
@@ -886,123 +930,488 @@
         activeChat.classList.add("hidden");
       }
     } else {
-      loadOutboundPanel();
+      emptyChat.classList.add("hidden");
+      activeChat.classList.add("hidden");
+      if (isAi) loadAiSetupPanel();
+      if (isClients) loadClientsPanel();
     }
+    renderQuickShortcuts();
   }
 
-  function renderOutboundLimits(limits) {
-    const el = $("outbound-limits");
-    const trial = limits.is_trial !== false;
-    const rows = [];
+  const MAPS_MOCK_PLANS = {
+    lavander: {
+      summary: "Tu lavandería encaja con negocios que generan mucha ropa sucia y necesitan un proveedor constante.",
+      searches: [
+        { label: "Hoteles", query: "hoteles", why: "Camas, toallas y sábanas todos los días." },
+        { label: "Moteles", query: "moteles", why: "Alto volumen de ropa de cama y toallas." },
+        { label: "Hostels", query: "hostels", why: "Rotación de huéspedes y lavandería frecuente." },
+        { label: "Restaurantes", query: "restaurantes", why: "Manteles, delantales y paños de cocina." },
+        { label: "Gimnasios", query: "gimnasios", why: "Toallas y uniformes de entrenadores." },
+      ],
+    },
+    default: {
+      summary: "Buscamos empresas locales que suelen comprar servicios como el tuyo y tienen teléfono visible en Google Maps.",
+      searches: [
+        { label: "Comercios del sector", query: "empresas", why: "Negocios relacionados con tu rubro." },
+        { label: "Pymes locales", query: "pymes", why: "Empresas pequeñas con decisión rápida." },
+        { label: "Oficinas", query: "oficinas", why: "Posibles clientes corporativos." },
+        { label: "Restaurantes", query: "restaurantes", why: "Alto tráfico y necesidad de proveedores." },
+      ],
+    },
+  };
 
-    $("outbound-disclaimer-banner").classList.toggle("hidden", !!limits.disclaimer_accepted);
+  const MAPS_MOCK_NAMES = {
+    hoteles: ["Hotel Plaza Real", "Hotel Andino", "Hotel Central Park", "Hotel Montaña Verde", "Hotel Río Grande"],
+    moteles: ["Motel Aurora", "Motel Las Palmas", "Motel Express 24", "Motel El Descanso"],
+    hostels: ["Hostel Nomada", "Backpackers House", "Hostel Centro", "The Traveler's Inn"],
+    restaurantes: ["Restaurante La Fogata", "Asados del Norte", "Café & Brunch", "Sabor Criollo", "Mariscos del Puerto"],
+    gimnasios: ["Gym PowerFit", "CrossBox Elite", "Fitness Total", "Iron Gym"],
+    empresas: ["Comercializadora Andina", "Servicios Integrales SAS", "Grupo Empresarial Norte"],
+    pymes: ["Distribuidora El Éxito", "Importaciones La 80", "Soluciones Locales SAS"],
+    oficinas: ["Torre Empresarial 45", "Centro de Negocios Nova", "Oficinas Parque Central"],
+  };
 
-    if (trial) {
-      rows.push(statRow("Trial usado", `${limits.trial_bait_used} / ${limits.trial_bait_limit}`));
-      rows.push(
-        statRow("Restantes", String(limits.trial_bait_remaining), limits.trial_bait_remaining > 0 ? "ok" : "bad")
-      );
-    } else {
-      rows.push(statRow("Enviados hoy", `${limits.daily_bait_sent} / ${limits.daily_bait_limit}`));
-      rows.push(
-        statRow("Restantes hoy", String(limits.daily_remaining ?? 0), (limits.daily_remaining ?? 0) > 0 ? "ok" : "bad")
-      );
+  function inferMapsMockPlan(businessText) {
+    const lower = normalizeForSearch(businessText);
+    if (lower.includes("lavander") || lower.includes("lavanderia") || lower.includes("tintorer")) {
+      return MAPS_MOCK_PLANS.lavander;
     }
-
-    const statusText = limits.can_send_bait ? "Puede enviar" : limits.block_reason || "Bloqueado";
-    rows.push(statRow("Estado", statusText, limits.can_send_bait ? "ok" : "warn"));
-    el.innerHTML = rows.join("");
-
-    const maxLimit = trial ? limits.trial_bait_remaining : (limits.daily_remaining ?? limits.daily_bait_limit);
-    const limitInput = $("campaign-limit");
-    if (maxLimit > 0) {
-      limitInput.max = Math.min(100, maxLimit);
-      if (parseInt(limitInput.value, 10) > maxLimit) limitInput.value = maxLimit;
-    }
+    return MAPS_MOCK_PLANS.default;
   }
 
-  function renderOutboundQueue(queue) {
-    const el = $("outbound-queue-stats");
-    el.innerHTML = [
-      statRow("Pendientes en cola", String(queue.queue_pending)),
-      statRow("Procesando", String(queue.queue_processing)),
-      statRow("Leads pendientes", String(queue.leads_pending)),
-      statRow("Envíos", queue.outbound_paused ? "Pausados" : "Activos", queue.outbound_paused ? "warn" : "ok"),
-    ].join("");
-
-    $("outbound-pause-btn").classList.toggle("hidden", !state.canEnqueueOutbound || queue.outbound_paused);
-    $("outbound-resume-btn").classList.toggle("hidden", !state.canEnqueueOutbound || !queue.outbound_paused);
+  function buildMapsMockLeads(plan, city, limit = 12) {
+    const cityLabel = city || "tu ciudad";
+    const leads = [];
+    const searches = plan.searches || [];
+    let i = 0;
+    while (leads.length < limit && i < limit * 3) {
+      const search = searches[i % searches.length];
+      const pool = MAPS_MOCK_NAMES[search.query] || MAPS_MOCK_NAMES.empresas;
+      const name = pool[Math.floor(i / searches.length) % pool.length];
+      const phoneBase = 3001000000 + (i * 1737) % 8999999;
+      leads.push({
+        name: `${name}${i >= searches.length ? ` ${Math.floor(i / searches.length) + 1}` : ""}`.trim(),
+        phone: `+57${phoneBase}`,
+        address: `Cra ${10 + (i % 40)} # ${20 + (i % 50)}-${30 + (i % 60)}, ${cityLabel}`,
+        category: search.label,
+      });
+      i += 1;
+    }
+    return leads.slice(0, limit);
   }
 
-  function renderLeadsList(leads) {
-    const ul = $("leads-list");
-    if (!leads.length) {
-      ul.innerHTML = '<li class="conversation-item"><span class="muted">Sin leads — importa números</span></li>';
+  function renderMapsPlan(plan, business, city) {
+    const card = $("maps-plan-card");
+    const list = $("maps-plan-list");
+    if (!card || !list) return;
+    $("maps-plan-title").textContent = `Para «${business.slice(0, 60)}${business.length > 60 ? "…" : ""}» en ${city || "tu zona"}`;
+    $("maps-plan-summary").textContent = plan.summary;
+    list.innerHTML = (plan.searches || []).map((s) => `
+      <li class="maps-plan-item">
+        <strong>${escapeHtml(s.label)}</strong>
+        <span class="muted small">${escapeHtml(s.why)}</span>
+      </li>
+    `).join("");
+    card.classList.remove("hidden");
+  }
+
+  function renderMapsResults(leads, city) {
+    const card = $("maps-results-card");
+    const body = $("maps-results-body");
+    if (!card || !body) return;
+    $("maps-results-title").textContent = `${leads.length} posibles clientes`;
+    $("maps-results-meta").textContent = `En ${city || "tu zona"} · con teléfono para contactar en frío`;
+    body.innerHTML = leads.map((l) => `
+      <tr>
+        <td>${escapeHtml(l.name)}</td>
+        <td>${escapeHtml(l.phone)}</td>
+        <td>${escapeHtml(l.address)}</td>
+        <td><span class="maps-type-pill">${escapeHtml(l.category)}</span></td>
+      </tr>
+    `).join("");
+    card.classList.remove("hidden");
+  }
+
+  function downloadMapsMockExcel(leads, business, city) {
+    const headers = ["Nombre", "Teléfono", "Dirección", "Tipo", "Negocio origen", "Ciudad"];
+    const rows = leads.map((l) => [
+      l.name,
+      l.phone,
+      l.address,
+      l.category,
+      business,
+      city,
+    ]);
+    const escapeCsv = (v) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = normalizeForSearch(city || "clientes").replace(/\s+/g, "-").slice(0, 24) || "clientes";
+    a.href = url;
+    a.download = `clientes-${slug}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function resetMapsProspectPanel() {
+    state.clients.plan = null;
+    state.clients.leads = [];
+    $("maps-plan-card")?.classList.add("hidden");
+    $("maps-results-card")?.classList.add("hidden");
+    $("maps-reset-btn")?.classList.add("hidden");
+    $("maps-search-btn")?.classList.remove("hidden");
+    $("maps-search-status").textContent = "";
+    $("maps-business-input")?.removeAttribute("disabled");
+    $("maps-city-input")?.removeAttribute("disabled");
+  }
+
+  function loadClientsPanel() {
+    resetMapsProspectPanel();
+    const business = state.clients.business || "";
+    const city = state.clients.city || "";
+    if ($("maps-business-input")) $("maps-business-input").value = business;
+    if ($("maps-city-input")) $("maps-city-input").value = city;
+  }
+
+  async function runMapsProspectMock() {
+    const businessInput = $("maps-business-input");
+    const cityInput = $("maps-city-input");
+    const status = $("maps-search-status");
+    const btn = $("maps-search-btn");
+    const business = businessInput?.value.trim() || "";
+    const city = cityInput?.value.trim() || "";
+
+    if (business.length < 4) {
+      status.textContent = "Cuéntanos un poco más sobre tu negocio (mínimo unas palabras).";
       return;
     }
-    ul.innerHTML = leads
-      .map((l) => {
-        const name = l.name || l.phone_e164;
-        const statusLabel = (l.status || "").replace(/_/g, " ");
-        return `<li class="conversation-item lead-item">
-          <strong>${escapeHtml(name)}</strong>
-          <span class="muted small">${escapeHtml(l.phone_e164)}</span>
-          <span class="lead-status">${escapeHtml(statusLabel)}</span>
-        </li>`;
-      })
-      .join("");
-  }
-
-  function updateOutboundControls() {
-    const limits = state.outbound.limits;
-    const canAct = limits?.can_send_bait && limits?.disclaimer_accepted;
-
-    $("import-leads-btn").disabled = !state.canImportLeads;
-    $("leads-import-input").disabled = !state.canImportLeads;
-    $("start-campaign-btn").disabled = !state.canEnqueueOutbound || !canAct;
-    $("campaign-name").disabled = !state.canEnqueueOutbound;
-    $("campaign-limit").disabled = !state.canEnqueueOutbound;
-    $("campaign-template").disabled = !state.canEnqueueOutbound;
-    $("accept-disclaimer-btn").disabled = !state.canEnqueueOutbound;
-  }
-
-  function parseLeadsImport(text) {
-    const leads = [];
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const parts = trimmed.split(",").map((s) => s.trim());
-      const phone = parts[0];
-      const name = parts.slice(1).join(", ").trim();
-      if (phone) leads.push({ phone, name });
+    if (city.length < 2) {
+      status.textContent = "Indica la ciudad o zona donde quieres buscar.";
+      return;
     }
-    return leads;
+
+    state.clients.business = business;
+    state.clients.city = city;
+    btn.disabled = true;
+    businessInput.disabled = true;
+    cityInput.disabled = true;
+    $("maps-plan-card")?.classList.add("hidden");
+    $("maps-results-card")?.classList.add("hidden");
+    status.textContent = "La IA está analizando tu negocio…";
+
+    await new Promise((r) => setTimeout(r, 900));
+    const plan = inferMapsMockPlan(business);
+    state.clients.plan = plan;
+    renderMapsPlan(plan, business, city);
+
+    status.textContent = "Buscando en Google Maps (vista previa)…";
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const leads = buildMapsMockLeads(plan, city, 12);
+    state.clients.leads = leads;
+    renderMapsResults(leads, city);
+
+    status.textContent = `✓ Vista previa lista — en producción traeremos hasta 100 contactos reales por día.`;
+    btn.classList.add("hidden");
+    $("maps-reset-btn")?.classList.remove("hidden");
+    btn.disabled = false;
   }
 
-  async function loadOutboundPanel() {
-    $("outbound-limits").innerHTML = '<p class="muted">Cargando…</p>';
-    $("outbound-queue-stats").innerHTML = '<p class="muted">Cargando…</p>';
+  const BIZ_FIELD_IDS = [
+    "biz-industry",
+    "biz-products",
+    "biz-target",
+    "biz-prices",
+    "biz-hours",
+    "biz-tone",
+    "biz-restrictions",
+  ];
+
+  function readBizForm() {
+    return {
+      industry: $("biz-industry")?.value.trim() || "",
+      products_services: $("biz-products")?.value.trim() || "",
+      target_customer: $("biz-target")?.value.trim() || "",
+      price_range: $("biz-prices")?.value.trim() || "",
+      location_hours: $("biz-hours")?.value.trim() || "",
+      tone: $("biz-tone")?.value.trim() || "",
+      restrictions: $("biz-restrictions")?.value.trim() || "",
+    };
+  }
+
+  function fillBizForm(profile) {
+    $("biz-industry").value = profile?.industry || "";
+    $("biz-products").value = profile?.products_services || "";
+    $("biz-target").value = profile?.target_customer || "";
+    $("biz-prices").value = profile?.price_range || "";
+    $("biz-hours").value = profile?.location_hours || "";
+    $("biz-tone").value = profile?.tone || "";
+    $("biz-restrictions").value = profile?.restrictions || "";
+    renderBizSummary(profile);
+    updateAiSetupControls();
+  }
+
+  function renderBizSummary(profile) {
+    const list = $("biz-summary-list");
+    if (!list) return;
+    const lines = profile?.ai_summary || [];
+    if (!lines.length) {
+      list.innerHTML = '<li class="muted">Completa las preguntas y guarda.</li>';
+      return;
+    }
+    list.innerHTML = lines.map((line) => `<li><span class="biz-check">✓</span> ${escapeHtml(line)}</li>`).join("");
+  }
+
+  function updateAiSetupControls() {
+    const ro = !state.canManageGlobal;
+    BIZ_FIELD_IDS.forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = ro;
+    });
+    if ($("biz-save-btn")) $("biz-save-btn").disabled = ro;
+  }
+
+  function setBizSaveStatus(text) {
+    const el = $("biz-save-status");
+    if (el) el.textContent = text || "";
+  }
+
+  async function loadAiSetupPanel() {
+    setBizSaveStatus("");
     try {
-      const [limits, queue, leads] = await Promise.all([
-        api("/outbound/limits"),
-        api("/outbound/queue/stats"),
-        api("/outbound/leads?limit=80"),
-      ]);
-      state.outbound.limits = limits;
-      state.outbound.queue = queue;
-      state.outbound.leads = leads;
-      renderOutboundLimits(limits);
-      renderOutboundQueue(queue);
-      renderLeadsList(leads);
-      updateOutboundControls();
+      const profile = await api("/outbound/business-profile");
+      state.aiProfile = profile;
+      fillBizForm(profile);
     } catch (err) {
-      $("outbound-limits").innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
-      $("outbound-queue-stats").innerHTML = "";
+      setBizSaveStatus(err.message);
+      fillBizForm(null);
+    }
+    await loadQuickShortcuts();
+    renderAiShortcutsSummary();
+  }
+
+  async function saveAiSetup() {
+    if (!state.canManageGlobal) return;
+    const btn = $("biz-save-btn");
+    btn.disabled = true;
+    setBizSaveStatus("Guardando…");
+    try {
+      const payload = readBizForm();
+      const profile = await api("/outbound/business-profile", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      state.aiProfile = profile;
+      fillBizForm(profile);
+      setBizSaveStatus("✓ Guardado — tu IA ya conoce tu negocio");
+    } catch (err) {
+      setBizSaveStatus(err.message);
+    } finally {
+      updateAiSetupControls();
     }
   }
 
-  function refreshOutboundIfVisible() {
-    if (state.panelMode === "outbound") loadOutboundPanel();
+  function refreshAiSetupIfVisible() {
+    if (state.panelMode === "ai") loadAiSetupPanel();
+  }
+
+  function newShortcutDraft() {
+    return {
+      id: crypto.randomUUID(),
+      label: "",
+      type: "text",
+      text: "",
+      image_path: null,
+      image_url: null,
+    };
+  }
+
+  async function loadQuickShortcuts() {
+    try {
+      state.quickShortcuts = await api("/quick-shortcuts");
+    } catch {
+      state.quickShortcuts = [];
+    }
+    renderQuickShortcuts();
+    renderAiShortcutsSummary();
+  }
+
+  function renderAiShortcutsSummary() {
+    const list = $("ai-shortcuts-summary");
+    const btn = $("ai-shortcuts-config-btn");
+    if (!list) return;
+    const items = state.quickShortcuts || [];
+    if (!items.length) {
+      list.innerHTML = '<li class="muted">Aún no tienes atajos — agrega Menú, Precios, Horarios…</li>';
+    } else {
+      list.innerHTML = items.map((s) => {
+        const kind = s.type === "image" ? "Foto" : "Texto";
+        return `<li><strong>${escapeHtml(s.label)}</strong> <span class="muted small">· ${kind}</span></li>`;
+      }).join("");
+    }
+    if (btn) btn.classList.toggle("hidden", !state.canManageGlobal);
+  }
+
+  function renderQuickShortcuts() {
+    const wrap = $("quick-shortcuts-wrap");
+    const bar = $("quick-shortcuts-bar");
+    if (!wrap || !bar) return;
+
+    const show = state.panelMode === "chats" && state.activeId && state.canWrite;
+    wrap.classList.toggle("hidden", !show);
+
+    if (!show) {
+      bar.innerHTML = "";
+      return;
+    }
+
+    const items = state.quickShortcuts || [];
+    const pills = items.map((s) => {
+      const icon = s.type === "image" ? "🖼 " : "";
+      return `<button type="button" class="quick-shortcut-pill" data-shortcut-id="${escapeHtml(s.id)}" title="Enviar ${escapeHtml(s.label)}">${icon}${escapeHtml(s.label)}</button>`;
+    }).join("");
+
+    const editBtn = state.canManageGlobal
+      ? `<button type="button" class="quick-shortcut-pill quick-shortcut-edit" id="edit-shortcuts-btn" title="Configurar atajos (todos los chats)">⚙ Atajos</button>`
+      : "";
+
+    bar.innerHTML = pills + editBtn;
+    bar.querySelectorAll("[data-shortcut-id]").forEach((btn) => {
+      btn.addEventListener("click", () => sendQuickShortcut(btn.dataset.shortcutId));
+    });
+    $("edit-shortcuts-btn")?.addEventListener("click", openShortcutsModal);
+  }
+
+  async function sendQuickShortcut(shortcutId) {
+    if (!state.activeId || !state.canWrite) return;
+    const pill = document.querySelector(`[data-shortcut-id="${shortcutId}"]`);
+    if (pill) pill.disabled = true;
+    try {
+      await api("/whatsapp/status", {}, 8000).catch(() => null);
+      const msg = await api(`/conversations/${state.activeId}/messages/shortcut`, {
+        method: "POST",
+        body: JSON.stringify({ shortcut_id: shortcutId }),
+      });
+      const exists = state.messages.some((m) => m.id === msg.id);
+      if (!exists) {
+        state.messages.push(msg);
+        state._messagesSig = state.messages
+          .map((m) => m.id || `${m.body}|${m.created_at}`)
+          .join("\n");
+        renderMessages();
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      if (pill) pill.disabled = false;
+    }
+  }
+
+  function openShortcutsModal() {
+    state.shortcutsDraft = (state.quickShortcuts || []).map((s) => ({ ...s }));
+    if (!state.shortcutsDraft.length) state.shortcutsDraft.push(newShortcutDraft());
+    renderShortcutsEditor();
+    $("shortcuts-modal").classList.remove("hidden");
+  }
+
+  function closeShortcutsModal() {
+    $("shortcuts-modal").classList.add("hidden");
+  }
+
+  function renderShortcutsEditor() {
+    const list = $("shortcuts-editor-list");
+    if (!list) return;
+    list.innerHTML = state.shortcutsDraft.map((s, idx) => {
+      const isImage = s.type === "image";
+      const thumb = s.image_url
+        ? `<img src="${escapeHtml(s.image_url)}" class="shortcut-thumb" alt="" />`
+        : "";
+      return `
+        <div class="shortcut-editor-row" data-idx="${idx}">
+          <input type="text" class="shortcut-label" maxlength="20" placeholder="Nombre — ej: Menú" value="${escapeHtml(s.label || "")}" />
+          <div class="shortcut-type-row">
+            <label><input type="radio" name="stype-${idx}" value="text" ${!isImage ? "checked" : ""} /> Texto</label>
+            <label><input type="radio" name="stype-${idx}" value="image" ${isImage ? "checked" : ""} /> Foto</label>
+          </div>
+          <div class="shortcut-text-wrap ${isImage ? "hidden" : ""}">
+            <textarea class="shortcut-text" rows="2" maxlength="500" placeholder="Ej: Hola! Aquí tienes nuestros precios…">${escapeHtml(s.text || "")}</textarea>
+          </div>
+          <div class="shortcut-image-wrap ${isImage ? "" : "hidden"}">
+            <label class="btn ghost small wa-upload-btn">
+              📷 Subir foto
+              <input type="file" class="shortcut-image-file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+            </label>
+            ${thumb}
+          </div>
+          <button type="button" class="btn-link shortcut-remove-btn">Quitar</button>
+        </div>`;
+    }).join("");
+
+    list.querySelectorAll(".shortcut-editor-row").forEach((row) => {
+      const idx = parseInt(row.dataset.idx, 10);
+      row.querySelector(".shortcut-label")?.addEventListener("input", (e) => {
+        state.shortcutsDraft[idx].label = e.target.value;
+      });
+      row.querySelectorAll(`input[name="stype-${idx}"]`).forEach((radio) => {
+        radio.addEventListener("change", (e) => {
+          state.shortcutsDraft[idx].type = e.target.value;
+          renderShortcutsEditor();
+        });
+      });
+      row.querySelector(".shortcut-text")?.addEventListener("input", (e) => {
+        state.shortcutsDraft[idx].text = e.target.value;
+      });
+      row.querySelector(".shortcut-image-file")?.addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await api("/outbound/assets", { method: "POST", body: fd }, 30000);
+          state.shortcutsDraft[idx].image_path = res.image_path;
+          state.shortcutsDraft[idx].image_url = res.image_url;
+          renderShortcutsEditor();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+      row.querySelector(".shortcut-remove-btn")?.addEventListener("click", () => {
+        state.shortcutsDraft.splice(idx, 1);
+        if (!state.shortcutsDraft.length) state.shortcutsDraft.push(newShortcutDraft());
+        renderShortcutsEditor();
+      });
+    });
+  }
+
+  async function saveQuickShortcuts() {
+    const payload = state.shortcutsDraft
+      .filter((s) => s.label?.trim())
+      .map((s) => ({
+        id: s.id,
+        label: s.label.trim(),
+        type: s.type,
+        text: s.type === "text" ? (s.text || "").trim() : null,
+        image_path: s.type === "image" ? s.image_path : null,
+      }))
+      .filter((s) => (s.type === "text" ? s.text : s.image_path));
+
+    $("shortcuts-save-btn").disabled = true;
+    try {
+      state.quickShortcuts = await api("/quick-shortcuts", {
+        method: "PUT",
+        body: JSON.stringify({ shortcuts: payload }),
+      });
+      closeShortcutsModal();
+      renderQuickShortcuts();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      $("shortcuts-save-btn").disabled = false;
+    }
   }
 
   function aiBlockReasonForConv(conv) {
@@ -1041,6 +1450,7 @@
     $("toggle-ai-chat").checked = !!conv.ai_active;
     $("toggle-mode-manual").disabled = !state.canWrite;
     $("toggle-ai-chat").disabled = !state.canWrite;
+    syncInterestButtons(conv);
     const canRetry = state.canWrite && conv.ai_active && state.tenant?.ai_global_enabled && conv.mode !== "manual";
     $("ai-retry-btn").classList.toggle("hidden", !canRetry);
     $("ai-retry-btn").disabled = !canRetry;
@@ -1055,6 +1465,41 @@
     }
   }
 
+  function syncInterestButtons(conv) {
+    const interestedBtn = $("mark-interested-btn");
+    const notInterestedBtn = $("mark-not-interested-btn");
+    if (!interestedBtn || !notInterestedBtn) return;
+    const status = conv?.interest_status || null;
+    interestedBtn.classList.toggle("active", status === "interested");
+    interestedBtn.classList.toggle("interested", status === "interested");
+    notInterestedBtn.classList.toggle("active", status === "not_interested");
+    notInterestedBtn.classList.toggle("not-interested", status === "not_interested");
+    const disabled = !state.canWrite;
+    interestedBtn.disabled = disabled;
+    notInterestedBtn.disabled = disabled;
+  }
+
+  async function setConversationInterest(status) {
+    if (!state.activeId || !state.canWrite) return;
+    const conv = state.conversations.find((c) => c.id === state.activeId);
+    const next = conv?.interest_status === status ? null : status;
+    const interestedBtn = $("mark-interested-btn");
+    const notInterestedBtn = $("mark-not-interested-btn");
+    interestedBtn.disabled = true;
+    notInterestedBtn.disabled = true;
+    try {
+      const updated = await api(`/conversations/${state.activeId}/interest`, {
+        method: "PATCH",
+        body: JSON.stringify({ interest_status: next }),
+      });
+      upsertConversation(updated);
+      if (updated.id === state.activeId) syncChatToggles(updated);
+    } catch (err) {
+      alert(err.message);
+      syncInterestButtons(conv);
+    }
+  }
+
   async function selectConversation(id) {
     pullInFlight = false;
     state.activeId = id;
@@ -1066,9 +1511,10 @@
     emptyChat.classList.add("hidden");
     activeChat.classList.remove("hidden");
     $("chat-title").textContent = convTitle(conv);
-    $("chat-phone").textContent = convSubtitle(conv);
+    applyChatContactPhone(conv);
     syncChatToggles(conv);
     renderConversationList();
+    renderQuickShortcuts();
 
     try {
       const msgs = dedupeMessages(await api(`/conversations/${id}/messages`));
@@ -1097,6 +1543,7 @@
         api("/whatsapp/status", {}, 8000),
         api("/ai/status", {}, 15000).catch(() => null),
       ]);
+      await loadQuickShortcuts();
 
       state.user = me;
       state.tenant = tenant;
@@ -1300,7 +1747,7 @@
         break;
       case "outbound.queued":
       case "outbound.sent":
-        refreshOutboundIfVisible();
+        if (state.panelMode === "clients") loadClientsPanel();
         if (event.type === "outbound.sent" && event.conversation_id) {
           fetchConversations()
             .then((rows) => {
@@ -1618,107 +2065,31 @@
     }
   }
 
-  $("tab-chats-active").addEventListener("click", () => switchChatTab("active"));
-  $("tab-chats-archived").addEventListener("click", () => switchChatTab("archived"));
+  $("tab-chats-interested").addEventListener("click", () => switchChatTab("interested"));
+  $("tab-chats-not-interested").addEventListener("click", () => switchChatTab("not_interested"));
+  $("tab-chats-all").addEventListener("click", () => switchChatTab("all"));
 
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
-  $("mode-outbound").addEventListener("click", () => switchPanelMode("outbound"));
-  $("refresh-outbound").addEventListener("click", () => loadOutboundPanel());
-
-  $("accept-disclaimer-btn").addEventListener("click", async () => {
-    if (!state.canEnqueueOutbound) return;
-    const btn = $("accept-disclaimer-btn");
-    btn.disabled = true;
-    try {
-      state.tenant = await api("/tenants/me/accept-disclaimer", { method: "POST" });
-      await loadOutboundPanel();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      btn.disabled = false;
-    }
+  $("mode-clients").addEventListener("click", () => switchPanelMode("clients"));
+  $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
+  $("biz-save-btn").addEventListener("click", () => saveAiSetup());
+  $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
+  $("maps-search-btn").addEventListener("click", () => runMapsProspectMock());
+  $("maps-reset-btn").addEventListener("click", () => resetMapsProspectPanel());
+  $("maps-download-btn").addEventListener("click", () => {
+    if (!state.clients.leads?.length) return;
+    downloadMapsMockExcel(state.clients.leads, state.clients.business, state.clients.city);
   });
 
-  $("import-leads-btn").addEventListener("click", async () => {
-    if (!state.canImportLeads) return;
-    const leads = parseLeadsImport($("leads-import-input").value);
-    const resultEl = $("import-leads-result");
-    if (!leads.length) {
-      resultEl.textContent = "Agrega al menos un teléfono válido.";
-      return;
-    }
-    const btn = $("import-leads-btn");
-    btn.disabled = true;
-    resultEl.textContent = "Importando…";
-    try {
-      const res = await api("/outbound/leads", {
-        method: "POST",
-        body: JSON.stringify({ leads, source: "manual" }),
-      });
-      resultEl.textContent = `+${res.added} agregados, ${res.skipped} omitidos, ${res.invalid} inválidos`;
-      $("leads-import-input").value = "";
-      await loadOutboundPanel();
-    } catch (err) {
-      resultEl.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      updateOutboundControls();
-    }
+  $("shortcuts-add-btn").addEventListener("click", () => {
+    if (state.shortcutsDraft.length >= 12) return;
+    state.shortcutsDraft.push(newShortcutDraft());
+    renderShortcutsEditor();
   });
-
-  $("start-campaign-btn").addEventListener("click", async () => {
-    if (!state.canEnqueueOutbound) return;
-    const btn = $("start-campaign-btn");
-    const resultEl = $("campaign-result");
-    const limit = parseInt($("campaign-limit").value, 10);
-    const name = $("campaign-name").value.trim() || "Campaña";
-    const template = $("campaign-template").value.trim();
-
-    if (!limit || limit < 1) {
-      resultEl.textContent = "Indica una cantidad válida.";
-      return;
-    }
-
-    btn.disabled = true;
-    resultEl.textContent = "Encolando…";
-    try {
-      const body = { name, limit };
-      if (template) body.message_template = template;
-      const res = await api("/outbound/campaigns/enqueue", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      resultEl.textContent = res.queued
-        ? `${res.queued} carnadas en cola${res.skipped ? ` (${res.skipped} omitidos)` : ""}`
-        : "Nada encolado";
-      await loadOutboundPanel();
-    } catch (err) {
-      resultEl.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      updateOutboundControls();
-    }
-  });
-
-  $("outbound-pause-btn").addEventListener("click", async () => {
-    if (!state.canEnqueueOutbound) return;
-    try {
-      await api("/outbound/pause", { method: "POST", body: JSON.stringify({ paused: true }) });
-      await loadOutboundPanel();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-
-  $("outbound-resume-btn").addEventListener("click", async () => {
-    if (!state.canEnqueueOutbound) return;
-    try {
-      await api("/outbound/pause", { method: "POST", body: JSON.stringify({ paused: false }) });
-      await loadOutboundPanel();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
+  $("shortcuts-save-btn").addEventListener("click", () => saveQuickShortcuts());
+  $("shortcuts-cancel-btn").addEventListener("click", closeShortcutsModal);
+  $("shortcuts-modal-close").addEventListener("click", closeShortcutsModal);
+  $("shortcuts-modal-backdrop").addEventListener("click", closeShortcutsModal);
 
   $("chat-search").addEventListener("input", (e) => {
     state.searchQuery = e.target.value.trim();
@@ -1785,6 +2156,9 @@
     }
   });
 
+  $("mark-interested-btn").addEventListener("click", () => setConversationInterest("interested"));
+  $("mark-not-interested-btn").addEventListener("click", () => setConversationInterest("not_interested"));
+
   $("toggle-ai-chat").addEventListener("change", async (e) => {
     if (!state.activeId || !state.canWrite) return;
     try {
@@ -1842,7 +2216,6 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && state.user) {
       refreshWaStatus();
-      refreshOutboundIfVisible();
     }
   });
 

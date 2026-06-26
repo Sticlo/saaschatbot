@@ -34,7 +34,7 @@ from app.application.outbound.outbound_dedup_service import (
     should_skip_outbound,
 )
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
-from app.application.whatsapp.whatsapp_service import send_text_message
+from app.application.whatsapp.whatsapp_service import send_bait_message
 from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 
 log = logging.getLogger(__name__)
@@ -129,6 +129,7 @@ def enqueue_campaign(
     limit: Optional[int] = None,
     campaign_name: str = "Campaña",
     message_template: Optional[str] = None,
+    bait_template_id: Optional[uuid.UUID] = None,
 ) -> dict:
     """Encola carnadas para leads pending. Retorna stats o error."""
     ok, reason, _ = check_bait_quota(db, tenant, count=1)
@@ -163,18 +164,32 @@ def enqueue_campaign(
             return {"ok": False, "error": reason}
         leads = leads[:cap]
 
+    from app.application.outbound.bait_template_service import get_template, template_to_extras
+
+    bait_template = None
+    message_extras: dict = {}
+    if bait_template_id:
+        bait_template = get_template(db, tenant.id, bait_template_id)
+        if bait_template is None:
+            return {"ok": False, "error": "Plantilla de carnada no encontrada"}
+        message_extras = template_to_extras(bait_template)
+
     campaign = Campaign(
         tenant_id=tenant.id,
         name=campaign_name,
         status=CampaignStatus.RUNNING.value,
         message_template=message_template,
+        bait_template_id=bait_template.id if bait_template else None,
         total_queued=len(leads),
         started_at=datetime.now(timezone.utc),
     )
     db.add(campaign)
     db.flush()
 
-    template = get_bait_template(db, tenant, campaign)
+    if bait_template and not message_template:
+        template = bait_template.text.strip()
+    else:
+        template = get_bait_template(db, tenant, campaign)
     now = datetime.now(timezone.utc)
     queued = 0
 
@@ -196,6 +211,7 @@ def enqueue_campaign(
             phone_e164=lead.phone_e164,
             contact_name=lead.name,
             message_body=body,
+            message_extras=message_extras or None,
             status=SendQueueStatus.PENDING.value,
             scheduled_at=_compute_scheduled_at(now, idx),
         )
@@ -275,13 +291,14 @@ def process_send_queue_item(db: Session, item: SendQueueItem) -> bool:
     )
 
     try:
-        message = send_text_message(
+        message = send_bait_message(
             db,
             tenant=tenant,
             session=session,
             conversation=conversation,
             text=item.message_body,
             source=MessageSource.BAIT.value,
+            extras=item.message_extras,
         )
         conversation.bait_sent = True
         conversation.ai_active = False

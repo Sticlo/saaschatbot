@@ -16,6 +16,7 @@ from app.domain.entities.enums import (
     UserRole,
     WhatsAppStatus,
 )
+from app.domain.entities.bait_template import BaitTemplate
 from app.domain.entities.outbound import Campaign, Exclusion, Lead, SendQueueItem
 from app.domain.entities.plan import DEFAULT_PLAN_ID, Plan
 from app.domain.entities.subscription import Subscription
@@ -26,6 +27,7 @@ from app.domain.entities.whatsapp_session import WhatsAppSession
 
 __all__ = [
     "AuditLog",
+    "BaitTemplate",
     "Campaign",
     "Exclusion",
     "Lead",

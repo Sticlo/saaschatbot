@@ -46,6 +46,7 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ConversationStatus.ACTIVE.value
     )
+    interest_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     chatwoot_conversation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

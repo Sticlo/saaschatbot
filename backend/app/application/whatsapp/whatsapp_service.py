@@ -42,6 +42,8 @@ from app.application.whatsapp.whatsapp_gateway import (
     logout_instance as gateway_logout_instance,
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
+    send_image as gateway_send_image,
+    send_buttons as gateway_send_buttons,
     uses_waha,
 )
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
@@ -582,3 +584,245 @@ def send_text_message(
 
     publish_message_event(tenant, conversation, message, event_type="message.out")
     return message
+
+
+def send_image_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    image_path: str,
+    caption: str = "",
+    source: str,
+) -> Message:
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise EvolutionAPIError(reason)
+
+    conversation, recipient = _prepare_outbound_recipient(
+        db, tenant=tenant, session=session, conversation=conversation
+    )
+    from app.application.outbound.tenant_asset_service import read_asset_base64
+
+    b64, mime = read_asset_base64(image_path, tenant_id=tenant.id)
+    filename = image_path.rsplit("/", 1)[-1]
+    result = gateway_send_image(
+        session.instance_name,
+        recipient,
+        data_b64=b64,
+        mimetype=mime,
+        filename=filename,
+        caption=caption[:1024],
+    )
+    evolution_id = _extract_evolution_id(result)
+    display_body = f"[Imagen]\n{caption}".strip() if caption else "[Imagen]"
+    return _record_outbound_message(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        body=display_body[:4096],
+        source=source,
+        evolution_id=evolution_id,
+    )
+
+
+def _extract_evolution_id(result: dict) -> Optional[str]:
+    if not isinstance(result, dict):
+        return None
+    key = result.get("key")
+    if isinstance(key, dict) and key.get("id"):
+        return str(key["id"])
+    for field in ("messageId", "id"):
+        if result.get(field):
+            return str(result[field])
+    return None
+
+
+def _prepare_outbound_recipient(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+) -> tuple[Conversation, str]:
+    if not conversation.contact_jid and not is_valid_whatsapp_phone(conversation.contact_phone):
+        raise EvolutionAPIError(
+            "No se puede enviar a este contacto — número inválido. "
+            "Pide que te escriba de nuevo por WhatsApp."
+        )
+
+    recipient = evolution_send_target(conversation)
+    if uses_waha():
+        return conversation, recipient
+
+    from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
+
+    alt_phone = ""
+    if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
+        alt_phone = fetch_lid_alt_phone(
+            settings.evolution_database_url,
+            session.instance_name,
+            conversation.contact_jid,
+        )
+        if not alt_phone and session.active_connection_id:
+            from app.application.conversations.contact_resolver_service import _load_link_maps
+
+            _lid_map, _ = _load_link_maps(
+                db,
+                tenant_id=tenant.id,
+                whatsapp_connection_id=session.active_connection_id,
+            )
+            alt_phone = _lid_map.get(conversation.contact_jid) or ""
+        if alt_phone and is_valid_whatsapp_phone(alt_phone):
+            recipient = phone_to_evolution_number(alt_phone)
+            from app.application.sync.contact_identity_service import apply_identity_to_conversation
+            from app.application.conversations.contact_resolver_service import (
+                record_contact_link,
+                repair_duplicates_for_contact,
+            )
+
+            record_contact_link(
+                db,
+                tenant_id=tenant.id,
+                whatsapp_connection_id=session.active_connection_id,
+                lid_jid=conversation.contact_jid,
+                phone_e164=normalize_phone(alt_phone),
+                verified=True,
+            )
+            apply_identity_to_conversation(
+                conversation,
+                contact_phone=normalize_phone(alt_phone),
+                contact_name=conversation.contact_name,
+                contact_jid=conversation.contact_jid,
+            )
+            if session.active_connection_id:
+                canonical = repair_duplicates_for_contact(
+                    db,
+                    tenant_id=tenant.id,
+                    whatsapp_connection_id=session.active_connection_id,
+                    phone=normalize_phone(alt_phone),
+                    lid_jid=conversation.contact_jid,
+                    instance_name=session.instance_name,
+                )
+                if canonical is not None and canonical.id != conversation.id:
+                    conversation = canonical
+    return conversation, recipient
+
+
+def _record_outbound_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    body: str,
+    source: str,
+    evolution_id: Optional[str],
+) -> Message:
+    message = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.OUT.value,
+        source=source,
+        body=body,
+        status=MessageStatus.SENT.value,
+        evolution_message_id=evolution_id,
+    )
+    conversation.last_message_at = datetime.now(timezone.utc)
+    db.add(message)
+    db.flush()
+    publish_message_event(tenant, conversation, message, event_type="message.out")
+    return message
+
+
+def _buttons_to_provider(buttons: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for idx, btn in enumerate(buttons[:3]):
+        label = str(btn.get("label") or "").strip()
+        if not label:
+            continue
+        value = str(btn.get("value") or label).strip()
+        out.append(
+            {
+                "type": "reply",
+                "displayText": label[:25],
+                "id": value[:120],
+            }
+        )
+    return out
+
+
+def send_bait_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    text: str,
+    source: str,
+    extras: Optional[dict] = None,
+) -> Message:
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise EvolutionAPIError(reason)
+
+    conversation, recipient = _prepare_outbound_recipient(
+        db, tenant=tenant, session=session, conversation=conversation
+    )
+    extras = extras or {}
+    image_path = extras.get("image_path")
+    buttons = extras.get("buttons") or []
+    button_title = str(extras.get("button_title") or tenant.business_name or "Opciones")[:60]
+    button_footer = str(extras.get("button_footer") or "")[:60]
+    provider_buttons = _buttons_to_provider(buttons) if buttons else []
+    last_id: Optional[str] = None
+    display_body = text
+
+    if image_path:
+        from app.application.outbound.tenant_asset_service import read_asset_base64
+
+        b64, mime = read_asset_base64(image_path, tenant_id=tenant.id)
+        filename = image_path.rsplit("/", 1)[-1]
+        caption = "" if provider_buttons else text
+        result = gateway_send_image(
+            session.instance_name,
+            recipient,
+            data_b64=b64,
+            mimetype=mime,
+            filename=filename,
+            caption=caption[:1024],
+        )
+        last_id = _extract_evolution_id(result)
+        if provider_buttons:
+            display_body = f"[Imagen]\n{text}"
+
+    if provider_buttons:
+        try:
+            result = gateway_send_buttons(
+                session.instance_name,
+                recipient,
+                title=button_title,
+                description=text[:1024],
+                footer=button_footer,
+                buttons=provider_buttons,
+            )
+            last_id = _extract_evolution_id(result) or last_id
+            if image_path:
+                display_body = f"[Imagen + botones]\n{text}"
+        except WhatsAppGatewayError:
+            log.warning("Botones fallaron — enviando solo texto tenant=%s", tenant.id)
+            if not image_path or provider_buttons:
+                result = gateway_send_text(session.instance_name, recipient, text)
+                last_id = _extract_evolution_id(result) or last_id
+    elif not image_path:
+        result = gateway_send_text(session.instance_name, recipient, text)
+        last_id = _extract_evolution_id(result)
+
+    return _record_outbound_message(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        body=display_body[:4096],
+        source=source,
+        evolution_id=last_id,
+    )

@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.domain.entities import Conversation, Exclusion, Message, Tenant, TenantProfile, WhatsAppSession
-from app.domain.entities.enums import ConversationMode, ConversationStatus, MessageDirection, MessageSource
+from app.domain.entities.enums import (
+    ConversationInterest,
+    ConversationMode,
+    ConversationStatus,
+    MessageDirection,
+    MessageSource,
+)
 from app.application.ai.ai_classifier_service import classify_inbound_message
 from app.application.ai.ai_conversation_service import generate_reply
 from app.infrastructure.ai.deepseek_client import DeepSeekError, is_configured
@@ -123,6 +129,7 @@ def register_opt_out(
     phone = conversation.contact_phone
     if not phone or phone.startswith("lid:"):
         conversation.status = ConversationStatus.EXCLUDED.value
+        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
         conversation.ai_active = False
         return
 
@@ -142,6 +149,7 @@ def register_opt_out(
 
     mark_phone_excluded(tenant.id, phone)
     conversation.status = ConversationStatus.EXCLUDED.value
+    conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
     conversation.ai_active = False
     publish_conversation_updated(tenant.id, conversation)
 
@@ -271,6 +279,7 @@ def process_ai_reply(
         return True
 
     if category == "no_interesado":
+        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
         conversation.ai_active = False
         publish_conversation_updated(tenant.id, conversation)
         try:

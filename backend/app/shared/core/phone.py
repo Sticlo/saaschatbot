@@ -106,6 +106,42 @@ def format_display_phone(phone: str) -> str:
     return phone
 
 
+def lid_short_ref(phone: str, *, contact_jid: str = "") -> str:
+    """Últimos dígitos del @lid para identificar contactos sin número visible."""
+    lid_id = ""
+    if contact_jid and contact_jid.endswith("@lid"):
+        lid_id = contact_jid.split("@")[0]
+    elif is_lid_placeholder(phone):
+        lid_id = phone[4:]
+    if not lid_id:
+        return ""
+    tail = lid_id[-5:] if len(lid_id) >= 5 else lid_id
+    return f"····{tail}"
+
+
+def format_contact_display_phone(
+    phone: str,
+    *,
+    contact_jid: str = "",
+    linked_phone: str = "",
+) -> str:
+    """Teléfono legible o referencia corta cuando WhatsApp oculta el número (@lid)."""
+    candidate = (linked_phone or "").strip()
+    if not candidate or is_lid_placeholder(candidate):
+        if phone and not is_lid_placeholder(phone):
+            normalized = normalize_phone(phone)
+            if is_valid_whatsapp_phone(normalized):
+                candidate = normalized
+    if candidate:
+        normalized = normalize_phone(candidate)
+        if is_valid_whatsapp_phone(normalized):
+            return normalized
+    ref = lid_short_ref(phone, contact_jid=contact_jid)
+    if ref:
+        return f"Sin número · ref {ref}"
+    return ""
+
+
 def resolve_display_name(name: str, phone: str, *, contact_jid: str = "") -> str:
     if name and not is_placeholder_contact_name(name, phone):
         return name

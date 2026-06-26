@@ -135,6 +135,53 @@ class WahaClient:
         payload = {"session": session, "chatId": chat_id, "text": text}
         return self._request("POST", "/api/sendText", json=payload, timeout=45.0)
 
+    def send_image(
+        self,
+        session: str,
+        chat_id: str,
+        *,
+        data_b64: str,
+        mimetype: str,
+        filename: str,
+        caption: str = "",
+    ) -> dict:
+        payload = {
+            "session": session,
+            "chatId": chat_id,
+            "caption": caption,
+            "file": {
+                "mimetype": mimetype,
+                "filename": filename,
+                "data": data_b64,
+            },
+        }
+        return self._request("POST", "/api/sendImage", json=payload, timeout=45.0)
+
+    def send_buttons(
+        self,
+        session: str,
+        chat_id: str,
+        *,
+        title: str,
+        body: str,
+        footer: str,
+        buttons: list[dict],
+    ) -> dict:
+        waha_buttons = []
+        for btn in buttons[:3]:
+            label = btn.get("displayText") or btn.get("text") or "Opción"
+            reply = btn.get("id") or label
+            waha_buttons.append({"type": "reply", "text": str(label)[:25], "id": str(reply)[:120]})
+        payload = {
+            "session": session,
+            "chatId": chat_id,
+            "header": title[:60],
+            "body": body[:1024],
+            "footer": footer[:60],
+            "buttons": waha_buttons,
+        }
+        return self._request("POST", "/api/sendButtons", json=payload, timeout=45.0)
+
     def list_apps(self, session: str) -> list[dict]:
         result = self._request("GET", "/api/apps", params={"session": session})
         if isinstance(result, list):

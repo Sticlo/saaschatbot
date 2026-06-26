@@ -10,7 +10,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.shared.core.deps import RequireAgent, RequireViewer
-from app.shared.core.phone import is_owner_display_name, is_owner_jid, is_placeholder_contact_name, is_valid_whatsapp_phone, normalize_phone
+from app.shared.core.phone import is_owner_display_name, is_owner_jid, is_lid_placeholder, is_placeholder_contact_name, is_valid_whatsapp_phone, normalize_phone
 from app.config import settings
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
@@ -18,17 +18,24 @@ from app.domain.entities.enums import MessageSource
 from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 from app.presentation.schemas.whatsapp import (
     ConversationAiUpdate,
+    ConversationInterestUpdate,
     ConversationLiveSyncResponse,
     ConversationModeUpdate,
     ConversationResponse,
     MessageResponse,
     SendMessageRequest,
+    SendShortcutRequest,
     serialize_conversation,
 )
 from app.application.realtime.realtime_service import publish_conversation_updated
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
-from app.application.whatsapp.whatsapp_service import refresh_session_status, send_text_message
+from app.application.whatsapp.whatsapp_service import (
+    refresh_session_status,
+    send_image_message,
+    send_text_message,
+)
+from app.application.outbound.quick_shortcut_service import find_shortcut
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -39,15 +46,56 @@ def _to_conversation_response(
     display_name_override: str | None = None,
     last_message_at_override: datetime | None = None,
     last_message_preview: str = "",
+    linked_phone: str | None = None,
 ) -> ConversationResponse:
     data = serialize_conversation(
         conversation,
         display_name_override=display_name_override,
         last_message_preview=last_message_preview,
+        linked_phone=linked_phone,
     )
     if last_message_at_override is not None:
         data["last_message_at"] = last_message_at_override
     return ConversationResponse.model_validate(data)
+
+
+def _linked_phone_for_conversation(lid_to_phone: dict[str, str], conversation: Conversation) -> str:
+    jid = (conversation.contact_jid or "").strip()
+    if jid.endswith("@lid"):
+        return lid_to_phone.get(jid, "")
+    if is_lid_placeholder(conversation.contact_phone):
+        return lid_to_phone.get(f"{conversation.contact_phone[4:]}@lid", "")
+    return ""
+
+
+def _load_lid_phone_map(db: Session, tenant_id: uuid.UUID, session: WhatsAppSession) -> dict[str, str]:
+    if not session.active_connection_id:
+        return {}
+    from app.application.conversations.contact_resolver_service import _load_link_maps
+
+    lid_to_phone, _ = _load_link_maps(
+        db,
+        tenant_id=tenant_id,
+        whatsapp_connection_id=session.active_connection_id,
+    )
+    return lid_to_phone
+
+
+def _conversation_api_response(
+    db: Session,
+    tenant_id: uuid.UUID,
+    conversation: Conversation,
+) -> ConversationResponse:
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == tenant_id)
+        .first()
+    )
+    linked = ""
+    if session:
+        lid_to_phone = _load_lid_phone_map(db, tenant_id, session)
+        linked = _linked_phone_for_conversation(lid_to_phone, conversation)
+    return _to_conversation_response(conversation, linked_phone=linked)
 
 
 @router.get("", response_model=list[ConversationResponse])
@@ -246,6 +294,7 @@ def list_conversations(
             names_lookup = None
 
     responses = []
+    lid_to_phone = _load_lid_phone_map(db, current.tenant_id, session)
     for row in visible:
         override = None
         if names_lookup is not None and is_placeholder_contact_name(
@@ -260,6 +309,7 @@ def list_conversations(
                 display_name_override=override,
                 last_message_at_override=mx_map.get(row.id) or row.last_message_at,
                 last_message_preview=preview_map.get(row.id, ""),
+                linked_phone=_linked_phone_for_conversation(lid_to_phone, row),
             )
         )
     return responses
@@ -445,6 +495,87 @@ def send_message(
     return message
 
 
+@router.post("/{conversation_id}/messages/shortcut", response_model=MessageResponse, status_code=201)
+def send_shortcut_message(
+    conversation_id: uuid.UUID,
+    body: SendShortcutRequest,
+    request: Request,
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == current.tenant_id,
+        )
+        .first()
+    )
+    if tenant is None or session is None or conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación o WhatsApp no encontrado")
+
+    shortcut = find_shortcut(db, tenant.id, body.shortcut_id)
+    if shortcut is None:
+        raise HTTPException(status_code=404, detail="Atajo no encontrado")
+
+    try:
+        refresh_session_status(db, tenant, session)
+        db.commit()
+        db.refresh(tenant)
+    except EvolutionAPIError:
+        db.rollback()
+
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise HTTPException(status_code=409, detail=reason)
+
+    try:
+        if shortcut.get("type") == "image":
+            message = send_image_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                image_path=str(shortcut["image_path"]),
+                caption="",
+                source=MessageSource.AGENT.value,
+            )
+        else:
+            message = send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=str(shortcut["text"]),
+                source=MessageSource.AGENT.value,
+            )
+        log_audit(
+            db,
+            tenant_id=tenant.id,
+            user_id=current.id,
+            action="message.sent_shortcut",
+            details={
+                "conversation_id": str(conversation.id),
+                "shortcut_id": body.shortcut_id,
+                "shortcut_label": shortcut.get("label"),
+            },
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+        db.refresh(message)
+    except EvolutionAPIError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return message
+
+
 @router.patch("/{conversation_id}/mode", response_model=ConversationResponse)
 def update_conversation_mode(
     conversation_id: uuid.UUID,
@@ -467,7 +598,7 @@ def update_conversation_mode(
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
-    return _to_conversation_response(conversation)
+    return _conversation_api_response(db, current.tenant_id, conversation)
 
 
 @router.patch("/{conversation_id}/ai", response_model=ConversationResponse)
@@ -500,7 +631,32 @@ def update_conversation_ai(
             tenant_id=current.tenant_id,
             conversation_id=conversation.id,
         )
-    return _to_conversation_response(conversation)
+    return _conversation_api_response(db, current.tenant_id, conversation)
+
+
+@router.patch("/{conversation_id}/interest", response_model=ConversationResponse)
+def update_conversation_interest(
+    conversation_id: uuid.UUID,
+    body: ConversationInterestUpdate,
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == current.tenant_id,
+        )
+        .first()
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    conversation.interest_status = body.interest_status
+    db.commit()
+    db.refresh(conversation)
+    publish_conversation_updated(current.tenant_id, conversation)
+    return _conversation_api_response(db, current.tenant_id, conversation)
 
 
 @router.post("/{conversation_id}/ai/trigger", status_code=202)

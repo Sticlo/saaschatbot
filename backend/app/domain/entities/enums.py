@@ -41,6 +41,11 @@ class ConversationStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
+class ConversationInterest(str, enum.Enum):
+    INTERESTED = "interested"
+    NOT_INTERESTED = "not_interested"
+
+
 class MessageDirection(str, enum.Enum):
     IN = "in"
     OUT = "out"

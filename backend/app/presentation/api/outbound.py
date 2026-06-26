@@ -107,6 +107,7 @@ def start_campaign(
         limit=body.limit,
         campaign_name=body.name,
         message_template=body.message_template,
+        bait_template_id=body.bait_template_id,
     )
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "No se pudo encolar"))

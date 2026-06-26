@@ -73,6 +73,7 @@ class TenantProfile(Base):
     onboarding_answers: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     ai_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     bait_message_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quick_shortcuts: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

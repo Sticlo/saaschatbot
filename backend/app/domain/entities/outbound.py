@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.persistence.database import Base
@@ -83,6 +83,11 @@ class Campaign(Base):
         String(20), nullable=False, default=CampaignStatus.DRAFT.value
     )
     message_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bait_template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bait_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     total_queued: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -129,6 +134,7 @@ class SendQueueItem(Base):
     phone_e164: Mapped[str] = mapped_column(String(32), nullable=False)
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     message_body: Mapped[str] = mapped_column(Text, nullable=False)
+    message_extras: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=SendQueueStatus.PENDING.value
     )

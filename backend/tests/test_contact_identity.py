@@ -21,6 +21,27 @@ def test_extract_name_prefers_notify_from_whatsapp():
     }) == "Agenda"
 
 
+def test_format_contact_display_phone_uses_linked_number():
+    from app.shared.core.phone import format_contact_display_phone
+
+    shown = format_contact_display_phone(
+        "lid:194776884326522",
+        contact_jid="194776884326522@lid",
+        linked_phone="+573208177650",
+    )
+    assert shown == "+573208177650"
+
+
+def test_format_contact_display_phone_lid_ref_when_no_number():
+    from app.shared.core.phone import format_contact_display_phone
+
+    shown = format_contact_display_phone(
+        "lid:194776884326522",
+        contact_jid="194776884326522@lid",
+    )
+    assert shown == "Sin número · ref ····26522"
+
+
 def test_is_placeholder_contact_name_treats_contacto_as_placeholder():
     from app.shared.core.phone import is_placeholder_contact_name, resolve_display_name
 

@@ -20,10 +20,9 @@ Si no sabes algo, dilo con honestidad y ofrece que un humano del equipo le confi
 
 def build_system_prompt(tenant: Tenant, profile: Optional[TenantProfile]) -> str:
     if profile and profile.ai_system_prompt and profile.ai_system_prompt.strip():
-        base = profile.ai_system_prompt.strip()
-    else:
-        base = DEFAULT_SYSTEM_PROMPT.format(business_name=tenant.business_name)
+        return profile.ai_system_prompt.strip()
 
+    base = DEFAULT_SYSTEM_PROMPT.format(business_name=tenant.business_name)
     extras: list[str] = []
     if profile and profile.onboarding_answers:
         answers = profile.onboarding_answers
