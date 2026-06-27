@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from app.config import settings
-from app.infrastructure.ai.deepseek_client import DeepSeekError, chat_completion
+from app.infrastructure.ai.deepseek_client import DeepSeekError, chat_completion, is_configured
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +56,20 @@ def _heuristic_classify(text: str) -> dict[str, Any]:
         return {"category": "duda", "reason": "heuristic duda"}
 
     return {"category": "interesado", "reason": "heuristic default"}
+
+
+def _needs_llm_classifier(text: str, heuristic: dict[str, Any]) -> bool:
+    """Solo casos ambiguos justifican gastar tokens en clasificador."""
+    if heuristic["category"] in ("opt_out", "ruido", "no_interesado"):
+        return False
+    if heuristic["reason"].startswith("heuristic saludo"):
+        return False
+    if heuristic["reason"].startswith("heuristic duda"):
+        return False
+    # Mensajes cortos: heurística basta
+    if len(text.strip()) <= 80:
+        return False
+    return True
 
 
 def _is_trivial_noise(text: str) -> bool:
@@ -110,25 +124,35 @@ def _parse_classifier_json(raw: str) -> dict[str, Any]:
     }
 
 
+def _classify_with_llm(text: str, *, business_name: str = "") -> dict[str, Any]:
+    raw = chat_completion(
+        [
+            {"role": "system", "content": CLASSIFIER_SYSTEM},
+            {
+                "role": "user",
+                "content": f"Negocio: {business_name or 'sin nombre'}\nMensaje del contacto:\n{text}",
+            },
+        ],
+        model=settings.deepseek_classifier_model,
+        temperature=0.1,
+        max_tokens=80,
+    )
+    return _adjust_classification(text, _parse_classifier_json(raw))
+
+
 def classify_inbound_message(text: str, *, business_name: str = "") -> dict[str, Any]:
+    """Clasifica mensajes. Por defecto usa reglas locales (0 costo); LLM solo si está activado."""
     cleaned = (text or "").strip()
     if not cleaned:
         return {"category": "ruido", "reason": "empty"}
 
-    try:
-        raw = chat_completion(
-            [
-                {"role": "system", "content": CLASSIFIER_SYSTEM},
-                {
-                    "role": "user",
-                    "content": f"Negocio: {business_name or 'sin nombre'}\nMensaje del contacto:\n{cleaned}",
-                },
-            ],
-            model=settings.deepseek_classifier_model,
-            temperature=0.1,
-            max_tokens=120,
-        )
-        return _adjust_classification(cleaned, _parse_classifier_json(raw))
-    except (DeepSeekError, ValueError) as exc:
-        log.warning("Clasificador DeepSeek fallback: %s", exc)
-        return _heuristic_classify(cleaned)
+    heuristic = _heuristic_classify(cleaned)
+
+    use_llm = settings.ai_classifier_use_llm and is_configured()
+    if use_llm and _needs_llm_classifier(cleaned, heuristic):
+        try:
+            return _classify_with_llm(cleaned, business_name=business_name)
+        except (DeepSeekError, ValueError) as exc:
+            log.warning("Clasificador DeepSeek fallback: %s", exc)
+
+    return heuristic

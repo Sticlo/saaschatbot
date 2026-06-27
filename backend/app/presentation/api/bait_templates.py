@@ -21,7 +21,12 @@ from app.application.outbound.bait_template_service import (
     update_template,
 )
 from app.application.outbound.tenant_asset_service import save_tenant_image
-from app.domain.entities import BaitTemplate, Tenant, TenantProfile
+from app.application.billing.tenant_profile_service import (
+    answers_from_profile,
+    apply_business_answers,
+    get_or_create_tenant_profile,
+)
+from app.domain.entities import BaitTemplate, Tenant
 from app.infrastructure.ai.deepseek_client import DeepSeekError
 from app.infrastructure.persistence.database import get_db
 from app.presentation.schemas.bait_templates import (
@@ -65,25 +70,15 @@ def _template_response(row: BaitTemplate) -> BaitTemplateResponse:
     )
 
 
-def _answers_from_profile(profile: TenantProfile) -> dict:
-    raw = profile.onboarding_answers or {}
-    return raw if isinstance(raw, dict) else {}
+def _answers_from_profile(profile) -> dict:
+    return answers_from_profile(profile)
 
 
 def _business_summary(business_name: str, answers: dict) -> list[str]:
     return business_summary_lines(business_name=business_name, answers=answers)
 
 
-@router.get("/business-profile", response_model=BusinessProfileResponse)
-def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
-    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
-    profile = (
-        db.query(TenantProfile)
-        .filter(TenantProfile.tenant_id == current.tenant_id)
-        .first()
-    )
-    if tenant is None or profile is None:
-        raise HTTPException(status_code=404, detail="Perfil no encontrado")
+def _profile_response(tenant: Tenant, profile) -> BusinessProfileResponse:
     answers = _answers_from_profile(profile)
     return BusinessProfileResponse(
         business_name=tenant.business_name,
@@ -94,10 +89,22 @@ def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
         location_hours=answers.get("location_hours"),
         tone=answers.get("tone"),
         restrictions=answers.get("restrictions"),
+        maps_prospect_business=answers.get("maps_prospect_business"),
+        maps_prospect_city=answers.get("maps_prospect_city"),
         ai_system_prompt=profile.ai_system_prompt,
         bait_message_template=profile.bait_message_template,
         ai_summary=_business_summary(tenant.business_name, answers),
     )
+
+
+@router.get("/business-profile", response_model=BusinessProfileResponse)
+def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    profile = get_or_create_tenant_profile(db, tenant.id)
+    db.commit()
+    return _profile_response(tenant, profile)
 
 
 @router.put("/business-profile", response_model=BusinessProfileResponse)
@@ -108,13 +115,9 @@ def update_business_profile(
     db: Session = Depends(get_db),
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
-    profile = (
-        db.query(TenantProfile)
-        .filter(TenantProfile.tenant_id == current.tenant_id)
-        .first()
-    )
-    if tenant is None or profile is None:
-        raise HTTPException(status_code=404, detail="Perfil no encontrado")
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    profile = get_or_create_tenant_profile(db, tenant.id)
 
     answers = _answers_from_profile(profile)
     for key in (
@@ -125,11 +128,13 @@ def update_business_profile(
         "location_hours",
         "tone",
         "restrictions",
+        "maps_prospect_business",
+        "maps_prospect_city",
     ):
         value = getattr(body, key)
         if value is not None:
             answers[key] = value.strip()
-    profile.onboarding_answers = answers
+    apply_business_answers(profile, answers)
 
     if body.ai_system_prompt is not None:
         profile.ai_system_prompt = body.ai_system_prompt.strip() or None
@@ -150,7 +155,7 @@ def update_business_profile(
     )
     db.commit()
     db.refresh(profile)
-    return get_business_profile(current, db)
+    return _profile_response(tenant, profile)
 
 
 @router.post("/assets", response_model=AssetUploadResponse)
@@ -319,13 +324,9 @@ def generate_template_with_ai(
     db: Session = Depends(get_db),
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
-    profile = (
-        db.query(TenantProfile)
-        .filter(TenantProfile.tenant_id == current.tenant_id)
-        .first()
-    )
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    profile = get_or_create_tenant_profile(db, tenant.id)
     try:
         data = generate_bait_template(tenant=tenant, profile=profile, tone=body.tone)
     except DeepSeekError as exc:

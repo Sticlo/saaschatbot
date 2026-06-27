@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.domain.entities import TenantProfile
+from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 
 _MAX_SHORTCUTS = 12
 
@@ -36,8 +36,8 @@ def _normalize(raw: list[dict]) -> list[dict]:
 
 
 def get_shortcuts(db: Session, tenant_id: uuid.UUID) -> list[dict]:
-    profile = db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).first()
-    if profile is None or not profile.quick_shortcuts:
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    if not profile.quick_shortcuts:
         return []
     if isinstance(profile.quick_shortcuts, list):
         return profile.quick_shortcuts
@@ -45,9 +45,7 @@ def get_shortcuts(db: Session, tenant_id: uuid.UUID) -> list[dict]:
 
 
 def save_shortcuts(db: Session, tenant_id: uuid.UUID, shortcuts: list[dict]) -> list[dict]:
-    profile = db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).first()
-    if profile is None:
-        raise ValueError("Perfil no encontrado")
+    profile = get_or_create_tenant_profile(db, tenant_id)
     cleaned = _normalize(shortcuts)
     profile.quick_shortcuts = cleaned
     db.flush()

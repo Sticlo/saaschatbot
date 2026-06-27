@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from app.application.ai.ai_qualify_service import build_qualify_system_prompt
+from app.config import settings
 from app.domain.entities import Message, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
 from app.infrastructure.ai.deepseek_client import DeepSeekError, chat_completion
@@ -36,8 +38,9 @@ def build_system_prompt(tenant: Tenant, profile: Optional[TenantProfile]) -> str
     return base
 
 
-def format_history(messages: list[Message], *, limit: int = 15) -> list[dict[str, str]]:
-    rows = messages[-limit:]
+def format_history(messages: list[Message], *, limit: Optional[int] = None) -> list[dict[str, str]]:
+    cap = limit if limit is not None else settings.ai_history_messages
+    rows = messages[-cap:]
     formatted: list[dict[str, str]] = []
     for msg in rows:
         role = "user" if msg.direction == MessageDirection.IN.value else "assistant"
@@ -46,6 +49,28 @@ def format_history(messages: list[Message], *, limit: int = 15) -> list[dict[str
             continue
         formatted.append({"role": role, "content": body})
     return formatted
+
+
+def generate_qualify_reply(
+    *,
+    tenant: Tenant,
+    profile: Optional[TenantProfile],
+    contact_name: str,
+    history: list[Message],
+    is_first_contact: bool = False,
+) -> str:
+    system = build_qualify_system_prompt(
+        tenant, profile, is_first_contact=is_first_contact
+    )
+    if contact_name and not contact_name.startswith("+"):
+        system += f"\n\nNombre del contacto: {contact_name}"
+
+    messages = [{"role": "system", "content": system}, *format_history(history)]
+    return chat_completion(
+        messages,
+        temperature=0.65,
+        max_tokens=settings.ai_reply_max_tokens,
+    )
 
 
 def generate_reply(
@@ -62,7 +87,11 @@ def generate_reply(
     messages = [{"role": "system", "content": system}, *format_history(history)]
 
     try:
-        return chat_completion(messages, temperature=0.65, max_tokens=500)
+        return chat_completion(
+            messages,
+            temperature=0.65,
+            max_tokens=settings.ai_reply_max_tokens,
+        )
     except DeepSeekError:
         log.exception("Error generando respuesta DeepSeek tenant=%s", tenant.id)
         raise

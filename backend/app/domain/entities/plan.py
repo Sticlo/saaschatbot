@@ -10,8 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.persistence.database import Base
 
-# UUID fijo del plan Pro — referencia estable en migraciones y seeds
+# UUIDs fijos — referencia estable en migraciones y seeds
 DEFAULT_PLAN_ID = uuid.UUID("a0000000-0000-4000-8000-000000000001")
+PREMIUM_PLAN_ID = uuid.UUID("a0000000-0000-4000-8000-000000000002")
 
 
 class Plan(Base):

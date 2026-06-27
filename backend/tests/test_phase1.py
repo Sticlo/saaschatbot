@@ -25,11 +25,16 @@ def test_list_public_plans(client: TestClient):
     response = client.get("/api/v1/plans")
     assert response.status_code == 200
     plans = response.json()
-    assert len(plans) >= 1
+    assert len(plans) >= 2
     pro = next(p for p in plans if p["slug"] == "pro")
-    assert pro["price_cop"] == 80_000
+    assert pro["price_cop"] == 120_000
     assert pro["trial_bait_limit"] == 10
-    assert pro["daily_bait_limit"] == 100
+    assert pro["daily_bait_limit"] == 50
+    assert pro["max_team_members"] == 2
+    premium = next(p for p in plans if p["slug"] == "premium")
+    assert premium["price_cop"] == 200_000
+    assert premium["daily_bait_limit"] == 100
+    assert premium["features"]["ai_daily_replies"] == 0
 
 
 def test_register_login_and_subscription(client: TestClient):
@@ -47,6 +52,34 @@ def test_register_login_and_subscription(client: TestClient):
     assert body["trial_bait_remaining"] == 10
     assert body["plan"]["slug"] == "pro"
     assert body["needs_payment"] is False
+
+
+def test_lookup_email(client: TestClient):
+    auth = _register(client)
+    email = auth["email"]
+
+    existing = client.post("/api/v1/auth/lookup-email", json={"email": email})
+    assert existing.status_code == 200
+    assert existing.json()["exists"] is True
+    assert existing.json()["email"] == email
+
+    missing = client.post(
+        "/api/v1/auth/lookup-email",
+        json={"email": f"missing-{uuid.uuid4().hex[:8]}@test.com"},
+    )
+    assert missing.status_code == 200
+    assert missing.json()["exists"] is False
+
+
+    assert missing.json()["exists"] is False
+
+
+def test_auth_providers(client: TestClient):
+    response = client.get("/api/v1/auth/providers")
+    assert response.status_code == 200
+    body = response.json()
+    assert "google" in body
+    assert "github" in body
 
 
 def test_change_password(client: TestClient):

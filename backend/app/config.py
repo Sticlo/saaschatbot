@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     deepseek_classifier_model: str = ALLOWED_DEEPSEEK_MODEL
     ai_reply_delay_min_seconds: float = 2.0
     ai_reply_delay_max_seconds: float = 6.0
+    # Costo IA — deepseek-chat + heurísticas (sin clasificador LLM por defecto)
+    ai_classifier_use_llm: bool = False
+    ai_history_messages: int = 10
+    ai_reply_max_tokens: int = 350
+    ai_trial_daily_reply_limit: int = 80
+    ai_paid_daily_reply_limit: int = 400
+    ai_default_mode: str = "qualify"
+    ai_trial_daily_classify_limit: int = 500
+    ai_paid_daily_classify_limit: int = 0  # 0 = ilimitado (clasificar no cuesta casi nada)
+    ai_classify_delay_seconds: float = 0.3
+    ai_maps_plans_per_day: int = 5
 
     # Workers — en producción la API no arranca workers (procesos separados).
     embed_workers_in_api: bool = False
@@ -89,6 +100,31 @@ class Settings(BaseSettings):
     chatwoot_inbox_messages_per_chat: int = 15
     chatwoot_inbox_max_chats_per_sync: int = 12
     chatwoot_webhook_secret: str = "dev-chatwoot-webhook-local"
+
+    # OAuth — Google / GitHub (login social)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_redirect_uri: str = "http://localhost:8000/api/v1/auth/github/callback"
+    oauth_success_redirect: str = "http://localhost:4200/precios"
+    oauth_error_redirect: str = "http://localhost:4200/login"
+    resend_api_key: str = ""
+    email_from: str = "Omitel <onboarding@resend.dev>"
+    site_public_url: str = "http://localhost:4200"
+    magic_link_expire_minutes: int = 15
+    password_reset_expire_minutes: int = 30
+    auth_login_max_attempts: int = 10
+    auth_login_window_seconds: int = 900
+    auth_forgot_max_attempts: int = 5
+    auth_forgot_window_seconds: int = 3600
+
+    # Wompi — pagos COP (Colombia)
+    wompi_public_key: str = ""
+    wompi_integrity_secret: str = ""
+    wompi_events_secret: str = ""
+    wompi_checkout_redirect_url: str = "http://localhost:4200/precios"
 
     def chatwoot_base_url(self) -> str:
         """URL que Evolution usa para hablar con Chatwoot."""
@@ -140,6 +176,23 @@ class Settings(BaseSettings):
         except (TypeError, ValueError):
             return 15
         return max(5, min(n, 50))
+
+    @field_validator(
+        "ai_history_messages",
+        "ai_reply_max_tokens",
+        "ai_trial_daily_reply_limit",
+        "ai_paid_daily_reply_limit",
+        "ai_trial_daily_classify_limit",
+        "ai_paid_daily_classify_limit",
+        "ai_maps_plans_per_day",
+    )
+    @classmethod
+    def _cap_ai_limits(cls, value: int) -> int:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return 200
+        return max(1, min(n, 5000))
 
     @field_validator("deepseek_chat_model", "deepseek_classifier_model")
     @classmethod

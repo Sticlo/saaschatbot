@@ -6,28 +6,81 @@
   <meta http-equiv="X-Frame-Options" content="DENY" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
-  <title>SaasChatbot — Panel</title>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=25" />
+  <title>Omitel — Panel</title>
+  <script src="/static/panel/theme.js?v=1"></script>
+  <link rel="stylesheet" href="/static/panel/styles.css?v=33" />
 </head>
 <body>
   <div id="app">
     <!-- Login -->
     <section id="login-view" class="view">
       <div class="login-card">
-        <h1>SaasChatbot</h1>
-        <p class="subtitle">Panel de conversaciones</p>
+        <div class="login-card-head">
+          <div>
+            <h1>Omitel</h1>
+            <p class="subtitle">Panel de conversaciones</p>
+          </div>
+          <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
+            <span>Tema claro</span>
+            <input type="checkbox" id="theme-toggle-login" />
+          </label>
+        </div>
         <form id="login-form">
-          <label>
-            Email
-            <input type="email" id="login-email" required autocomplete="username" />
-          </label>
-          <label>
-            Contraseña
-            <input type="password" id="login-password" required autocomplete="current-password" />
-          </label>
-          <p id="login-error" class="error hidden"></p>
-          <button type="submit" class="btn primary">Entrar</button>
+          <div id="login-oauth" class="oauth-stack hidden">
+            <a id="oauth-google" class="btn btn-oauth google hidden" href="/api/v1/auth/google/start">Continuar con Google</a>
+            <a id="oauth-github" class="btn btn-oauth github hidden" href="/api/v1/auth/github/start">Continuar con GitHub</a>
+          </div>
+          <div id="login-oauth-divider" class="auth-divider hidden"><span>o con correo</span></div>
+
+          <div id="login-step-email">
+            <label>
+              Correo electrónico
+              <input type="email" id="login-email" required autocomplete="username" placeholder="tu@negocio.com" />
+            </label>
+            <p id="login-error" class="error hidden"></p>
+            <button type="button" id="login-continue-btn" class="btn primary">Continuar con correo</button>
+          </div>
+
+          <div id="login-step-password" class="hidden">
+            <div class="auth-email-chip">
+              <span id="login-email-display"></span>
+              <button type="button" id="login-back-btn" class="link-btn">Cambiar</button>
+            </div>
+            <label>
+              Contraseña
+              <input type="password" id="login-password" autocomplete="current-password" />
+            </label>
+            <p id="login-error-password" class="error hidden"></p>
+            <button type="submit" class="btn primary">Entrar</button>
+          </div>
+
+          <div id="login-step-register" class="hidden">
+            <div class="auth-email-chip">
+              <span id="register-email-display"></span>
+              <button type="button" id="register-back-btn" class="link-btn">Cambiar</button>
+            </div>
+            <label>
+              Nombre del negocio
+              <input type="text" id="register-business" autocomplete="organization" />
+            </label>
+            <label>
+              Tu nombre
+              <input type="text" id="register-owner" autocomplete="name" />
+            </label>
+            <label>
+              Contraseña
+              <input type="password" id="register-password" autocomplete="new-password" />
+            </label>
+            <p class="login-hint muted">Mínimo 8 caracteres.</p>
+            <p id="login-error-register" class="error hidden"></p>
+            <button type="button" id="register-submit-btn" class="btn primary">Crear cuenta y entrar</button>
+          </div>
         </form>
+        <p class="login-back muted">
+          <a href="/">← Volver al inicio</a>
+          ·
+          <a href="/registro">Crear cuenta</a>
+        </p>
       </div>
     </section>
 
@@ -45,6 +98,10 @@
           <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
         </div>
         <div class="topbar-right">
+          <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
+            <span>Tema claro</span>
+            <input type="checkbox" id="theme-toggle" />
+          </label>
           <label class="toggle-row" title="Activa/desactiva IA en todos los chats">
             <span>IA global</span>
             <input type="checkbox" id="toggle-ai-global" />
@@ -136,7 +193,7 @@
             <header class="ai-setup-hero">
               <div class="ai-setup-hero-icon" aria-hidden="true">✨</div>
               <h2>Cuéntanos de tu negocio</h2>
-              <p>La IA responderá tus chats de WhatsApp. Responde en tus propias palabras — nosotros nos encargamos del resto.</p>
+              <p>La IA saluda, responde las primeras dudas y te avisa en <strong>Interesados</strong> cuando el cliente quiera reservar o comprar — tú cierras la venta.</p>
             </header>
 
             <div class="ai-setup-layout">
@@ -212,8 +269,8 @@
 
               <aside class="ai-setup-preview-card">
                 <div class="ai-preview-badge">Vista previa</div>
-                <h3>Tu IA responderá sabiendo esto</h3>
-                <p class="ai-preview-note">Actualiza cuando quieras — tus chats usarán la info más reciente.</p>
+                <h3>Tu IA calificará leads sabiendo esto</h3>
+                <p class="ai-preview-note">Saluda, responde preguntas y pasa el chat a ti cuando digan que quieren reservar.</p>
                 <ul id="biz-summary-list" class="biz-summary-list">
                   <li class="muted">Completa las preguntas y pulsa guardar.</li>
                 </ul>
@@ -361,6 +418,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=60"></script>
+  <script src="/static/panel/app.js?v=69"></script>
 </body>
 </html>

@@ -46,6 +46,13 @@ class ConversationInterest(str, enum.Enum):
     NOT_INTERESTED = "not_interested"
 
 
+class AiMode(str, enum.Enum):
+    """qualify: saluda, responde dudas y detecta interés. classify_only: solo etiqueta."""
+    QUALIFY = "qualify"
+    CLASSIFY_ONLY = "classify_only"
+    FULL_REPLY = "full_reply"
+
+
 class MessageDirection(str, enum.Enum):
     IN = "in"
     OUT = "out"

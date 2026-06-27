@@ -1,32 +1,116 @@
 <app-shell>
-  <section class="container pricing-page">
-    <div class="section-head">
-      <span class="eyebrow">Precios</span>
-      <h1>Planes simples para empezar y escalar.</h1>
-      <p class="lead">Prueba con límites seguros y entra al panel para conectar tu WhatsApp.</p>
-    </div>
+  <section class="pricing-light-zone">
+    <div class="container pricing-page">
+      <div class="section-head">
+        <h1>Elige el plan para tu negocio</h1>
+        <p class="lead">
+          Omitel responde al inicio, ordena tus chats y te avisa quién quiere comprar.
+          Tú cierras en Interesados.
+        </p>
+      </div>
 
-    <p *ngIf="loading" class="state">Cargando planes…</p>
-    <p *ngIf="error" class="state error">{{ error }}</p>
+      <div class="billing-banner" *ngIf="loggedIn">
+        <span *ngIf="subscription?.is_trial">Estás en prueba gratis — activa un plan cuando quieras.</span>
+        <span *ngIf="subscription?.is_paid">Tu plan activo: <strong>{{ subscription?.plan?.name }}</strong></span>
+        <span *ngIf="loggedIn && !subscription">Tu cuenta está activa.</span>
+        <a routerLink="/panel">Ir al panel</a>
+      </div>
 
-    <div class="plans-grid" *ngIf="!loading && !error">
-      <article class="plan-card card" *ngFor="let plan of plans; let i = index" [class.featured]="i === 0">
-        <div class="plan-top">
-          <h2>{{ plan.name }}</h2>
-          <p class="plan-desc">{{ plan.description }}</p>
-          <div class="price">{{ formatCop(plan.price_cop) }}<span>/mes</span></div>
+      <p class="checkout-alert success" *ngIf="checkoutSuccess">{{ checkoutSuccess }}</p>
+      <p class="checkout-alert error" *ngIf="checkoutError">{{ checkoutError }}</p>
+      <p class="checkout-alert muted" *ngIf="loggedIn && !billingEnabled">
+        Pagos en línea próximamente. Mientras tanto, escríbenos para activar tu plan.
+      </p>
+
+      <div class="plans-grid">
+        <article
+          class="plan-card"
+          *ngFor="let plan of plans"
+          [class.popular]="isFeatured(plan)"
+          [class.premium-tier]="isPremium(plan)"
+        >
+          <div class="plan-ribbon" *ngIf="ribbonLabel(plan) as label">{{ label }}</div>
+
+          <div class="plan-inner">
+            <div class="plan-head">
+              <div class="plan-title-row">
+                <h2>{{ plan.name }}</h2>
+                <span class="discount-pill" *ngIf="discountLabel(plan) as dto">
+                  {{ dto }}
+                </span>
+              </div>
+              <p class="plan-desc">{{ plan.description }}</p>
+
+              <div class="price-block">
+                <div class="price-was" *ngIf="referencePrice(plan) as ref">
+                  {{ formatCop(ref) }}
+                </div>
+                <div class="price-now">
+                  <span class="price">{{ formatCop(plan.price_cop) }}</span>
+                  <span class="price-period">/mes</span>
+                </div>
+              </div>
+              <p class="price-note">
+                Precio de lanzamiento. Facturación mensual, cancela cuando quieras.
+              </p>
+
+              <button
+                type="button"
+                class="plan-cta"
+                [class.plan-cta-solid]="isFeatured(plan) || isPremium(plan)"
+                [class.plan-cta-active]="isCurrentPlan(plan)"
+                [disabled]="!canSelectPlan(plan)"
+                (click)="onPlanSelect(plan)"
+              >
+                {{
+                  checkoutLoading && activePlanSlug === plan.slug
+                    ? 'Abriendo pago…'
+                    : ctaLabel(plan)
+                }}
+              </button>
+            </div>
+
+            <div class="plan-body">
+              <p class="premium-includes" *ngIf="isPremium(plan)">
+                Incluye todo el Plan Pro y suma capacidad para crecer.
+              </p>
+              <h3 class="features-title">{{ featuresTitle(plan) }}</h3>
+              <ul class="feature-list">
+                <li
+                  *ngFor="let item of featuresFor(plan)"
+                  [class.highlight]="item.highlight"
+                >
+                  <span class="check" aria-hidden="true"></span>
+                  <span class="feature-text">
+                    {{ item.text }}
+                    <span class="feature-tag" *ngIf="item.tag">{{ item.tag }}</span>
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <article class="trial-card" *ngIf="!loggedIn">
+        <div class="trial-inner">
+          <div>
+            <p class="trial-eyebrow">Sin compromiso</p>
+            <h3>Prueba gratis 7 días</h3>
+            <p class="trial-desc">
+              Crea tu cuenta en Omitel, conecta WhatsApp y prueba el panel antes de pagar.
+            </p>
+          </div>
+          <ul class="trial-list">
+            <li *ngFor="let item of trialFeatures">{{ item }}</li>
+          </ul>
+          <a routerLink="/registro" class="trial-cta">Crear cuenta de prueba</a>
         </div>
-        <ul>
-          <li *ngFor="let item of featureList(plan)">{{ item }}</li>
-        </ul>
-        <a routerLink="/registro" class="btn btn-primary full">Crear cuenta</a>
       </article>
-    </div>
 
-    <div class="pricing-cta card" *ngIf="!loading">
-      <h3>¿Ya tienes cuenta?</h3>
-      <p>Inicia sesión y entra directo al panel de WhatsApp.</p>
-      <a routerLink="/login" class="btn btn-secondary">Ir a login</a>
+      <div class="pricing-footer" *ngIf="!loggedIn">
+        <p>¿Ya tienes cuenta? <a routerLink="/login">Inicia sesión</a></p>
+      </div>
     </div>
   </section>
 </app-shell>

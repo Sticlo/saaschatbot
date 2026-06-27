@@ -2,8 +2,8 @@
   position: sticky;
   top: 0;
   z-index: 20;
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(12px);
-  background: rgba(7, 17, 26, 0.85);
   border-bottom: 1px solid var(--border);
 }
 
@@ -16,27 +16,174 @@
   min-height: 4rem;
 }
 
-.brand {
-  font-weight: 800;
-  font-size: 1.1rem;
-  color: var(--text);
-}
-
-.nav {
+.header-left {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
-.nav a:not(.btn) {
-  color: var(--muted);
-  padding: 0.35rem 0.5rem;
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
-.nav a:not(.btn).active,
-.nav a:not(.btn):hover {
+.brand {
+  font-weight: 800;
+  font-size: 1.2rem;
   color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.brand span {
+  color: var(--primary);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.nav-links a {
+  color: var(--muted);
+  padding: 0.45rem 0.65rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.nav-links a.active,
+.nav-links a:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.user-dropdown {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 0.25rem;
+}
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.user-avatar:hover,
+.user-avatar.open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.12);
+}
+
+.user-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 50;
+  width: min(18rem, calc(100vw - 2rem));
+  padding: 0.35rem 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(29, 30, 32, 0.12);
+}
+
+.user-dropdown-head {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem 0.75rem;
+}
+
+.user-dropdown-head strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.user-dropdown-head span {
+  font-size: 0.82rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.user-dropdown-item:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.user-dropdown-item.logout {
+  color: var(--muted);
+}
+
+.user-dropdown-item.logout:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.user-dropdown-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.user-dropdown-divider {
+  height: 1px;
+  margin: 0.35rem 0;
+  background: var(--border);
+}
+
+.footer-logout {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.footer-logout:hover {
+  color: var(--primary);
 }
 
 .site-main {
@@ -46,7 +193,8 @@
 .site-footer {
   border-top: 1px solid var(--border);
   padding: 2rem 0;
-  margin-top: 3rem;
+  margin-top: 0;
+  background: #fff;
 }
 
 .footer-inner {
@@ -54,19 +202,47 @@
   align-items: flex-start;
 }
 
+.footer-inner strong {
+  font-size: 1.05rem;
+}
+
+.footer-inner p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .footer-links {
   display: flex;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .footer-links a {
   color: var(--muted);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.footer-links a:hover {
+  color: var(--primary);
 }
 
 @media (max-width: 720px) {
   .header-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 1rem 0;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0.85rem 0;
+    gap: 0.75rem;
+  }
+
+  .header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .user-dropdown-panel {
+    right: 0;
+    left: auto;
   }
 }

@@ -1,12 +1,14 @@
 :root {
-  --bg: #07111a;
-  --surface: rgba(17, 27, 33, 0.82);
-  --surface-2: #1f2c34;
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #f3f7fa;
-  --muted: #9eb1bf;
-  --primary: #00a884;
-  --primary-2: #06cf9c;
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-2: #f0f2f8;
+  --border: #e4e6ef;
+  --text: #1d1e20;
+  --muted: #6d7080;
+  --primary: #ff6b00;
+  --primary-2: #ff8533;
+  --primary-soft: #fff0e6;
+  --shadow: 0 8px 24px rgba(29, 30, 32, 0.07);
 }
 
 * {
@@ -21,9 +23,16 @@ body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(0, 168, 132, 0.16), transparent 28%),
-    linear-gradient(180deg, var(--bg) 0%, #08141e 100%);
+  background: var(--bg);
+}
+
+.app-boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 a {
@@ -32,15 +41,15 @@ a {
 }
 
 .container {
-  width: min(1180px, calc(100% - 2rem));
+  width: min(1100px, calc(100% - 2rem));
   margin: 0 auto;
 }
 
 .eyebrow {
   display: inline-block;
-  color: var(--primary-2);
-  font-size: 0.85rem;
-  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.82rem;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -48,9 +57,9 @@ a {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 16px;
   padding: 1.5rem;
-  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
 }
 
 .muted {
@@ -61,18 +70,19 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
-  padding: 0.75rem 1.1rem;
-  border-radius: 999px;
+  min-height: 44px;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
   border: 1px solid transparent;
   font-weight: 700;
+  font-size: 0.95rem;
   cursor: pointer;
-  transition: 180ms ease;
+  transition: 150ms ease;
 }
 
 .btn-primary {
   background: var(--primary);
-  color: #04110d;
+  color: #fff;
 }
 
 .btn-primary:hover {
@@ -81,14 +91,15 @@ a {
 
 .btn-secondary,
 .btn-ghost {
-  background: transparent;
+  background: #fff;
   color: var(--text);
   border-color: var(--border);
 }
 
 .btn-secondary:hover,
 .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-2);
+  border-color: #cdd0dc;
 }
 
 .btn.full {

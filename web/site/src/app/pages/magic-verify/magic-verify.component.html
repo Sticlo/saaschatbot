@@ -1,0 +1,16 @@
+<app-shell>
+  <section class="container auth-page">
+    <div class="auth-card card">
+      @if (status === 'loading') {
+        <h1>Entrando…</h1>
+        <p class="muted">Validando tu enlace seguro.</p>
+      } @else {
+        <h1>No pudimos entrar</h1>
+        <p class="error">{{ error }}</p>
+        <p class="muted center">
+          <a routerLink="/login">Pedir un enlace nuevo</a>
+        </p>
+      }
+    </div>
+  </section>
+</app-shell>

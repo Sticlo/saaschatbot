@@ -1,6 +1,7 @@
 (() => {
   const API = "/api/v1";
   const LEGACY_STORAGE_KEY = "saaschatbot_token";
+  const THEME_STORAGE_KEY = "omitel_panel_theme";
 
   const state = {
     token: null,
@@ -34,10 +35,49 @@
 
   const $ = (id) => document.getElementById(id);
 
+  function getTheme() {
+    try {
+      const stored = localStorage.getItem(THEME_STORAGE_KEY);
+      return stored === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  }
+
+  function syncThemeToggles(theme) {
+    const checked = theme === "light";
+    const panelToggle = $("theme-toggle");
+    const loginToggle = $("theme-toggle-login");
+    if (panelToggle) panelToggle.checked = checked;
+    if (loginToggle) loginToggle.checked = checked;
+  }
+
+  function applyTheme(theme) {
+    const next = theme === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+    syncThemeToggles(next);
+  }
+
+  function bindThemeToggle(el) {
+    if (!el) return;
+    el.addEventListener("change", () => {
+      applyTheme(el.checked ? "light" : "dark");
+    });
+  }
+
   const loginView = $("login-view");
   const panelView = $("panel-view");
   const loginForm = $("login-form");
   const loginError = $("login-error");
+  const loginStepEmail = $("login-step-email");
+  const loginStepPassword = $("login-step-password");
+  const loginStepRegister = $("login-step-register");
+  let loginEmail = "";
   const conversationList = $("conversation-list");
   const messagesEl = $("messages");
   const emptyChat = $("empty-chat");
@@ -67,15 +107,6 @@
           ? { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}), ...(options.headers || {}) }
           : { ...headers(), ...(options.headers || {}) },
       });
-      if (res.status === 401) {
-        logout();
-        throw new Error("Sesión expirada");
-      }
-      if (res.status === 404) {
-        const e = new Error("Not Found");
-        e.status = 404;
-        throw e;
-      }
       const text = await res.text();
       let data = null;
       try {
@@ -83,9 +114,24 @@
       } catch {
         data = text;
       }
+      if (res.status === 401) {
+        logout();
+        throw new Error("Sesión expirada");
+      }
       if (!res.ok) {
-        const msg = data?.detail || (typeof data === "string" ? data : "Error");
-        throw new Error(typeof msg === "object" ? JSON.stringify(msg) : msg);
+        const detail = data?.detail;
+        let msg = detail || (typeof data === "string" ? data : "Error");
+        if (typeof msg === "object") msg = JSON.stringify(msg);
+        if (res.status === 404 && path.includes("/interest")) {
+          msg = "Función no disponible — reinicia el backend (uvicorn) para cargar la última versión.";
+        } else if (res.status === 404 && detail === "Conversación no encontrada") {
+          msg = "Conversación no encontrada";
+        } else if (res.status === 404 && !detail) {
+          msg = "No encontrado";
+        }
+        const e = new Error(msg);
+        e.status = res.status;
+        throw e;
       }
       return data;
     } catch (err) {
@@ -144,6 +190,18 @@
     $("user-label").textContent = "";
   }
 
+  function resetLoginForm() {
+    loginEmail = "";
+    showLoginStep("email");
+    loginForm?.reset();
+    [loginError, $("login-error-password"), $("login-error-register")].forEach((el) => {
+      if (el) {
+        el.textContent = "";
+        el.classList.add("hidden");
+      }
+    });
+  }
+
   async function logout() {
     try {
       await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" });
@@ -158,7 +216,9 @@
     state.token = null;
     disconnectWs();
     resetPanelState();
+    resetLoginForm();
     showLogin();
+    loadAuthProviders();
   }
 
   function roleAtLeast(role, minimum) {
@@ -656,9 +716,6 @@
     if (conv.interest_status === "interested") return "interested";
     if (conv.interest_status === "not_interested") return "not_interested";
     if (conv.status === "excluded") return "not_interested";
-    if (conv.bait_sent && !conv.ai_active) return "not_interested";
-    if (conv.bait_sent && conv.ai_active) return "interested";
-    if (conv.ai_active) return "interested";
     return null;
   }
 
@@ -1071,10 +1128,28 @@
 
   function loadClientsPanel() {
     resetMapsProspectPanel();
-    const business = state.clients.business || "";
-    const city = state.clients.city || "";
-    if ($("maps-business-input")) $("maps-business-input").value = business;
-    if ($("maps-city-input")) $("maps-city-input").value = city;
+    api("/outbound/business-profile")
+      .then((profile) => {
+        state.clients.business = profile?.maps_prospect_business || profile?.industry || "";
+        state.clients.city = profile?.maps_prospect_city || "";
+        if ($("maps-business-input")) $("maps-business-input").value = state.clients.business;
+        if ($("maps-city-input")) $("maps-city-input").value = state.clients.city;
+      })
+      .catch(() => {});
+  }
+
+  async function persistMapsProspectFields(business, city) {
+    try {
+      await api("/outbound/business-profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          maps_prospect_business: business,
+          maps_prospect_city: city,
+        }),
+      });
+    } catch {
+      /* mockup — no bloquear si falla */
+    }
   }
 
   async function runMapsProspectMock() {
@@ -1096,6 +1171,7 @@
 
     state.clients.business = business;
     state.clients.city = city;
+    persistMapsProspectFields(business, city);
     btn.disabled = true;
     businessInput.disabled = true;
     cityInput.disabled = true;
@@ -1435,6 +1511,21 @@
     if (state.aiStatus && state.aiStatus.configured && !state.aiStatus.provider_ok && state.aiStatus.provider_error) {
       parts.push(state.aiStatus.provider_error);
     }
+    if (
+      state.aiStatus?.ai_mode === "classify_only"
+      && state.aiStatus?.daily_classifications_unlimited
+      && state.aiStatus?.provider_ok
+    ) {
+      /* Sin banner — clasificación ilimitada en plan pagado */
+    } else if (state.aiStatus?.daily_replies_unlimited && state.aiStatus?.provider_ok) {
+      /* Premium — respuestas IA ilimitadas */
+    } else {
+      const aiLeft = state.aiStatus?.daily_classifications_remaining ?? state.aiStatus?.daily_replies_remaining;
+      if (typeof aiLeft === "number" && aiLeft <= 50) {
+        const label = state.aiStatus?.ai_mode === "classify_only" ? "clasificaciones" : "respuestas IA";
+        parts.push(`Te quedan ${aiLeft} ${label} hoy — activa tu plan para IA ilimitada.`);
+      }
+    }
     if (!parts.length) {
       banner.classList.add("hidden");
       banner.textContent = "";
@@ -1765,7 +1856,9 @@
             provider_ok: false,
             provider_error: String(event.error).includes("402")
               ? "Sin saldo en DeepSeek — recarga en platform.deepseek.com"
-              : String(event.error).slice(0, 200),
+              : String(event.error).includes("403")
+                ? "DeepSeek rechazó la conexión (403) — revisa DEEPSEEK_API_KEY en .env"
+                : String(event.error).slice(0, 200),
           };
           renderAiAlerts();
           if (state.activeId) {
@@ -1779,32 +1872,175 @@
     }
   }
 
+  function showLoginStep(step) {
+    loginStepEmail?.classList.toggle("hidden", step !== "email");
+    loginStepPassword?.classList.toggle("hidden", step !== "password");
+    loginStepRegister?.classList.toggle("hidden", step !== "register");
+    [loginError, $("login-error-password"), $("login-error-register")].forEach((el) => {
+      if (el) {
+        el.textContent = "";
+        el.classList.add("hidden");
+      }
+    });
+  }
+
+  function setLoginError(el, message) {
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+
+  async function lookupLoginEmail(email) {
+    const res = await fetch(`${API}/auth/lookup-email`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "No pudimos verificar el correo");
+    return data;
+  }
+
+  async function completeAuth(data) {
+    state.token = data.access_token || null;
+    try {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    showPanel();
+    await loadInitial();
+  }
+
+  async function loadAuthProviders() {
+    const stack = $("login-oauth");
+    const divider = $("login-oauth-divider");
+    const googleBtn = $("oauth-google");
+    const githubBtn = $("oauth-github");
+
+    googleBtn?.classList.add("hidden");
+    githubBtn?.classList.add("hidden");
+    stack?.classList.add("hidden");
+    divider?.classList.add("hidden");
+
+    try {
+      const res = await fetch(`${API}/auth/providers`);
+      if (!res.ok) {
+        googleBtn?.classList.remove("hidden");
+        stack?.classList.remove("hidden");
+        divider?.classList.remove("hidden");
+        return;
+      }
+      const data = await res.json();
+      let visible = false;
+      if (data.google) {
+        googleBtn?.classList.remove("hidden");
+        visible = true;
+      }
+      if (data.github) {
+        githubBtn?.classList.remove("hidden");
+        visible = true;
+      }
+      if (visible) {
+        stack?.classList.remove("hidden");
+        divider?.classList.remove("hidden");
+      }
+    } catch {
+      googleBtn?.classList.remove("hidden");
+      stack?.classList.remove("hidden");
+      divider?.classList.remove("hidden");
+    }
+  }
+
+  $("login-continue-btn")?.addEventListener("click", async () => {
+    loginEmail = ($("login-email")?.value || "").trim().toLowerCase();
+    if (!loginEmail) {
+      setLoginError(loginError, "Ingresa tu correo");
+      return;
+    }
+    const btn = $("login-continue-btn");
+    btn.disabled = true;
+    try {
+      const data = await lookupLoginEmail(loginEmail);
+      if (data.exists) {
+        $("login-email-display").textContent = loginEmail;
+        showLoginStep("password");
+        $("login-password")?.focus();
+      } else {
+        $("register-email-display").textContent = loginEmail;
+        showLoginStep("register");
+        $("register-business")?.focus();
+      }
+    } catch (err) {
+      setLoginError(loginError, err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("login-back-btn")?.addEventListener("click", () => {
+    $("login-password").value = "";
+    showLoginStep("email");
+  });
+
+  $("register-back-btn")?.addEventListener("click", () => {
+    $("register-business").value = "";
+    $("register-owner").value = "";
+    $("register-password").value = "";
+    showLoginStep("email");
+  });
+
+  $("register-submit-btn")?.addEventListener("click", async () => {
+    const business_name = ($("register-business")?.value || "").trim();
+    const owner_name = ($("register-owner")?.value || "").trim();
+    const password = $("register-password")?.value || "";
+    const errEl = $("login-error-register");
+    if (!business_name || !owner_name || password.length < 8) {
+      setLoginError(errEl, "Completa todos los campos (contraseña mín. 8 caracteres)");
+      return;
+    }
+    const btn = $("register-submit-btn");
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API}/auth/register`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_name, owner_name, email: loginEmail, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "No pudimos crear la cuenta");
+      await completeAuth(data);
+    } catch (err) {
+      setLoginError(errEl, err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    loginError.classList.add("hidden");
-    const email = $("login-email").value.trim();
-    const password = $("login-password").value;
+    if (!loginStepEmail?.classList.contains("hidden")) {
+      $("login-continue-btn")?.click();
+      return;
+    }
+    if (loginStepPassword?.classList.contains("hidden")) return;
 
+    const password = $("login-password")?.value || "";
+    const errEl = $("login-error-password");
     try {
       const res = await fetch(`${API}/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: loginEmail, password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Login fallido");
-      state.token = data.access_token || null;
-      try {
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-      } catch {
-        /* ignore */
-      }
-      showPanel();
-      await loadInitial();
+      await completeAuth(data);
     } catch (err) {
-      loginError.textContent = err.message;
-      loginError.classList.remove("hidden");
+      setLoginError(errEl, err.message);
     }
   });
 
@@ -2224,6 +2460,11 @@
   } catch {
     /* ignore */
   }
+
+  syncThemeToggles(getTheme());
+  bindThemeToggle($("theme-toggle"));
+  bindThemeToggle($("theme-toggle-login"));
+  loadAuthProviders();
 
   async function tryRestoreSession() {
     try {

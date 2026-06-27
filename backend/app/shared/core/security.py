@@ -10,12 +10,25 @@ from jose import JWTError, jwt
 
 from app.config import settings
 
+BCRYPT_ROUNDS = 12
+
+
+def validate_password_policy(password: str) -> None:
+    cleaned = (password or "").strip()
+    if len(cleaned) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres")
+    if len(cleaned) > 128:
+        raise ValueError("La contraseña es demasiado larga")
+
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    validate_password_policy(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_password(plain: str, hashed: Optional[str]) -> bool:
+    if not hashed:
+        return False
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 

@@ -90,6 +90,222 @@ def test_classify_parses_json(mock_chat):
     assert result["category"] == "duda"
 
 
+def test_detect_purchase_intent_signals():
+    from app.application.ai.ai_qualify_service import detect_purchase_intent
+
+    assert detect_purchase_intent("Listo, ¿dónde reservo?") is True
+    assert detect_purchase_intent("Me interesa, quiero reservar") is True
+    assert detect_purchase_intent("Me interesa saber más") is False
+    assert detect_purchase_intent("No me interesa") is False
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.classify_inbound_message")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_classify_only_marks_interested_no_reply(_sleep, mock_classify, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
+    from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
+    from app.application.ai.ai_service import process_ai_reply
+
+    mock_classify.return_value = {"category": "interesado", "reason": "test"}
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Test Biz",
+            slug=f"t-{uuid.uuid4().hex[:8]}",
+            ai_global_enabled=True,
+        )
+        db.add(tenant)
+        db.flush()
+
+        db.add(TenantProfile(tenant_id=tenant.id, ai_mode=AiMode.CLASSIFY_ONLY.value))
+        session = WhatsAppSession(
+            tenant_id=tenant.id,
+            instance_name=f"inst_{uuid.uuid4().hex[:8]}",
+            status=WhatsAppStatus.CONNECTED.value,
+        )
+        db.add(session)
+
+        conv = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573001112233",
+            contact_name="Juan",
+            ai_active=True,
+            mode="auto",
+            bait_sent=True,
+            whatsapp_connection_id=uuid.uuid4(),
+        )
+        db.add(conv)
+        db.flush()
+
+        msg = Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction=MessageDirection.IN.value,
+            source=MessageSource.CONTACT.value,
+            body="Me interesa saber más",
+            status="received",
+        )
+        db.add(msg)
+        db.commit()
+
+        ok = process_ai_reply(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            message_id=msg.id,
+        )
+        db.commit()
+        db.refresh(conv)
+
+    assert ok is True
+    mock_send.assert_not_called()
+    assert conv.interest_status == "interested"
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.classify_inbound_message")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_qualify_replies_without_marking_interested(
+    _sleep,
+    mock_classify,
+    mock_generate,
+    mock_send,
+):
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
+    from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
+    from app.application.ai.ai_service import process_ai_reply
+
+    mock_classify.return_value = {"category": "duda", "reason": "precio"}
+    mock_generate.return_value = "¡Hola! El menú del día cuesta $25.000."
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Test Biz",
+            slug=f"t-{uuid.uuid4().hex[:8]}",
+            ai_global_enabled=True,
+        )
+        db.add(tenant)
+        db.flush()
+
+        db.add(TenantProfile(tenant_id=tenant.id, ai_mode=AiMode.QUALIFY.value))
+        session = WhatsAppSession(
+            tenant_id=tenant.id,
+            instance_name=f"inst_{uuid.uuid4().hex[:8]}",
+            status=WhatsAppStatus.CONNECTED.value,
+        )
+        db.add(session)
+
+        conv = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573001112233",
+            contact_name="Juan",
+            ai_active=True,
+            mode=ConversationMode.AUTO.value,
+            bait_sent=True,
+            whatsapp_connection_id=uuid.uuid4(),
+        )
+        db.add(conv)
+        db.flush()
+
+        msg = Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction=MessageDirection.IN.value,
+            source=MessageSource.CONTACT.value,
+            body="¿Cuánto cuesta?",
+            status="received",
+        )
+        db.add(msg)
+        db.commit()
+
+        ok = process_ai_reply(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            message_id=msg.id,
+        )
+        db.commit()
+        db.refresh(conv)
+
+    assert ok is True
+    mock_send.assert_called_once()
+    assert conv.interest_status is None
+    assert conv.mode == ConversationMode.AUTO.value
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.classify_inbound_message")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_qualify_handoff_marks_interested_and_manual(_sleep, mock_classify, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+    from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
+    from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
+    from app.application.ai.ai_service import process_ai_reply
+
+    mock_classify.return_value = {"category": "interesado", "reason": "reserva"}
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            business_name="Test Biz",
+            slug=f"t-{uuid.uuid4().hex[:8]}",
+            ai_global_enabled=True,
+        )
+        db.add(tenant)
+        db.flush()
+
+        db.add(TenantProfile(tenant_id=tenant.id, ai_mode=AiMode.QUALIFY.value))
+        session = WhatsAppSession(
+            tenant_id=tenant.id,
+            instance_name=f"inst_{uuid.uuid4().hex[:8]}",
+            status=WhatsAppStatus.CONNECTED.value,
+        )
+        db.add(session)
+
+        conv = Conversation(
+            tenant_id=tenant.id,
+            contact_phone="+573001112233",
+            contact_name="Juan",
+            ai_active=True,
+            mode=ConversationMode.AUTO.value,
+            bait_sent=True,
+            whatsapp_connection_id=uuid.uuid4(),
+        )
+        db.add(conv)
+        db.flush()
+
+        msg = Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction=MessageDirection.IN.value,
+            source=MessageSource.CONTACT.value,
+            body="Listo, ¿dónde reservo?",
+            status="received",
+        )
+        db.add(msg)
+        db.commit()
+
+        ok = process_ai_reply(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            message_id=msg.id,
+        )
+        db.commit()
+        db.refresh(conv)
+
+    assert ok is True
+    mock_send.assert_called_once()
+    assert conv.interest_status == "interested"
+    assert conv.mode == ConversationMode.MANUAL.value
+
+
 @requires_db
 @patch("app.application.ai.ai_service.send_text_message")
 @patch("app.application.ai.ai_service.generate_reply")
@@ -102,8 +318,8 @@ def test_process_ai_reply_sends_message(
     mock_send,
 ):
     from app.infrastructure.persistence.database import SessionLocal
-    from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
-    from app.domain.entities.enums import MessageDirection, MessageSource, WhatsAppStatus
+    from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
+    from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
     from app.application.ai.ai_service import process_ai_reply
 
     mock_classify.return_value = {"category": "interesado", "reason": "test"}
@@ -118,6 +334,7 @@ def test_process_ai_reply_sends_message(
         db.add(tenant)
         db.flush()
 
+        db.add(TenantProfile(tenant_id=tenant.id, ai_mode=AiMode.FULL_REPLY.value))
         session = WhatsAppSession(
             tenant_id=tenant.id,
             instance_name=f"inst_{uuid.uuid4().hex[:8]}",
@@ -148,12 +365,11 @@ def test_process_ai_reply_sends_message(
         db.add(msg)
         db.commit()
 
-        with patch("app.application.ai.ai_service.is_configured", return_value=True):
-            ok = process_ai_reply(
-                db,
-                tenant_id=tenant.id,
-                conversation_id=conv.id,
-                message_id=msg.id,
-            )
+        ok = process_ai_reply(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            message_id=msg.id,
+        )
         assert ok is True
         mock_send.assert_called_once()

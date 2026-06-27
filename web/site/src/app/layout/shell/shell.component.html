@@ -1,12 +1,68 @@
 <header class="site-header">
   <div class="container header-inner">
-    <a routerLink="/" class="brand">{{ appName }}</a>
-    <nav class="nav">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
-      <a routerLink="/precios" routerLinkActive="active">Precios</a>
-      <a routerLink="/login" routerLinkActive="active" class="btn btn-ghost">Entrar</a>
-      <a routerLink="/registro" routerLinkActive="active" class="btn btn-primary">Probar gratis</a>
-    </nav>
+    <div class="header-left">
+      <a routerLink="/" class="brand">Omi<span>tel</span></a>
+    </div>
+
+    <div class="header-right">
+      <nav class="nav-links" aria-label="Principal">
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
+        <a routerLink="/precios" routerLinkActive="active">Precios</a>
+      </nav>
+
+      <ng-container *ngIf="user$ | async as user; else guestNav">
+        <div class="nav-actions">
+          <a routerLink="/precios" class="btn btn-ghost">
+            {{ planCtaLabel(subscription$ | async) }}
+          </a>
+          <a [href]="panelUrl" class="btn btn-primary">Panel WhatsApp</a>
+        </div>
+
+        <div class="user-dropdown">
+          <button
+            type="button"
+            class="user-avatar"
+            [class.open]="userMenuOpen"
+            [attr.aria-expanded]="userMenuOpen"
+            aria-haspopup="true"
+            [title]="displayName(user)"
+            (click)="toggleUserMenu($event)"
+          >
+            {{ userInitials(user) }}
+          </button>
+
+          <div class="user-dropdown-panel" *ngIf="userMenuOpen" (click)="$event.stopPropagation()">
+            <div class="user-dropdown-head">
+              <strong>{{ displayName(user) }}</strong>
+              <span>{{ user.email }}</span>
+            </div>
+
+            <a routerLink="/precios" class="user-dropdown-item" (click)="userMenuOpen = false">
+              {{ planCtaLabel(subscription$ | async) }}
+            </a>
+            <a [href]="panelUrl" class="user-dropdown-item">Panel WhatsApp</a>
+
+            <div class="user-dropdown-divider"></div>
+
+            <button
+              type="button"
+              class="user-dropdown-item logout"
+              [disabled]="loggingOut"
+              (click)="logout()"
+            >
+              {{ loggingOut ? 'Saliendo…' : 'Salir' }}
+            </button>
+          </div>
+        </div>
+      </ng-container>
+
+      <ng-template #guestNav>
+        <div class="nav-actions">
+          <a routerLink="/login" routerLinkActive="active" class="btn btn-ghost">Entrar</a>
+          <a routerLink="/registro" routerLinkActive="active" class="btn btn-primary">Probar gratis</a>
+        </div>
+      </ng-template>
+    </div>
   </div>
 </header>
 
@@ -17,13 +73,19 @@
 <footer class="site-footer">
   <div class="container footer-inner">
     <div>
-      <strong>{{ appName }}</strong>
+      <strong class="brand">Omi<span>tel</span></strong>
       <p>WhatsApp + IA para vender y atender mejor.</p>
     </div>
     <div class="footer-links">
       <a routerLink="/precios">Precios</a>
-      <a routerLink="/login">Entrar</a>
-      <a routerLink="/registro">Crear cuenta</a>
+      <ng-container *ngIf="user$ | async; else guestFooter">
+        <a [href]="panelUrl">Panel WhatsApp</a>
+        <button type="button" class="footer-logout" (click)="logout()">Salir</button>
+      </ng-container>
+      <ng-template #guestFooter>
+        <a routerLink="/login">Entrar</a>
+        <a routerLink="/registro">Crear cuenta</a>
+      </ng-template>
     </div>
     <p class="muted">© {{ year }} {{ appName }}</p>
   </div>

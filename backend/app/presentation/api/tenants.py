@@ -16,6 +16,7 @@ from app.presentation.schemas.auth import (
     TenantSettingsUpdate,
 )
 from app.application.realtime.realtime_service import publish_tenant_settings
+from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 from app.application.billing.tenant_service import log_audit
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -80,13 +81,8 @@ def update_my_tenant(
 
 @router.get("/me/profile", response_model=TenantProfileResponse)
 def get_profile(current: RequireViewer, db: Session = Depends(get_db)):
-    profile = (
-        db.query(TenantProfile)
-        .filter(TenantProfile.tenant_id == current.tenant_id)
-        .first()
-    )
-    if profile is None:
-        raise HTTPException(status_code=404, detail="Perfil no encontrado")
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    db.commit()
     return profile
 
 
@@ -97,13 +93,7 @@ def update_profile(
     current: RequireOwner,
     db: Session = Depends(get_db),
 ):
-    profile = (
-        db.query(TenantProfile)
-        .filter(TenantProfile.tenant_id == current.tenant_id)
-        .first()
-    )
-    if profile is None:
-        raise HTTPException(status_code=404, detail="Perfil no encontrado")
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
 
     if body.onboarding_answers is not None:
         profile.onboarding_answers = body.onboarding_answers

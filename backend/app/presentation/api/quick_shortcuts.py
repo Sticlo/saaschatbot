@@ -35,6 +35,7 @@ def _to_response(item: dict) -> QuickShortcutResponse:
 @router.get("", response_model=list[QuickShortcutResponse])
 def list_shortcuts(current: RequireViewer, db: Session = Depends(get_db)):
     rows = get_shortcuts(db, current.tenant_id)
+    db.commit()
     return [_to_response(r) for r in rows]
 
 

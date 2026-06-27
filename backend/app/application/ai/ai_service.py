@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
 import time
@@ -9,6 +8,21 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.application.ai.ai_classifier_service import classify_inbound_message
+from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
+from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
+from app.application.ai.ai_qualify_service import detect_purchase_intent, handoff_reply
+from app.application.ai.ai_usage_service import (
+    check_daily_classify_quota,
+    check_daily_reply_quota,
+    increment_daily_classify_count,
+    increment_daily_reply_count,
+)
+from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
+from app.application.messaging.message_service import _detect_media_type_from_body
+from app.application.outbound.outbound_dedup_service import mark_phone_excluded
+from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
+from app.application.whatsapp.whatsapp_service import send_text_message
 from app.config import settings
 from app.domain.entities import Conversation, Exclusion, Message, Tenant, TenantProfile, WhatsAppSession
 from app.domain.entities.enums import (
@@ -18,13 +32,7 @@ from app.domain.entities.enums import (
     MessageDirection,
     MessageSource,
 )
-from app.application.ai.ai_classifier_service import classify_inbound_message
-from app.application.ai.ai_conversation_service import generate_reply
-from app.infrastructure.ai.deepseek_client import DeepSeekError, is_configured
-from app.application.messaging.message_service import _detect_media_type_from_body
-from app.application.outbound.outbound_dedup_service import mark_phone_excluded
-from app.application.realtime.realtime_service import publish_conversation_updated
-from app.application.whatsapp.whatsapp_service import send_text_message
+from app.infrastructure.ai.deepseek_client import DeepSeekError
 
 log = logging.getLogger(__name__)
 
@@ -66,15 +74,21 @@ def is_respondable_text(body: str) -> bool:
     return True
 
 
+def _interest_from_category(category: str) -> Optional[str]:
+    if category in ("interesado", "duda"):
+        return ConversationInterest.INTERESTED.value
+    if category == "no_interesado":
+        return ConversationInterest.NOT_INTERESTED.value
+    return None
+
+
 def maybe_schedule_ai_for_conversation(
     db: Session,
     *,
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
 ) -> bool:
-    """Encola IA si el último mensaje es entrante y aún no hay respuesta bot."""
-    from app.domain.entities import Message
-    from app.domain.entities.enums import MessageSource
+    """Encola IA si el último mensaje es entrante y aplica procesamiento."""
     from app.application.ai.ai_queue_service import enqueue_ai_reply_ids
 
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
@@ -85,6 +99,9 @@ def maybe_schedule_ai_for_conversation(
     )
     if not tenant or not conversation or not should_ai_respond(tenant, conversation):
         return False
+
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    classify_mode = is_classify_only(profile)
 
     latest_in = (
         db.query(Message)
@@ -98,18 +115,19 @@ def maybe_schedule_ai_for_conversation(
     if latest_in is None or not is_respondable_text(latest_in.body):
         return False
 
-    replied = (
-        db.query(Message.id)
-        .filter(
-            Message.conversation_id == conversation_id,
-            Message.direction == MessageDirection.OUT.value,
-            Message.source == MessageSource.BOT.value,
-            Message.created_at >= latest_in.created_at,
+    if not classify_mode:
+        replied = (
+            db.query(Message.id)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.direction == MessageDirection.OUT.value,
+                Message.source == MessageSource.BOT.value,
+                Message.created_at >= latest_in.created_at,
+            )
+            .first()
         )
-        .first()
-    )
-    if replied is not None:
-        return False
+        if replied is not None:
+            return False
 
     enqueue_ai_reply_ids(
         tenant_id=tenant_id,
@@ -176,6 +194,338 @@ def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
     )
 
 
+def _publish_quota_error(tenant: Tenant, conversation_id: uuid.UUID, err: str) -> None:
+    publish_panel_event(
+        tenant.id,
+        {
+            "type": "ai.error",
+            "conversation_id": str(conversation_id),
+            "error": err,
+        },
+    )
+
+
+def _run_classification(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    message: Message,
+    profile: Optional[TenantProfile],
+) -> Optional[dict]:
+    try:
+        return classify_inbound_message(
+            message.body,
+            business_name=tenant.business_name,
+        )
+    except Exception:
+        log.exception("Error clasificando mensaje conv=%s", conversation.id)
+        return None
+
+
+def _process_classify_only(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    message: Message,
+    session: WhatsAppSession,
+    profile: Optional[TenantProfile],
+) -> bool:
+    """Solo etiqueta interesado / no interesado — sin cerrar venta ni charlar."""
+    quota_ok, _, _, quota_err = check_daily_classify_quota(db, tenant)
+    if not quota_ok:
+        log.warning("Clasificación quota tenant=%s: %s", tenant.id, quota_err)
+        _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario")
+        return True
+
+    classification = _run_classification(
+        db, tenant=tenant, conversation=conversation, message=message, profile=profile
+    )
+    if classification is None:
+        return True
+
+    category = classification.get("category", "duda")
+    log.info(
+        "IA classify-only tenant=%s conv=%s category=%s",
+        tenant.id,
+        conversation.id,
+        category,
+    )
+
+    if category == "ruido":
+        return True
+
+    if category == "opt_out":
+        register_opt_out(db, tenant=tenant, conversation=conversation)
+        try:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=OPT_OUT_REPLY,
+                source=MessageSource.BOT.value,
+            )
+        except Exception:
+            log.exception("Error enviando opt_out conv=%s", conversation.id)
+        increment_daily_classify_count(tenant.id)
+        return True
+
+    interest = _interest_from_category(category)
+    if interest:
+        conversation.interest_status = interest
+        if interest == ConversationInterest.NOT_INTERESTED.value:
+            conversation.ai_active = False
+
+    increment_daily_classify_count(tenant.id)
+    publish_conversation_updated(tenant.id, conversation)
+    return True
+
+
+def _handoff_to_human(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    session: WhatsAppSession,
+) -> bool:
+    conversation.interest_status = ConversationInterest.INTERESTED.value
+    conversation.mode = ConversationMode.MANUAL.value
+    publish_conversation_updated(tenant.id, conversation)
+
+    quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
+    if not quota_ok:
+        log.warning("IA quota tenant=%s handoff: %s", tenant.id, quota_err)
+        _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
+        return True
+
+    try:
+        send_text_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            text=handoff_reply(tenant.business_name),
+            source=MessageSource.BOT.value,
+        )
+        increment_daily_reply_count(tenant.id)
+    except Exception:
+        log.exception("Error enviando handoff conv=%s", conversation.id)
+        return False
+    return True
+
+
+def _process_qualify(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    message: Message,
+    session: WhatsAppSession,
+    profile: Optional[TenantProfile],
+) -> bool:
+    """Saluda, responde dudas y pasa a humano cuando hay intención de reserva/compra."""
+    classification = _run_classification(
+        db, tenant=tenant, conversation=conversation, message=message, profile=profile
+    )
+    if classification is None:
+        return True
+
+    category = classification.get("category", "duda")
+    log.info(
+        "IA qualify tenant=%s conv=%s category=%s",
+        tenant.id,
+        conversation.id,
+        category,
+    )
+
+    if category == "ruido":
+        return True
+
+    if category == "opt_out":
+        register_opt_out(db, tenant=tenant, conversation=conversation)
+        try:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=OPT_OUT_REPLY,
+                source=MessageSource.BOT.value,
+            )
+        except Exception:
+            log.exception("Error enviando opt_out conv=%s", conversation.id)
+        return True
+
+    if category == "no_interesado":
+        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
+        conversation.ai_active = False
+        publish_conversation_updated(tenant.id, conversation)
+        try:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=NO_INTEREST_REPLY,
+                source=MessageSource.BOT.value,
+            )
+        except Exception:
+            log.exception("Error enviando no_interesado conv=%s", conversation.id)
+        return True
+
+    if detect_purchase_intent(message.body):
+        return _handoff_to_human(
+            db, tenant=tenant, conversation=conversation, session=session
+        )
+
+    quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
+    if not quota_ok:
+        log.warning("IA quota tenant=%s: %s", tenant.id, quota_err)
+        _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
+        return True
+
+    history = _load_history(db, conversation.id)
+    inbound_count = sum(1 for m in history if m.direction == MessageDirection.IN.value)
+    is_first_contact = inbound_count <= 1
+
+    reply = FALLBACK_REPLY
+    used_fallback = False
+    try:
+        generated = generate_qualify_reply(
+            tenant=tenant,
+            profile=profile,
+            contact_name=conversation.contact_name,
+            history=history,
+            is_first_contact=is_first_contact,
+        )
+        if generated.strip():
+            reply = generated.strip()
+            increment_daily_reply_count(tenant.id)
+    except DeepSeekError as exc:
+        used_fallback = True
+        log.warning("IA qualify fallback conv=%s: %s", conversation.id, exc)
+        _publish_quota_error(tenant, conversation.id, str(exc)[:300])
+
+    if not reply.strip():
+        return True
+
+    try:
+        send_text_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            text=reply.strip(),
+            source=MessageSource.BOT.value,
+        )
+        if used_fallback:
+            log.info("IA qualify respondió con fallback conv=%s", conversation.id)
+    except Exception:
+        log.exception("Error enviando respuesta qualify conv=%s", conversation.id)
+        return False
+
+    return True
+
+
+def _process_full_reply(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    message: Message,
+    session: WhatsAppSession,
+    profile: Optional[TenantProfile],
+    classification: dict,
+) -> bool:
+    category = classification.get("category", "duda")
+
+    if category == "ruido":
+        return True
+
+    if category == "opt_out":
+        register_opt_out(db, tenant=tenant, conversation=conversation)
+        try:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=OPT_OUT_REPLY,
+                source=MessageSource.BOT.value,
+            )
+        except Exception:
+            log.exception("Error enviando opt_out conv=%s", conversation.id)
+        return True
+
+    if category == "no_interesado":
+        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
+        conversation.ai_active = False
+        publish_conversation_updated(tenant.id, conversation)
+        try:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=NO_INTEREST_REPLY,
+                source=MessageSource.BOT.value,
+            )
+        except Exception:
+            log.exception("Error enviando no_interesado conv=%s", conversation.id)
+        return True
+
+    interest = _interest_from_category(category)
+    if interest == ConversationInterest.INTERESTED.value:
+        conversation.interest_status = interest
+        publish_conversation_updated(tenant.id, conversation)
+
+    quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
+    if not quota_ok:
+        log.warning("IA quota tenant=%s: %s", tenant.id, quota_err)
+        _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
+        return True
+
+    history = _load_history(db, conversation.id)
+    reply = FALLBACK_REPLY
+    used_fallback = False
+    try:
+        generated = generate_reply(
+            tenant=tenant,
+            profile=profile,
+            contact_name=conversation.contact_name,
+            history=history,
+        )
+        if generated.strip():
+            reply = generated.strip()
+            increment_daily_reply_count(tenant.id)
+    except DeepSeekError as exc:
+        used_fallback = True
+        log.warning("IA fallback conv=%s: %s", conversation.id, exc)
+        _publish_quota_error(tenant, conversation.id, str(exc)[:300])
+
+    if not reply.strip():
+        return True
+
+    try:
+        send_text_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            text=reply.strip(),
+            source=MessageSource.BOT.value,
+        )
+        if used_fallback:
+            log.info("IA respondió con fallback conv=%s", conversation.id)
+    except Exception:
+        log.exception("Error enviando respuesta IA conv=%s", conversation.id)
+        return False
+
+    return True
+
+
 def process_ai_reply(
     db: Session,
     *,
@@ -183,7 +533,7 @@ def process_ai_reply(
     conversation_id: uuid.UUID,
     message_id: uuid.UUID,
 ) -> bool:
-    """Procesa un job de IA. Retorna True si terminó (respondió o decidió no responder)."""
+    """Procesa un job de IA: clasificar y/o responder según ai_mode del negocio."""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     conversation = (
         db.query(Conversation)
@@ -226,9 +576,16 @@ def process_ai_reply(
         log.info("IA skip conv=%s: mensaje no respondible (%r)", conversation_id, message.body[:80])
         return True
 
-    delay = random.uniform(
-        settings.ai_reply_delay_min_seconds,
-        settings.ai_reply_delay_max_seconds,
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    classify_mode = is_classify_only(profile)
+
+    delay = (
+        settings.ai_classify_delay_seconds
+        if classify_mode
+        else random.uniform(
+            settings.ai_reply_delay_min_seconds,
+            settings.ai_reply_delay_max_seconds,
+        )
     )
     time.sleep(delay)
 
@@ -239,104 +596,50 @@ def process_ai_reply(
     if not _is_latest_inbound(db, conversation_id, message_id):
         return True
 
-    profile = (
-        db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).first()
-    )
-
-    try:
-        classification = classify_inbound_message(
-            message.body,
-            business_name=tenant.business_name,
-        )
-    except Exception:
-        log.exception("Error clasificando mensaje conv=%s", conversation_id)
-        return True
-
-    category = classification.get("category", "duda")
-    log.info(
-        "IA classify tenant=%s conv=%s category=%s",
-        tenant_id,
-        conversation_id,
-        category,
-    )
-
-    if category == "ruido":
-        return True
-
-    if category == "opt_out":
-        register_opt_out(db, tenant=tenant, conversation=conversation)
-        try:
-            send_text_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                text=OPT_OUT_REPLY,
-                source=MessageSource.BOT.value,
-            )
-        except Exception:
-            log.exception("Error enviando opt_out conv=%s", conversation_id)
-        return True
-
-    if category == "no_interesado":
-        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
-        conversation.ai_active = False
-        publish_conversation_updated(tenant.id, conversation)
-        try:
-            send_text_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                text=NO_INTEREST_REPLY,
-                source=MessageSource.BOT.value,
-            )
-        except Exception:
-            log.exception("Error enviando no_interesado conv=%s", conversation_id)
-        return True
-
-    history = _load_history(db, conversation_id)
-    reply = FALLBACK_REPLY
-    used_fallback = False
-    try:
-        generated = generate_reply(
-            tenant=tenant,
-            profile=profile,
-            contact_name=conversation.contact_name,
-            history=history,
-        )
-        if generated.strip():
-            reply = generated.strip()
-    except DeepSeekError as exc:
-        used_fallback = True
-        log.warning("IA fallback conv=%s: %s", conversation_id, exc)
-        from app.application.realtime.realtime_service import publish_panel_event
-
-        publish_panel_event(
-            tenant.id,
-            {
-                "type": "ai.error",
-                "conversation_id": str(conversation_id),
-                "error": str(exc)[:300],
-            },
-        )
-
-    if not reply.strip():
-        return True
-
-    try:
-        send_text_message(
+    if classify_mode:
+        return _process_classify_only(
             db,
             tenant=tenant,
-            session=session,
             conversation=conversation,
-            text=reply.strip(),
-            source=MessageSource.BOT.value,
+            message=message,
+            session=session,
+            profile=profile,
         )
-        if used_fallback:
-            log.info("IA respondió con fallback conv=%s", conversation_id)
-    except Exception:
-        log.exception("Error enviando respuesta IA conv=%s", conversation_id)
-        return False
 
-    return True
+    if is_qualify_mode(profile):
+        return _process_qualify(
+            db,
+            tenant=tenant,
+            conversation=conversation,
+            message=message,
+            session=session,
+            profile=profile,
+        )
+
+    classification = _run_classification(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        message=message,
+        profile=profile,
+    )
+    if classification is None:
+        return True
+
+    log.info(
+        "IA classify tenant=%s conv=%s category=%s mode=%s",
+        tenant_id,
+        conversation_id,
+        classification.get("category"),
+        resolve_ai_mode(profile),
+    )
+
+    return _process_full_reply(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        message=message,
+        session=session,
+        profile=profile,
+        classification=classification,
+    )

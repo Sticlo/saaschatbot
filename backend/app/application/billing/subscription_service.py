@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
 from app.domain.entities import Plan, Subscription, SubscriptionStatus, Tenant, TenantPlan
+from app.infrastructure.cache.redis_client import cache_set, tenant_cache_key
 
 
 def get_tenant_subscription(db: Session, tenant_id: Any) -> Optional[Subscription]:
@@ -60,9 +62,24 @@ def build_subscription_summary(
 
 
 def activate_paid_subscription(
-    db: Session, tenant: Tenant, subscription: Subscription, plan: Plan
+    db: Session,
+    tenant: Tenant,
+    subscription: Subscription,
+    plan: Plan,
+    *,
+    wompi_transaction_id: Optional[str] = None,
+    period_start: Optional[datetime] = None,
+    period_end: Optional[datetime] = None,
 ) -> None:
-    """Para Fase 6 (Wompi). Centraliza la activación del plan pagado."""
+    """Activa el plan pagado tras confirmación de Wompi."""
     tenant.plan = TenantPlan.PAID.value
     tenant.daily_bait_limit = plan.daily_bait_limit
+    subscription.plan_id = plan.id
     subscription.status = SubscriptionStatus.ACTIVE.value
+    if period_start is not None:
+        subscription.current_period_start = period_start
+    if period_end is not None:
+        subscription.current_period_end = period_end
+    if wompi_transaction_id and not subscription.wompi_customer_id:
+        subscription.wompi_customer_id = wompi_transaction_id
+    cache_set(tenant_cache_key(str(tenant.id), "plan"), tenant.plan, ttl_seconds=900)

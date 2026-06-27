@@ -35,7 +35,7 @@ def register_tenant_with_owner(
     business_name: str,
     owner_name: str,
     email: str,
-    hashed_password: str,
+    hashed_password: Optional[str],
 ) -> Tuple[Tenant, User]:
     slug = _unique_slug(db, business_name)
     plan = get_default_plan(db)

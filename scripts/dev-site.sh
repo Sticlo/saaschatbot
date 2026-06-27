@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Landing Angular SSR (desarrollo con proxy al backend en :8000)
+# Landing Angular (desarrollo con proxy al backend en :8000)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,6 +9,9 @@ if [ ! -d "$SITE/node_modules" ]; then
   echo "→ Instalando dependencias de web/site…"
   npm --prefix "$SITE" install
 fi
+
+# Evita SSR cacheado de builds anteriores
+rm -rf "$SITE/.angular/cache" "$SITE/dist"
 
 echo "→ Site Angular: http://localhost:4200"
 echo "→ Backend API esperado en http://127.0.0.1:8000 (./scripts/dev.sh en otra terminal)"

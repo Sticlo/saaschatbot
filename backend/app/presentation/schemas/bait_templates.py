@@ -93,6 +93,8 @@ class BusinessProfileUpdate(BaseModel):
     location_hours: Optional[str] = Field(default=None, max_length=500)
     tone: Optional[str] = Field(default=None, max_length=120)
     restrictions: Optional[str] = Field(default=None, max_length=1000)
+    maps_prospect_business: Optional[str] = Field(default=None, max_length=2000)
+    maps_prospect_city: Optional[str] = Field(default=None, max_length=120)
     ai_system_prompt: Optional[str] = Field(default=None, max_length=4000)
     bait_message_template: Optional[str] = Field(default=None, max_length=2000)
 
@@ -106,6 +108,8 @@ class BusinessProfileResponse(BaseModel):
     location_hours: Optional[str] = None
     tone: Optional[str] = None
     restrictions: Optional[str] = None
+    maps_prospect_business: Optional[str] = None
+    maps_prospect_city: Optional[str] = None
     ai_system_prompt: Optional[str] = None
     bait_message_template: Optional[str] = None
     ai_summary: list[str] = Field(default_factory=list)

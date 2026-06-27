@@ -28,6 +28,46 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class EmailLookupRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailLookupResponse(BaseModel):
+    email: EmailStr
+    exists: bool
+
+
+class MagicLinkRequest(BaseModel):
+    email: EmailStr
+    business_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+
+
+class MagicLinkResponse(BaseModel):
+    sent: bool
+    needs_signup: bool = False
+    message: str = ""
+    dev_link: Optional[str] = None
+
+
+class MagicLinkVerifyRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    dev_link: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

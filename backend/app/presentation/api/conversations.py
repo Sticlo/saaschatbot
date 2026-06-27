@@ -641,6 +641,7 @@ def update_conversation_interest(
     current: RequireAgent,
     db: Session = Depends(get_db),
 ):
+    """Marca conversación como interesada / no interesada (panel)."""
     conversation = (
         db.query(Conversation)
         .filter(

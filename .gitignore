@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 *.pyo
+# Secretos locales — nunca subir al repo
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 .DS_Store
