@@ -25,10 +25,11 @@
             <input type="checkbox" id="theme-toggle-login" />
           </label>
         </div>
+        <p id="login-offline-banner" class="error hidden"></p>
         <form id="login-form">
           <div id="login-oauth" class="oauth-stack hidden">
-            <a id="oauth-google" class="btn btn-oauth google hidden" href="/api/v1/auth/google/start">Continuar con Google</a>
-            <a id="oauth-github" class="btn btn-oauth github hidden" href="/api/v1/auth/github/start">Continuar con GitHub</a>
+            <a id="oauth-google" class="btn btn-oauth google hidden" href="/api/v1/auth/google/start?next=%2Fpanel">Continuar con Google</a>
+            <a id="oauth-github" class="btn btn-oauth github hidden" href="/api/v1/auth/github/start?next=%2Fpanel">Continuar con GitHub</a>
           </div>
           <div id="login-oauth-divider" class="auth-divider hidden"><span>o con correo</span></div>
 
@@ -418,6 +419,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=69"></script>
+  <script src="/static/panel/app.js?v=70"></script>
 </body>
 </html>

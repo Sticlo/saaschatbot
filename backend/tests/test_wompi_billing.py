@@ -23,6 +23,32 @@ def test_integrity_signature_is_stable():
     assert len(sig1) == 64
 
 
+def test_wompi_api_base_sandbox():
+    from app.config import settings
+
+    settings.wompi_public_key = "pub_test_abc"
+    settings.wompi_api_base_url = ""
+    from app.application.billing.wompi_service import wompi_api_base
+
+    assert wompi_api_base() == "https://sandbox.wompi.co/v1"
+
+
+def test_sync_checkout_reference_mismatch():
+    from unittest.mock import MagicMock, patch
+
+    from app.application.billing.checkout_service import sync_checkout_with_wompi
+
+    checkout = MagicMock()
+    checkout.reference = "om-ref-1"
+    db = MagicMock()
+
+    with patch(
+        "app.application.billing.checkout_service.fetch_transaction",
+        return_value={"reference": "other-ref", "status": "APPROVED", "id": "tx-1"},
+    ):
+        assert sync_checkout_with_wompi(db, checkout=checkout, transaction_id="tx-1") is False
+
+
 def test_verify_event_checksum_valid():
     from app.config import settings
 

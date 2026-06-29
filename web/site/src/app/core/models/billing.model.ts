@@ -1,6 +1,8 @@
 export interface BillingConfig {
   enabled: boolean;
   public_key: string | null;
+  sandbox?: boolean;
+  sync_enabled?: boolean;
 }
 
 export interface CheckoutSession {

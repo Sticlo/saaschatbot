@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 class BillingConfigResponse(BaseModel):
     enabled: bool
     public_key: Optional[str] = None
+    sandbox: bool = False
+    sync_enabled: bool = False
 
 
 class CheckoutCreateRequest(BaseModel):
@@ -36,3 +38,7 @@ class CheckoutStatusResponse(BaseModel):
     plan_name: Optional[str] = None
     paid_at: Optional[datetime] = None
     wompi_transaction_id: Optional[str] = None
+
+
+class CheckoutSyncRequest(BaseModel):
+    transaction_id: str = Field(min_length=4, max_length=64)

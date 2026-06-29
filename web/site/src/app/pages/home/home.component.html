@@ -1,176 +1,242 @@
 <app-shell>
   <section class="home-page">
-    <!-- Hero -->
-    <div class="hero-wrap">
-      <div class="container hero">
+    <div class="home-bg" aria-hidden="true"></div>
+
+    <!-- Hero — split: copy left, WhatsApp mockup right -->
+    <div class="hero">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-aurora"></div>
+        <span class="hero-bloom hero-bloom--peach"></span>
+        <span class="hero-bloom hero-bloom--mist"></span>
+      </div>
+
+      <div class="container hero-grid">
         <div class="hero-copy">
-          <span class="eyebrow">WhatsApp + IA para vender más</span>
-          <h1>Deja de perder ventas entre 200 chats que nadie filtra.</h1>
-          <p class="lead">
-            Omitel conecta tu WhatsApp, responde lo repetitivo con IA y te muestra en
-            <strong>Interesados</strong> solo a quien quiere comprar, reservar o pedir cotización.
-            Tú entras a cerrar — no a contestar lo mismo todo el día.
-          </p>
-          <div class="hero-actions">
-            <ng-container *ngIf="user$ | async; else guestHero">
-              <a [href]="panelUrl" class="btn btn-primary">Ir al panel WhatsApp</a>
-              <a routerLink="/precios" class="btn btn-secondary">Ver mi plan</a>
-            </ng-container>
-            <ng-template #guestHero>
-              <a routerLink="/registro" class="btn btn-primary">Probar 7 días gratis</a>
-              <a routerLink="/precios" class="btn btn-secondary">Ver planes desde $120.000</a>
-            </ng-template>
+          <div class="hero-reveal">
+            <p class="eyebrow-pill hero-reveal-item">
+              <span class="eyebrow-dot"></span>
+              WhatsApp automatizado
+            </p>
+
+            <h1 class="hero-reveal-item">
+              <span class="headline-hero">Responde a tus clientes.</span>
+              <span class="headline-sub">Sin vivir en el chat.</span>
+            </h1>
+
+            <div class="subhead-block hero-reveal-item">
+              <p class="subhead-lead">La IA contesta por ti en WhatsApp.</p>
+              <p class="subhead">
+                Solo entras cuando detectamos un
+                <strong class="highlight-word">Interesado</strong>
+                listo para comprar.
+              </p>
+            </div>
+
+            <div class="hero-action hero-reveal-item">
+              <div class="hero-cta">
+                <ng-container *ngIf="user$ | async; else guestHero">
+                  <a [href]="panelUrl" class="btn-hero btn-hero--primary">Abrir panel</a>
+                </ng-container>
+                <ng-template #guestHero>
+                  <a routerLink="/registro" class="btn-hero btn-hero--primary">Probar gratis</a>
+                  <a routerLink="/precios" class="link-hero">Desde $120.000/mes ›</a>
+                </ng-template>
+              </div>
+              <p class="trust-line">7 días gratis · Sin tarjeta · Colombia</p>
+            </div>
           </div>
-          <ul class="hero-points">
-            <li>Sin tarjeta en la prueba</li>
-            <li>Onboarding guiado incluido</li>
-            <li>Hecho para negocios en Colombia</li>
-          </ul>
         </div>
 
-        <div class="hero-mockup" aria-hidden="true">
-          <div class="mockup-phone card">
-            <div class="mockup-top">
-              <span class="mockup-dot"></span>
-              <span class="mockup-title">Panel Omitel</span>
-              <span class="mockup-badge">En vivo</span>
+        <div class="hero-visual" [class.hero-visual--interested]="showAlert">
+          <div class="device-glow device-glow--warm" aria-hidden="true"></div>
+          <div class="device-glow device-glow--green" aria-hidden="true"></div>
+
+          <div class="device-3d">
+            <div class="insight-cards" aria-hidden="true">
+              <article
+                class="insight-card insight-card--probability"
+                [class.insight-card--visible]="showInsightProbability"
+                [class.insight-card--pop]="insightPop === 'probability'"
+              >
+                <span class="insight-glow insight-glow--orange" aria-hidden="true"></span>
+                <span class="insight-ring" aria-hidden="true"></span>
+                <div class="insight-top">
+                  <span class="insight-icon insight-icon--probability"></span>
+                  <span class="insight-badge insight-badge--live">En vivo</span>
+                </div>
+                <div class="insight-body">
+                  <span class="insight-label">Probabilidad de compra</span>
+                  <div class="insight-metric">
+                    <strong class="insight-value">{{ displayProbability }}%</strong>
+                    <span class="insight-trend" *ngIf="probabilityTrend">{{ probabilityTrend }}</span>
+                  </div>
+                  <div class="insight-bar insight-bar--orange">
+                    <span class="insight-bar-fill" [style.width.%]="displayProbability"></span>
+                  </div>
+                </div>
+              </article>
+
+              <article
+                class="insight-card insight-card--time"
+                [class.insight-card--visible]="showInsightTime"
+                [class.insight-card--pop]="insightPop === 'time'"
+              >
+                <span class="insight-glow insight-glow--blue" aria-hidden="true"></span>
+                <span class="insight-ring" aria-hidden="true"></span>
+                <div class="insight-top">
+                  <span class="insight-icon insight-icon--time"></span>
+                  <span class="insight-badge">Automático</span>
+                </div>
+                <div class="insight-body">
+                  <span class="insight-label">Tiempo ahorrado</span>
+                  <strong class="insight-value insight-value--hero">{{
+                    currentScenario.insights.timeSaved
+                  }}</strong>
+                  <span class="insight-caption">Sin responder manualmente</span>
+                </div>
+              </article>
+
+              <article
+                class="insight-card insight-card--sales"
+                [class.insight-card--visible]="showInsightSales"
+                [class.insight-card--pop]="insightPop === 'sales'"
+                [class.insight-card--celebrate]="showInsightSales && showAlert"
+              >
+                <span class="insight-glow insight-glow--green" aria-hidden="true"></span>
+                <span class="insight-ring insight-ring--green" aria-hidden="true"></span>
+                <div class="insight-top">
+                  <span class="insight-icon insight-icon--sales"></span>
+                  <span class="insight-badge insight-badge--win">Nueva venta</span>
+                </div>
+                <div class="insight-body">
+                  <span class="insight-label">Ventas</span>
+                  <strong class="insight-value insight-value--hero insight-value--sales">{{
+                    currentScenario.insights.sales
+                  }}</strong>
+                  <span class="insight-caption">Interesado confirmado</span>
+                </div>
+              </article>
             </div>
-            <div class="mockup-tabs">
-              <span class="tab">Chats</span>
-              <span class="tab active">Interesados <em>3</em></span>
-            </div>
-            <div class="mockup-chat">
-              <div class="bubble them">Hola, ¿precio del combo familiar?</div>
-              <div class="bubble bot">¡Hola! El combo está en $45.000. ¿Te gustaría reservar para hoy?</div>
-              <div class="bubble them highlight">Sí, para 6 personas a las 7pm</div>
-              <div class="mockup-alert">
-                <strong>Interesado detectado</strong>
-                <span>Reserva · Alta intención</span>
+
+            <div class="device-shadow" aria-hidden="true"></div>
+            <div class="device">
+              <span class="device-button device-button--action" aria-hidden="true"></span>
+              <span class="device-button device-button--vol-up" aria-hidden="true"></span>
+              <span class="device-button device-button--vol-down" aria-hidden="true"></span>
+              <span class="device-button device-button--power" aria-hidden="true"></span>
+              <div class="device-frame">
+                <div class="device-screen">
+                  <div class="device-status">
+                    <span class="device-time">10:41</span>
+                    <div class="device-island"></div>
+                    <span class="device-icons">
+                      <i class="sig"></i>
+                      <i class="bat"></i>
+                    </span>
+                  </div>
+
+                  <div class="device-app">
+                    <header class="wa-nav">
+                      <span class="wa-back">‹</span>
+                      <div class="wa-user">
+                        <div class="wa-avatar">{{ currentScenario.contactInitial }}</div>
+                        <div class="wa-name">
+                          <strong>{{ currentScenario.contactName }}</strong>
+                          <span>{{ currentScenario.contactRole }}</span>
+                        </div>
+                      </div>
+                      <span class="wa-actions">
+                        <i class="wa-icon-call"></i>
+                        <i class="wa-icon-menu">⋮</i>
+                      </span>
+                    </header>
+
+                    <div
+                      class="wa-chat"
+                      [class.wa-chat--static]="chatStatic"
+                      [class.wa-chat--swap]="scenarioTransition"
+                    >
+                      <div class="wa-date">Hoy · {{ currentScenario.vertical }}</div>
+
+                      <div
+                        *ngFor="let msg of visibleMessages"
+                        class="wa-row wa-row--enter"
+                        [class.wa-row--in]="msg.direction === 'in'"
+                        [class.wa-row--out]="msg.direction === 'out'"
+                      >
+                        <div class="wa-bubble">
+                          <p>{{ msg.text }}</p>
+                          <time>
+                            {{ msg.time }}
+                            <span class="wa-ticks" *ngIf="msg.direction === 'out'">✓✓</span>
+                          </time>
+                        </div>
+                        <span class="wa-brand" *ngIf="msg.direction === 'out'">O</span>
+                      </div>
+
+                      <div
+                        class="wa-row wa-row--in wa-row--typing"
+                        *ngIf="showTyping && !chatStatic"
+                        [class.wa-row--typing-out]="typingDirection === 'out'"
+                      >
+                        <div class="wa-bubble wa-bubble--typing">
+                          <span></span><span></span><span></span>
+                        </div>
+                        <span class="wa-brand" *ngIf="typingDirection === 'out'">O</span>
+                      </div>
+                    </div>
+
+                    <div class="wa-alert" [class.wa-alert--visible]="showAlert">
+                      <span class="wa-alert-dot"></span>
+                      {{ currentScenario.alertText }}
+                    </div>
+                  </div>
+
+                  <div class="device-home"></div>
+                </div>
               </div>
             </div>
-            <div class="mockup-footer">Tú entras aquí y cierras la venta ✓</div>
           </div>
+
+          <button
+            type="button"
+            class="chat-mode-toggle"
+            (click)="toggleChatMode()"
+            [attr.aria-pressed]="chatStatic"
+          >
+            {{ chatStatic ? 'Ver conversación viva' : 'Modo estático' }}
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Pain -->
-    <div class="container pain-section">
-      <div class="section-head center">
-        <span class="eyebrow">El problema</span>
-        <h2>¿Te suena familiar?</h2>
-        <p>Si vendes por WhatsApp, esto te frena cada semana.</p>
-      </div>
-      <div class="pain-grid">
-        <article class="pain-card card" *ngFor="let pain of pains">
-          <span class="pain-emoji">{{ pain.emoji }}</span>
-          <h3>{{ pain.title }}</h3>
-          <p>{{ pain.text }}</p>
-        </article>
-      </div>
-    </div>
-
-    <!-- How it helps -->
-    <div class="outcome-band">
-      <div class="container">
-        <div class="section-head center light">
-          <span class="eyebrow light">Cómo te ayuda Omitel</span>
-          <h2>Menos caos. Más cierres.</h2>
-          <p>Tres resultados concretos desde la primera semana.</p>
-        </div>
-        <div class="outcome-grid">
-          <article class="outcome-card" *ngFor="let item of outcomes">
-            <span class="outcome-value">{{ item.value }}</span>
-            <h3>{{ item.label }}</h3>
-            <p>{{ item.detail }}</p>
+    <!-- How it works -->
+    <section class="how">
+      <div class="how-inner">
+        <p class="how-label">Cómo funciona</p>
+        <div class="beats">
+          <article class="beat" *ngFor="let b of beats">
+            <span class="beat-step">{{ b.step }}</span>
+            <h2>{{ b.title }}</h2>
+            <p>{{ b.line }}</p>
           </article>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Flow -->
-    <div class="container flow-section">
-      <div class="section-head">
-        <span class="eyebrow">Así funciona</span>
-        <h2>De “¿cuánto cuesta?” a venta cerrada</h2>
+    <!-- Final CTA -->
+    <section class="close-block">
+      <div class="close-inner">
+        <h2>Tu próximo cliente<br />ya está en WhatsApp.</h2>
+        <p class="close-lead">Empieza hoy. Sin contratos. Sin complicaciones.</p>
+        <ng-container *ngIf="user$ | async; else guestClose">
+          <a [href]="panelUrl" class="btn-hero btn-hero--primary">Ir al panel</a>
+        </ng-container>
+        <ng-template #guestClose>
+          <a routerLink="/registro" class="btn-hero btn-hero--primary">Probar gratis</a>
+          <a routerLink="/precios" class="link-hero">Ver planes ›</a>
+        </ng-template>
       </div>
-      <ol class="flow-timeline">
-        <li>
-          <span class="flow-step">1</span>
-          <div>
-            <strong>Conectas tu WhatsApp</strong>
-            <p>En minutos. Chats sincronizados al panel — sin perder historial.</p>
-          </div>
-        </li>
-        <li>
-          <span class="flow-step">2</span>
-          <div>
-            <strong>La IA responde y califica</strong>
-            <p>Precios, horarios, menú, dudas frecuentes. Detecta quién tiene intención real.</p>
-          </div>
-        </li>
-        <li>
-          <span class="flow-step">3</span>
-          <div>
-            <strong>Tú cierras en Interesados</strong>
-            <p>Entras solo a los chats que importan. Reservas, pedidos y cotizaciones listos.</p>
-          </div>
-        </li>
-      </ol>
-    </div>
-
-    <!-- Personas -->
-    <div class="container personas-section">
-      <div class="section-head center">
-        <span class="eyebrow">Para quién es</span>
-        <h2>Negocios que viven en WhatsApp</h2>
-      </div>
-      <div class="persona-grid">
-        <article class="persona-card card" *ngFor="let p of personas">
-          <h3>{{ p.name }}</h3>
-          <p>{{ p.example }}</p>
-        </article>
-      </div>
-    </div>
-
-    <!-- Features -->
-    <div class="container features">
-      <div class="section-head center">
-        <span class="eyebrow">Qué incluye</span>
-        <h2>Todo en un panel, sin enredos</h2>
-        <p>No es un chatbot suelto — es tu operación de ventas por WhatsApp organizada.</p>
-      </div>
-      <div class="features-grid">
-        <article class="feature-card card" *ngFor="let f of features">
-          <span class="feature-tag">{{ f.tag }}</span>
-          <h3>{{ f.title }}</h3>
-          <p>{{ f.text }}</p>
-        </article>
-      </div>
-    </div>
-
-    <!-- Pricing teaser -->
-    <div class="container pricing-teaser card">
-      <div class="pricing-teaser-copy">
-        <h2>Desde $120.000/mes</h2>
-        <p>
-          Plan Pro para empezar fuerte · Premium si tienes mucho volumen e IA sin tope.
-          Prueba 7 días gratis antes de pagar.
-        </p>
-      </div>
-      <a routerLink="/precios" class="btn btn-primary">Comparar planes</a>
-    </div>
-
-    <!-- CTA -->
-    <div class="container cta-band card">
-      <div>
-        <h2>Recupera tu tiempo. No pierdas otro lead.</h2>
-        <p>Crea tu cuenta, conecta WhatsApp y ve Interesados en acción esta semana.</p>
-      </div>
-      <div class="cta-band-actions">
-        <a routerLink="/registro" class="btn btn-primary">Empezar prueba gratis</a>
-        <a routerLink="/precios" class="btn btn-secondary">Ver precios</a>
-      </div>
-    </div>
+    </section>
   </section>
 </app-shell>

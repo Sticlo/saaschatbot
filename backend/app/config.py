@@ -122,9 +122,11 @@ class Settings(BaseSettings):
 
     # Wompi — pagos COP (Colombia)
     wompi_public_key: str = ""
+    wompi_private_key: str = ""
     wompi_integrity_secret: str = ""
     wompi_events_secret: str = ""
     wompi_checkout_redirect_url: str = "http://localhost:4200/precios"
+    wompi_api_base_url: str = ""
 
     def chatwoot_base_url(self) -> str:
         """URL que Evolution usa para hablar con Chatwoot."""

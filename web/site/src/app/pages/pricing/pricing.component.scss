@@ -34,14 +34,16 @@
 
 .section-head h1 {
   margin: 0 0 0.75rem;
+  font-family: var(--font-geist);
   font-size: clamp(1.85rem, 4vw, 2.5rem);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--hz-text);
 }
 
 .section-head .lead {
   margin: 0;
+  font-family: var(--font-body);
   color: var(--hz-muted);
   font-size: 1.05rem;
   line-height: 1.6;
@@ -95,6 +97,43 @@
   background: #fff;
   border: 1px dashed var(--hz-border);
   color: var(--hz-muted);
+}
+
+.payments-trust {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
+  max-width: 42rem;
+  margin: 0 auto 1.5rem;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--hz-border);
+  font-size: 0.88rem;
+  color: var(--hz-muted);
+}
+
+.payments-trust strong {
+  color: var(--hz-text);
+}
+
+.payments-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hz-primary);
+  background: var(--hz-primary-soft);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+}
+
+.payments-note {
+  width: 100%;
+  text-align: center;
+  font-size: 0.78rem;
 }
 
 .plans-grid {
@@ -184,15 +223,17 @@
 
 .plan-head h2 {
   margin: 0;
+  font-family: var(--font-geist);
   font-size: 1.35rem;
-  font-weight: 800;
+  font-weight: 500;
   color: var(--hz-text);
 }
 
 .discount-pill {
   flex-shrink: 0;
+  font-family: var(--font-geist);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--hz-primary);
   background: var(--hz-primary-soft);
   padding: 0.25rem 0.55rem;
@@ -201,6 +242,7 @@
 
 .plan-desc {
   margin: 0 0 1.1rem;
+  font-family: var(--font-body);
   color: var(--hz-muted);
   font-size: 0.92rem;
   line-height: 1.5;
@@ -221,25 +263,24 @@
 }
 
 .price {
+  font-family: var(--font-geist);
   font-size: 2.35rem;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--hz-text);
   line-height: 1;
 }
 
-.premium-tier .price {
-  color: var(--hz-primary);
-}
-
 .price-period {
+  font-family: var(--font-body);
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--hz-muted);
 }
 
 .price-note {
   margin: 0.65rem 0 1.1rem;
+  font-family: var(--font-body);
   font-size: 0.78rem;
   line-height: 1.45;
   color: var(--hz-muted);
@@ -252,14 +293,18 @@
   width: 100%;
   min-height: 48px;
   border-radius: 8px;
-  font-weight: 700;
+  font-family: var(--font-geist);
+  font-weight: 600;
   font-size: 0.95rem;
   border: 2px solid var(--hz-primary);
   color: var(--hz-primary);
   background: #fff;
   transition: 150ms ease;
   cursor: pointer;
-  font: inherit;
+}
+
+.premium-tier .price {
+  color: var(--hz-primary);
 }
 
 .plan-cta:disabled {

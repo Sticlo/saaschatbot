@@ -73,9 +73,12 @@ def instance_exists(name: str) -> bool:
             return waha_client.session_exists(name)
         except WahaAPIError as exc:
             raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
-    from app.infrastructure.evolution.evolution_client import evolution_client
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 
-    return evolution_client.instance_exists(name)
+    try:
+        return evolution_client.instance_exists(name)
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
 def create_instance(name: str, webhook_url: str, webhook_secret: str) -> dict:
@@ -337,6 +340,9 @@ def gateway_request(method: str, path: str, **kwargs: Any) -> Any:
     """Proxy para ensure_evolution_webhook (solo Evolution)."""
     if uses_waha():
         return {}
-    from app.infrastructure.evolution.evolution_client import evolution_client
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 
-    return evolution_client._request(method, path, **kwargs)
+    try:
+        return evolution_client._request(method, path, **kwargs)
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc

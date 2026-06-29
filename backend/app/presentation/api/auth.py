@@ -35,7 +35,9 @@ from app.application.auth.password_reset_service import (
     reset_password_with_token,
 )
 from app.application.auth.oauth_service import (
+    consume_oauth_finish_token,
     consume_oauth_state,
+    create_oauth_finish_token,
     create_oauth_state,
     fetch_github_profile,
     fetch_google_profile,
@@ -236,12 +238,15 @@ def _is_safe_next_path(path: str) -> bool:
 
 
 def _site_url(path: str) -> str:
-    base = settings.site_public_url.rstrip("/")
+    site = settings.site_public_url.rstrip("/")
+    api = settings.app_public_url.rstrip("/")
     if path.startswith("http://") or path.startswith("https://"):
-        if path.startswith(base):
+        if path.startswith(site) or path.startswith(api):
             return path
-        return base
-    return f"{base}{path}"
+        return site
+    if path.startswith("/panel") or path.startswith("/api/"):
+        return f"{api}{path}"
+    return f"{site}{path}"
 
 
 def _resolve_oauth_redirect(user: User, db: Session, next_url: Optional[str]) -> str:
@@ -262,15 +267,58 @@ def _oauth_error_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(f"{base}?error={quote(message)}")
 
 
+def _with_oauth_flag(url: str) -> str:
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}oauth=1"
+
+
+def _to_site_relative(url: str) -> str:
+    base = settings.site_public_url.rstrip("/")
+    if url.startswith(base):
+        suffix = url[len(base):]
+        return suffix or "/"
+    if _is_safe_next_path(url):
+        return url
+    return "/precios"
+
+
+def _oauth_finish_url(access_token: str, destination: str) -> str:
+    from urllib.parse import urlencode
+
+    finish_token = create_oauth_finish_token(access_token)
+    site = settings.site_public_url.rstrip("/")
+    params = urlencode({"token": finish_token, "next": _to_site_relative(destination)})
+    return f"{site}/api/v1/auth/oauth/finish?{params}"
+
+
 def _oauth_success_redirect(user: User, db: Session, next_url: Optional[str] = None) -> RedirectResponse:
-    token = create_access_token(
+    access_token = create_access_token(
         user_id=str(user.id),
         tenant_id=str(user.tenant_id),
         role=user.role,
         email=user.email,
     )
-    response = RedirectResponse(_resolve_oauth_redirect(user, db, next_url))
-    set_auth_cookie(response, token)
+    destination = _resolve_oauth_redirect(user, db, next_url)
+    return RedirectResponse(_oauth_finish_url(access_token, destination))
+
+
+@router.get("/oauth/finish")
+def oauth_finish(
+    token: str = Query(..., min_length=16),
+    next: Optional[str] = Query(default=None),
+):
+    """Sets session cookie on the site origin after OAuth callback on the API port."""
+    access_token = consume_oauth_finish_token(token.strip())
+    if not access_token:
+        return _oauth_error_redirect("Enlace de inicio expirado. Intenta de nuevo.")
+
+    if next and _is_safe_next_path(next):
+        target = _with_oauth_flag(_site_url(next))
+    else:
+        target = _with_oauth_flag(settings.oauth_success_redirect)
+
+    response = RedirectResponse(target)
+    set_auth_cookie(response, access_token)
     return response
 
 

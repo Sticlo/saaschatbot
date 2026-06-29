@@ -1,5 +1,5 @@
 import { AsyncPipe, NgIf } from '@angular/common';
-import { Component, HostListener, OnInit, inject } from '@angular/core';
+import { Component, HostBinding, HostListener, OnInit, inject } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { filter } from 'rxjs/operators';
 
@@ -7,6 +7,7 @@ import { environment } from '../../../environments/environment';
 import { UserMe } from '../../core/models/auth.model';
 import { SubscriptionSummary } from '../../core/models/billing.model';
 import { SessionService } from '../../core/services/session.service';
+import { ThemeService, ThemeMode } from '../../core/services/theme.service';
 
 @Component({
   selector: 'app-shell',
@@ -17,6 +18,10 @@ import { SessionService } from '../../core/services/session.service';
 export class ShellComponent implements OnInit {
   private readonly session = inject(SessionService);
   private readonly router = inject(Router);
+  private readonly themeService = inject(ThemeService);
+
+  @HostBinding('class.shell-home')
+  isHome = false;
 
   readonly appName = environment.appName;
   readonly panelUrl = environment.panelUrl;
@@ -26,14 +31,27 @@ export class ShellComponent implements OnInit {
 
   userMenuOpen = false;
   loggingOut = false;
+  theme: ThemeMode = 'light';
 
   ngOnInit(): void {
+    this.theme = this.themeService.theme;
+    this.themeService.theme$.subscribe((mode) => {
+      this.theme = mode;
+    });
+
+    this.syncHomeRoute();
     this.router.events
       .pipe(filter((event) => event instanceof NavigationEnd))
       .subscribe(() => {
         this.userMenuOpen = false;
+        this.syncHomeRoute();
         this.session.refresh();
       });
+  }
+
+  private syncHomeRoute(): void {
+    const url = this.router.url.split('?')[0];
+    this.isHome = url === '/' || url === '';
   }
 
   @HostListener('document:click')
@@ -44,6 +62,10 @@ export class ShellComponent implements OnInit {
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
     this.userMenuOpen = !this.userMenuOpen;
+  }
+
+  toggleTheme(): void {
+    this.themeService.toggle();
   }
 
   displayName(user: UserMe): string {

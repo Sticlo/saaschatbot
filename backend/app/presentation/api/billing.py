@@ -11,8 +11,14 @@ from app.application.billing.checkout_service import (
     create_checkout,
     get_checkout_for_tenant,
     handle_wompi_event,
+    sync_checkout_with_wompi,
 )
-from app.application.billing.wompi_service import verify_event_checksum, wompi_enabled
+from app.application.billing.wompi_service import (
+    verify_event_checksum,
+    wompi_enabled,
+    wompi_is_sandbox,
+    wompi_sync_enabled,
+)
 from app.config import settings
 from app.domain.entities import Tenant
 from app.infrastructure.persistence.database import get_db
@@ -21,6 +27,7 @@ from app.presentation.schemas.billing import (
     CheckoutCreateRequest,
     CheckoutCreateResponse,
     CheckoutStatusResponse,
+    CheckoutSyncRequest,
 )
 from app.shared.core.deps import RequireOwner
 
@@ -34,6 +41,8 @@ def billing_config():
     return BillingConfigResponse(
         enabled=enabled,
         public_key=settings.wompi_public_key if enabled else None,
+        sandbox=wompi_is_sandbox() if enabled else False,
+        sync_enabled=wompi_sync_enabled(),
     )
 
 
@@ -73,12 +82,12 @@ def checkout_status(
     if checkout is None:
         raise HTTPException(status_code=404, detail="Checkout no encontrado")
 
-    plan_slug = None
-    plan_name = None
-    if checkout.plan is not None:
-        plan_slug = checkout.plan.slug
-        plan_name = checkout.plan.name
+    return _checkout_status_response(checkout)
 
+
+def _checkout_status_response(checkout) -> CheckoutStatusResponse:
+    plan_slug = checkout.plan.slug if checkout.plan else None
+    plan_name = checkout.plan.name if checkout.plan else None
     return CheckoutStatusResponse(
         reference=checkout.reference,
         status=checkout.status,
@@ -87,6 +96,39 @@ def checkout_status(
         paid_at=checkout.paid_at,
         wompi_transaction_id=checkout.wompi_transaction_id,
     )
+
+
+@router.post("/checkout/{reference}/sync", response_model=CheckoutStatusResponse)
+def sync_checkout(
+    reference: str,
+    body: CheckoutSyncRequest,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    if not wompi_sync_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Sincronización con Wompi no configurada (falta WOMPI_PRIVATE_KEY).",
+        )
+
+    checkout = get_checkout_for_tenant(
+        db, tenant_id=current.tenant_id, reference=reference.strip()
+    )
+    if checkout is None:
+        raise HTTPException(status_code=404, detail="Checkout no encontrado")
+
+    if checkout.status != "pending":
+        db.refresh(checkout)
+        return _checkout_status_response(checkout)
+
+    sync_checkout_with_wompi(
+        db,
+        checkout=checkout,
+        transaction_id=body.transaction_id.strip(),
+    )
+    db.commit()
+    db.refresh(checkout)
+    return _checkout_status_response(checkout)
 
 
 @router.post("/wompi/webhook", status_code=status.HTTP_200_OK)

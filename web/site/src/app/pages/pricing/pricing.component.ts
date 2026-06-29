@@ -43,6 +43,7 @@ export class PricingComponent implements OnInit, OnDestroy {
   plans: Plan[] = [];
   loggedIn = false;
   billingEnabled = false;
+  billingSandbox = false;
   subscription: SubscriptionSummary | null = null;
   checkoutLoading = false;
   checkoutError = '';
@@ -89,11 +90,18 @@ export class PricingComponent implements OnInit, OnDestroy {
       }
     });
 
+    this.billing.getConfig().subscribe({
+      next: (cfg) => {
+        this.billingSandbox = !!cfg.sandbox;
+      },
+    });
+
     this.route.queryParamMap.subscribe((params) => {
       if (params.get('checkout') === 'done') {
         const ref = params.get('ref');
+        const wompiId = params.get('id');
         if (ref) {
-          this.pollCheckout(ref);
+          this.finishCheckoutReturn(ref, wompiId);
         }
         this.router.navigate([], {
           relativeTo: this.route,
@@ -224,7 +232,9 @@ export class PricingComponent implements OnInit, OnDestroy {
           });
           widget.open((result) => {
             const tx = result.transaction;
-            if (tx?.status === 'APPROVED' || tx?.id) {
+            if (tx?.id) {
+              this.confirmCheckout(session.reference, tx.id);
+            } else if (tx?.status === 'APPROVED') {
               this.pollCheckout(session.reference);
             }
           });
@@ -245,12 +255,41 @@ export class PricingComponent implements OnInit, OnDestroy {
     });
   }
 
+  private finishCheckoutReturn(reference: string, wompiTransactionId: string | null): void {
+    if (wompiTransactionId) {
+      this.confirmCheckout(reference, wompiTransactionId);
+      return;
+    }
+    this.pollCheckout(reference);
+  }
+
+  private confirmCheckout(reference: string, transactionId: string): void {
+    this.checkoutLoading = true;
+    this.billing.syncCheckout(reference, transactionId).subscribe({
+      next: (status) => {
+        this.checkoutLoading = false;
+        if (status.status === 'approved') {
+          this.checkoutSuccess = `¡Listo! Tu ${status.plan_name || 'plan'} está activo.`;
+          this.session.refreshSubscription();
+          this.session.refresh();
+          return;
+        }
+        this.pollCheckout(reference);
+      },
+      error: () => {
+        this.checkoutLoading = false;
+        this.pollCheckout(reference);
+      },
+    });
+  }
+
   private pollCheckout(reference: string, attempt = 0): void {
     this.billing.getCheckoutStatus(reference).subscribe({
       next: (status) => {
         if (status.status === 'approved') {
           this.checkoutSuccess = `¡Listo! Tu ${status.plan_name || 'plan'} está activo.`;
           this.session.refreshSubscription();
+          this.session.refresh();
           return;
         }
         if (attempt < 8) {

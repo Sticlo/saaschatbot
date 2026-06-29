@@ -37,6 +37,31 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 
+def _gateway_unavailable_message(exc: EvolutionAPIError) -> str:
+    text = str(exc)
+    if "WAHA no responde" in text:
+        return (
+            "WAHA no responde. Inicia Docker y ejecuta: ./scripts/waha-docker.sh "
+            "o cambia WHATSAPP_PROVIDER=evolution en el .env"
+        )
+    if "Evolution API" in text or "Connection refused" in text or "ConnectError" in text:
+        return (
+            "Evolution API no está corriendo. En otra terminal ejecuta: "
+            "./scripts/evolution-mac.sh start"
+        )
+    return text
+
+
+def _gateway_http_error(exc: EvolutionAPIError) -> HTTPException:
+    message = _gateway_unavailable_message(exc)
+    status_code = (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+        if "no responde" in message.lower() or "no está corriendo" in message.lower()
+        else status.HTTP_502_BAD_GATEWAY
+    )
+    return HTTPException(status_code=status_code, detail=message)
+
+
 def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
     from app.application.chatwoot.chatwoot_service import chatwoot_panel_url
 
@@ -76,12 +101,7 @@ def connect_whatsapp(
         db.refresh(tenant)
     except EvolutionAPIError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
-            if "WAHA no responde" in str(exc)
-            else status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
+        raise _gateway_http_error(exc) from exc
 
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         ensure_whatsapp_sync_after_connect(tenant.id, force=True)
@@ -122,12 +142,7 @@ def reconnect_whatsapp(
         db.refresh(session)
     except EvolutionAPIError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
-            if "WAHA no responde" in str(exc)
-            else status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
+        raise _gateway_http_error(exc) from exc
 
     return WhatsAppConnectResponse(
         instance_name=session.instance_name,

@@ -10,6 +10,18 @@
         <a routerLink="/precios" routerLinkActive="active">Precios</a>
       </nav>
 
+      <button
+        type="button"
+        class="theme-toggle"
+        (click)="toggleTheme()"
+        [attr.aria-label]="theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'"
+        [attr.aria-pressed]="theme === 'dark'"
+        [title]="theme === 'dark' ? 'Modo claro' : 'Modo oscuro'"
+      >
+        <span class="theme-toggle-icon" [class.theme-toggle-icon--sun]="theme === 'dark'" aria-hidden="true"></span>
+        <span class="theme-toggle-label">{{ theme === 'dark' ? 'Claro' : 'Oscuro' }}</span>
+      </button>
+
       <ng-container *ngIf="user$ | async as user; else guestNav">
         <div class="nav-actions">
           <a routerLink="/precios" class="btn btn-ghost">

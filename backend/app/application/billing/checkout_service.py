@@ -16,6 +16,7 @@ from app.application.billing.tenant_service import log_audit
 from app.application.billing.wompi_service import (
     build_integrity_signature,
     cop_to_wompi_cents,
+    fetch_transaction,
     wompi_enabled,
 )
 from app.config import settings
@@ -165,6 +166,35 @@ def fulfill_checkout(
         ip_address=None,
     )
     return True
+
+
+def sync_checkout_with_wompi(
+    db: Session,
+    *,
+    checkout: PaymentCheckout,
+    transaction_id: str,
+) -> bool:
+    """Poll Wompi API and activate subscription if payment approved."""
+    transaction = fetch_transaction(transaction_id)
+    if not transaction:
+        return False
+
+    reference = str(transaction.get("reference") or "").strip()
+    if reference != checkout.reference:
+        log.warning(
+            "Wompi tx %s reference mismatch: expected %s got %s",
+            transaction_id,
+            checkout.reference,
+            reference,
+        )
+        return False
+
+    return fulfill_checkout(
+        db,
+        checkout=checkout,
+        wompi_transaction_id=str(transaction.get("id") or transaction_id),
+        wompi_status=str(transaction.get("status") or ""),
+    )
 
 
 def handle_wompi_event(db: Session, event: dict[str, Any]) -> None:

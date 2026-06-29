@@ -35,6 +35,51 @@
 
   const $ = (id) => document.getElementById(id);
 
+  const BACKEND_OFFLINE_MSG =
+    "El servidor no responde. En una terminal ejecuta: ./scripts/dev.sh — luego recarga esta página (Cmd+R).";
+
+  async function pingBackend(timeoutMs = 4000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch("/health", { signal: ctrl.signal, credentials: "include" });
+      clearTimeout(timer);
+      return res.ok;
+    } catch {
+      clearTimeout(timer);
+      return false;
+    }
+  }
+
+  function setBackendOfflineBanner(offline, message) {
+    const banner = $("login-offline-banner");
+    const continueBtn = $("login-continue-btn");
+    if (banner) {
+      banner.textContent = message || BACKEND_OFFLINE_MSG;
+      banner.classList.toggle("hidden", !offline);
+    }
+    if (continueBtn) continueBtn.disabled = !!offline;
+  }
+
+  async function ensureBackendOnline() {
+    const ok = await pingBackend(4000);
+    setBackendOfflineBanner(!ok);
+    return ok;
+  }
+
+  function bindOAuthLink(el) {
+    if (!el) return;
+    el.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const href = el.getAttribute("href") || "";
+      if (!(await ensureBackendOnline())) {
+        setLoginError(loginError, BACKEND_OFFLINE_MSG);
+        return;
+      }
+      window.location.assign(href);
+    });
+  }
+
   function getTheme() {
     try {
       const stored = localStorage.getItem(THEME_STORAGE_KEY);
@@ -122,7 +167,9 @@
         const detail = data?.detail;
         let msg = detail || (typeof data === "string" ? data : "Error");
         if (typeof msg === "object") msg = JSON.stringify(msg);
-        if (res.status === 404 && path.includes("/interest")) {
+        if (res.status === 503 && path.includes("/whatsapp/")) {
+          msg = detail || "Servicio de WhatsApp no disponible. Revisa que Evolution o WAHA esté corriendo.";
+        } else if (res.status === 404 && path.includes("/interest")) {
           msg = "Función no disponible — reinicia el backend (uvicorn) para cargar la última versión.";
         } else if (res.status === 404 && detail === "Conversación no encontrada") {
           msg = "Conversación no encontrada";
@@ -136,6 +183,17 @@
       return data;
     } catch (err) {
       if (err.name === "AbortError") throw new Error("Tiempo de espera agotado");
+      const raw = String(err?.message || err || "");
+      if (
+        raw === "Load failed" ||
+        raw === "Failed to fetch" ||
+        raw.includes("NetworkError") ||
+        raw.includes("network")
+      ) {
+        throw new Error(
+          "No pudimos contactar el servidor. Inicia el backend (puerto 8000) con ./scripts/dev.sh"
+        );
+      }
       throw err;
     } finally {
       clearTimeout(timer);
@@ -608,6 +666,22 @@
     if (!state.canConnectWa) return;
     showQrModal();
     $("qr-loading").textContent = "Generando QR… puede tardar hasta 30 segundos";
+    $("wa-setup-error").classList.add("hidden");
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 4000);
+      const health = await fetch("/health", { credentials: "include", signal: ctrl.signal });
+      clearTimeout(t);
+      if (!health.ok) throw new Error("Backend no responde");
+    } catch (err) {
+      const msg =
+        err.message ||
+        "No pudimos contactar el servidor. Inicia el backend con ./scripts/dev.sh";
+      showQrError(msg);
+      $("wa-setup-error").textContent = msg;
+      $("wa-setup-error").classList.remove("hidden");
+      return;
+    }
     try {
       const wa = await api("/whatsapp/connect", { method: "POST" }, 90000);
       applyWaSession(wa);
@@ -1924,8 +1998,22 @@
     stack?.classList.add("hidden");
     divider?.classList.add("hidden");
 
+    if (!(await pingBackend(4000))) {
+      setBackendOfflineBanner(true);
+      googleBtn?.classList.remove("hidden");
+      stack?.classList.remove("hidden");
+      divider?.classList.remove("hidden");
+      bindOAuthLink(googleBtn);
+      bindOAuthLink(githubBtn);
+      return;
+    }
+    setBackendOfflineBanner(false);
+
     try {
-      const res = await fetch(`${API}/auth/providers`);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`${API}/auth/providers`, { signal: ctrl.signal });
+      clearTimeout(timer);
       if (!res.ok) {
         googleBtn?.classList.remove("hidden");
         stack?.classList.remove("hidden");
@@ -1946,10 +2034,15 @@
         stack?.classList.remove("hidden");
         divider?.classList.remove("hidden");
       }
+      bindOAuthLink(googleBtn);
+      bindOAuthLink(githubBtn);
     } catch {
+      setBackendOfflineBanner(true);
       googleBtn?.classList.remove("hidden");
       stack?.classList.remove("hidden");
       divider?.classList.remove("hidden");
+      bindOAuthLink(googleBtn);
+      bindOAuthLink(githubBtn);
     }
   }
 
@@ -1957,6 +2050,10 @@
     loginEmail = ($("login-email")?.value || "").trim().toLowerCase();
     if (!loginEmail) {
       setLoginError(loginError, "Ingresa tu correo");
+      return;
+    }
+    if (!(await ensureBackendOnline())) {
+      setLoginError(loginError, BACKEND_OFFLINE_MSG);
       return;
     }
     const btn = $("login-continue-btn");
@@ -2467,8 +2564,14 @@
   loadAuthProviders();
 
   async function tryRestoreSession() {
+    if (!(await pingBackend(4000))) {
+      setBackendOfflineBanner(true);
+      showLogin();
+      return;
+    }
+    setBackendOfflineBanner(false);
     try {
-      const me = await api("/auth/me");
+      const me = await api("/auth/me", {}, 4000);
       state.user = me;
       showPanel();
       await loadInitial();

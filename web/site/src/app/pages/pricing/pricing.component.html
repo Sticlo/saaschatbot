@@ -18,6 +18,14 @@
 
       <p class="checkout-alert success" *ngIf="checkoutSuccess">{{ checkoutSuccess }}</p>
       <p class="checkout-alert error" *ngIf="checkoutError">{{ checkoutError }}</p>
+
+      <div class="payments-trust" *ngIf="billingEnabled">
+        <span class="payments-badge" *ngIf="billingSandbox">Modo prueba Wompi</span>
+        <span>Pago seguro con</span>
+        <strong>Tarjeta · PSE · Nequi</strong>
+        <span class="payments-note">Facturación mensual · cancela cuando quieras</span>
+      </div>
+
       <p class="checkout-alert muted" *ngIf="loggedIn && !billingEnabled">
         Pagos en línea próximamente. Mientras tanto, escríbenos para activar tu plan.
       </p>

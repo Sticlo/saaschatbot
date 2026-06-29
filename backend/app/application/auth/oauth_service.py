@@ -67,6 +67,23 @@ def consume_oauth_state(state: str, provider: str) -> tuple[bool, Optional[str]]
     return True, (next_url.strip() or None) if next_url else None
 
 
+_OAUTH_FINISH_PREFIX = "oauth_finish:"
+_OAUTH_FINISH_TTL = 120
+
+
+def create_oauth_finish_token(access_token: str) -> str:
+    token = secrets.token_urlsafe(32)
+    cache_set(f"{_OAUTH_FINISH_PREFIX}{token}", access_token, _OAUTH_FINISH_TTL)
+    return token
+
+
+def consume_oauth_finish_token(token: str) -> Optional[str]:
+    key = f"{_OAUTH_FINISH_PREFIX}{token}"
+    access_token = cache_get(key)
+    cache_delete(key)
+    return access_token or None
+
+
 def google_authorize_url(state: str) -> str:
     params = {
         "client_id": settings.google_client_id,
