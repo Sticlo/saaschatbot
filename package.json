@@ -1,8 +1,11 @@
 {
   "name": "omitel",
   "private": true,
+  "workspaces": [
+    "web/site"
+  ],
   "scripts": {
-    "build:site": "npm ci --prefix web/site --include=dev && npm run build --prefix web/site",
+    "build:site": "npm run build --workspace=site",
     "deploy": "npm run build:site && wrangler deploy"
   },
   "devDependencies": {
