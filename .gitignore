@@ -14,6 +14,7 @@ venv/
 logs/
 media_files/
 services/
+whatsapp/evolution-api/
 .evolution/
 *.csv
 *.xlsx
