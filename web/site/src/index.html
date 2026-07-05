@@ -11,16 +11,29 @@
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <script>
     (function () {
-      var key = 'omitel.theme';
-      var saved = localStorage.getItem(key);
-      var theme =
-        saved === 'dark' || saved === 'light'
-          ? saved
-          : window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light';
-      document.documentElement.setAttribute('data-theme', theme);
+      try {
+        var key = 'omitel.theme';
+        var saved = localStorage.getItem(key);
+        var theme =
+          saved === 'dark' || saved === 'light'
+            ? saved
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
     })();
+  </script>
+  <script>
+    window.__omitelBootTimer = window.setTimeout(function () {
+      var boot = document.querySelector('app-root .app-boot');
+      if (!boot) return;
+      boot.innerHTML =
+        'Omitel no terminó de cargar. ' +
+        '<a href="javascript:location.reload()" style="color:#ff6b00">Recargar</a>';
+    }, 12000);
   </script>
 </head>
 <body>

@@ -2,6 +2,8 @@ import { Injectable, PLATFORM_ID, inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { BehaviorSubject } from 'rxjs';
 
+import { readStorage, writeStorage } from '../safe-storage';
+
 export type ThemeMode = 'light' | 'dark';
 
 const STORAGE_KEY = 'omitel.theme';
@@ -45,12 +47,12 @@ export class ThemeService {
     document.documentElement.setAttribute('data-theme', theme);
 
     if (persist) {
-      localStorage.setItem(STORAGE_KEY, theme);
+      writeStorage(STORAGE_KEY, theme);
     }
   }
 
   private readPreferredTheme(): ThemeMode {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = readStorage(STORAGE_KEY);
     if (saved === 'dark' || saved === 'light') {
       return saved;
     }

@@ -1,20 +1,48 @@
 import { Routes } from '@angular/router';
 
-import { ExtrasComponent } from './pages/extras/extras.component';
-import { HomeComponent } from './pages/home/home.component';
-import { LoginComponent } from './pages/login/login.component';
-import { MagicVerifyComponent } from './pages/magic-verify/magic-verify.component';
-import { PasswordResetComponent } from './pages/password-reset/password-reset.component';
-import { PricingComponent } from './pages/pricing/pricing.component';
-
 export const routes: Routes = [
-  { path: '', component: HomeComponent, title: 'Omitel — WhatsApp con IA' },
-  { path: 'precios', component: PricingComponent, title: 'Precios — Omitel' },
-  { path: 'extras', component: ExtrasComponent, title: 'Extras — Omitel' },
-  { path: 'login', component: LoginComponent, title: 'Entrar — Omitel' },
-  { path: 'registro', component: LoginComponent, title: 'Crear cuenta — Omitel' },
-  { path: 'auth/entrar', component: MagicVerifyComponent, title: 'Entrando — Omitel' },
-  { path: 'recuperar', component: PasswordResetComponent, title: 'Recuperar contraseña — Omitel' },
-  { path: 'restablecer', component: PasswordResetComponent, title: 'Nueva contraseña — Omitel' },
+  {
+    path: '',
+    loadComponent: () => import('./pages/home/home.component').then((m) => m.HomeComponent),
+    title: 'Omitel — WhatsApp con IA',
+  },
+  {
+    path: 'precios',
+    loadComponent: () => import('./pages/pricing/pricing.component').then((m) => m.PricingComponent),
+    title: 'Precios — Omitel',
+  },
+  {
+    path: 'extras',
+    loadComponent: () => import('./pages/extras/extras.component').then((m) => m.ExtrasComponent),
+    title: 'Extras — Omitel',
+  },
+  {
+    path: 'login',
+    loadComponent: () => import('./pages/login/login.component').then((m) => m.LoginComponent),
+    title: 'Entrar — Omitel',
+  },
+  {
+    path: 'registro',
+    loadComponent: () => import('./pages/login/login.component').then((m) => m.LoginComponent),
+    title: 'Crear cuenta — Omitel',
+  },
+  {
+    path: 'auth/entrar',
+    loadComponent: () =>
+      import('./pages/magic-verify/magic-verify.component').then((m) => m.MagicVerifyComponent),
+    title: 'Entrando — Omitel',
+  },
+  {
+    path: 'recuperar',
+    loadComponent: () =>
+      import('./pages/password-reset/password-reset.component').then((m) => m.PasswordResetComponent),
+    title: 'Recuperar contraseña — Omitel',
+  },
+  {
+    path: 'restablecer',
+    loadComponent: () =>
+      import('./pages/password-reset/password-reset.component').then((m) => m.PasswordResetComponent),
+    title: 'Nueva contraseña — Omitel',
+  },
   { path: '**', redirectTo: '' },
 ];

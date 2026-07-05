@@ -9,6 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 
 import { whatsappUrl } from '../../core/contact';
+import { readStorage, writeStorage } from '../../core/safe-storage';
 import { environment } from '../../../environments/environment';
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { SessionService } from '../../core/services/session.service';
@@ -407,7 +408,7 @@ export class HomeComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const saved = localStorage.getItem(this.chatStorageKey);
+    const saved = readStorage(this.chatStorageKey);
     if (saved === '1') {
       this.applyStaticMode(true);
       return;
@@ -429,7 +430,7 @@ export class HomeComponent implements OnInit, OnDestroy {
     if (this.chatStatic) {
       this.applyStaticMode(false);
       if (isPlatformBrowser(this.platformId)) {
-        localStorage.setItem(this.chatStorageKey, '0');
+        writeStorage(this.chatStorageKey, '0');
       }
       this.startLiveChat();
       return;
@@ -437,7 +438,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
     this.applyStaticMode(true);
     if (isPlatformBrowser(this.platformId)) {
-      localStorage.setItem(this.chatStorageKey, '1');
+      writeStorage(this.chatStorageKey, '1');
     }
   }
 
