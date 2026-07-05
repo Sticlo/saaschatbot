@@ -13,7 +13,7 @@ venv/
 *.db-wal
 logs/
 media_files/
-services/
+/services/
 whatsapp/evolution-api/
 .evolution/
 *.csv
