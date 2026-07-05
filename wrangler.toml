@@ -1,0 +1,7 @@
+name = "omitel-site"
+compatibility_date = "2024-07-01"
+
+# Build output de Angular (web/site): npm run build → dist/site
+[assets]
+directory = "web/site/dist/site"
+not_found_handling = "single-page-application"
