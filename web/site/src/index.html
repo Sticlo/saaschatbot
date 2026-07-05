@@ -1,31 +1,15 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
   <meta charset="utf-8">
   <title>Omitel</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
   <meta name="description" content="Omitel — WhatsApp con IA para vender y atender mejor.">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-  <script>
-    (function () {
-      try {
-        var key = 'omitel.theme';
-        var saved = localStorage.getItem(key);
-        var theme =
-          saved === 'dark' || saved === 'light'
-            ? saved
-            : window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light';
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'light');
-      }
-    })();
-  </script>
   <script>
     window.__omitelBootTimer = window.setTimeout(function () {
       var boot = document.querySelector('app-root .app-boot');

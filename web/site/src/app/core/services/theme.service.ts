@@ -2,11 +2,7 @@ import { Injectable, PLATFORM_ID, inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { BehaviorSubject } from 'rxjs';
 
-import { readStorage, writeStorage } from '../safe-storage';
-
 export type ThemeMode = 'light' | 'dark';
-
-const STORAGE_KEY = 'omitel.theme';
 
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
@@ -20,43 +16,24 @@ export class ThemeService {
       return;
     }
 
-    const current = document.documentElement.getAttribute('data-theme');
-    if (current === 'dark' || current === 'light') {
-      this.themeSubject.next(current);
-      return;
-    }
-
-    this.setTheme(this.readPreferredTheme(), false);
+    document.documentElement.setAttribute('data-theme', 'light');
   }
 
   get theme(): ThemeMode {
-    return this.themeSubject.value;
+    return 'light';
   }
 
   toggle(): void {
-    this.setTheme(this.theme === 'dark' ? 'light' : 'dark');
+    this.setTheme('light');
   }
 
-  setTheme(theme: ThemeMode, persist = true): void {
-    this.themeSubject.next(theme);
+  setTheme(theme: ThemeMode, _persist = true): void {
+    this.themeSubject.next('light');
 
     if (!isPlatformBrowser(this.platformId)) {
       return;
     }
 
-    document.documentElement.setAttribute('data-theme', theme);
-
-    if (persist) {
-      writeStorage(STORAGE_KEY, theme);
-    }
-  }
-
-  private readPreferredTheme(): ThemeMode {
-    const saved = readStorage(STORAGE_KEY);
-    if (saved === 'dark' || saved === 'light') {
-      return saved;
-    }
-
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', 'light');
   }
 }
