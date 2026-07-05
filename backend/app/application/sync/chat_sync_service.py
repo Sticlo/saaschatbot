@@ -11,6 +11,7 @@ from app.config import settings
 from app.shared.core.phone import (
     is_group_or_broadcast_jid,
     is_owner_jid,
+    is_placeholder_contact_name,
     is_valid_whatsapp_phone,
     normalize_phone,
     phone_to_evolution_number,
@@ -223,7 +224,7 @@ def _collect_evolution_items(
 
         stored_chats = fetch_stored_chats(dsn, instance_name, limit=_MAX_CHATS_PER_SYNC)
         message_index = fetch_message_chat_index(
-            dsn, instance_name, limit=_MAX_CHATS_PER_SYNC, since_ts=None
+            dsn, instance_name, limit=_MAX_CHATS_PER_SYNC, since_ts=since_ts
         )
         counts = fetch_stored_counts(dsn, instance_name)
 
@@ -667,11 +668,9 @@ def _import_messages(
             push_name
             and not parsed["from_me"]
             and is_placeholder_contact_name(conversation.contact_name, conversation.contact_phone)
+            and not is_placeholder_contact_name(push_name, conversation.contact_phone)
         ):
-            from app.shared.core.phone import is_placeholder_contact_name as _is_ph
-
-            if not _is_ph(push_name, conversation.contact_phone):
-                conversation.contact_name = push_name
+            conversation.contact_name = push_name
 
     # last_message_at = fecha REAL del último mensaje (no la hora del sync).
     if latest_ts is not None:
@@ -974,14 +973,14 @@ def sync_whatsapp_chats(
             session.instance_name,
             load_jid,
             limit=per_chat_limit,
-            since_ts=None,
+            since_ts=since_ts,
         )
         if not records and load_jid != remote_jid:
             records = _load_message_records(
                 session.instance_name,
                 remote_jid,
                 limit=per_chat_limit,
-                since_ts=None,
+                since_ts=since_ts,
             )
 
         # Only create a new conversation if we found actual messages for it.
@@ -1004,6 +1003,7 @@ def sync_whatsapp_chats(
             contact_name=name,
             contact_jid=contact_jid,
             whatsapp_connection_id=connection_id,
+            imported_legacy=True,
         )
         apply_identity_to_conversation(
             conversation,

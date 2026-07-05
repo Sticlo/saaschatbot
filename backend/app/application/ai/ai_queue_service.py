@@ -105,9 +105,15 @@ def enqueue_ai_reply_ids(
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
     message_id: uuid.UUID,
+    *,
+    db: Optional["Session"] = None,
 ) -> None:
     """Encola respuesta IA. Llamar solo después de commit del mensaje entrante."""
-    db = SessionLocal()
+    from sqlalchemy.orm import Session
+
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
     try:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
         conversation = (
@@ -125,7 +131,8 @@ def enqueue_ai_reply_ids(
             log.info("IA no encolada conv=%s: %s", conversation_id, reason)
             return
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
     item = json.dumps(
         {

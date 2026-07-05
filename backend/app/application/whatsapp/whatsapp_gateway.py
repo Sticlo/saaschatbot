@@ -151,6 +151,23 @@ def logout_instance(name: str) -> dict:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
+def restart_instance(name: str) -> dict:
+    if uses_waha():
+        from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
+
+        try:
+            waha_client.stop_session(name)
+            return waha_client.start_session(name)
+        except WahaAPIError as exc:
+            raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        return evolution_client.restart_instance(name)
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
 def delete_instance(name: str) -> dict:
     if uses_waha():
         from app.infrastructure.waha.waha_client import WahaAPIError, waha_client

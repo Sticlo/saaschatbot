@@ -42,6 +42,19 @@ def test_format_contact_display_phone_lid_ref_when_no_number():
     assert shown == "Sin número · ref ····26522"
 
 
+def test_phone_matches_lid_digits_rejects_fake_lid_phone():
+    from app.shared.core.phone import phone_matches_lid_digits, resolve_contact_phone
+
+    assert phone_matches_lid_digits("+4630176116783", "4630176116783@lid")
+    assert not phone_matches_lid_digits("+5730176116783", "4630176116783@lid")
+
+    key = {
+        "remoteJid": "4630176116783@lid",
+        "senderPn": "4630176116783",
+    }
+    assert resolve_contact_phone("4630176116783@lid", key=key) == ""
+
+
 def test_is_placeholder_contact_name_treats_contacto_as_placeholder():
     from app.shared.core.phone import is_placeholder_contact_name, resolve_display_name
 

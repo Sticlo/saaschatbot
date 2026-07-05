@@ -210,16 +210,233 @@
       </div>
     </div>
 
+    <!-- Stats -->
+    <section class="stats-strip" aria-label="Resultados">
+      <div class="stats-inner">
+        <article class="stat" *ngFor="let s of stats">
+          <strong class="stat-value">{{ s.value }}</strong>
+          <span class="stat-label">{{ s.label }}</span>
+        </article>
+      </div>
+    </section>
+
+    <!-- Problem -->
+    <section class="problem">
+      <div class="section-inner">
+        <p class="section-eyebrow">El problema</p>
+        <h2 class="section-title">
+          Tu WhatsApp no debería ser<br class="br-desktop" />
+          una segunda jornada laboral.
+        </h2>
+        <p class="section-lead">
+          Cada día llegan preguntas de precio, horario y disponibilidad. Si no respondes rápido,
+          el cliente se va con la competencia. Omitel automatiza lo repetitivo y te deja
+          entrar solo cuando hay una venta real.
+        </p>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features">
+      <div class="section-inner">
+        <p class="section-eyebrow">Qué incluye</p>
+        <h2 class="section-title">Todo lo que necesitas<br class="br-desktop" /> para vender por WhatsApp</h2>
+        <div class="features-grid">
+          <article class="feature-card" *ngFor="let f of features">
+            <span class="feature-icon feature-icon--{{ f.icon }}" aria-hidden="true"></span>
+            <h3>{{ f.title }}</h3>
+            <p>{{ f.line }}</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel spotlight -->
+    <section class="panel-spotlight">
+      <div class="section-inner panel-spotlight-grid">
+        <div class="panel-spotlight-copy">
+          <p class="section-eyebrow">El panel</p>
+          <h2 class="section-title">Un solo lugar para<br class="br-desktop" /> todos tus chats</h2>
+          <p class="section-lead">
+            Conectas WhatsApp, activas la IA y ves en vivo quién escribe, quién está interesado
+            y qué respondió la automatización — sin instalar nada en el celular.
+          </p>
+          <ul class="panel-checklist">
+            <li>Lista de chats con preview del último mensaje</li>
+            <li>Toggle IA global y por conversación</li>
+            <li>Marca Interesado / No interesado con un clic</li>
+            <li>Atajos, citas y personalización de la IA</li>
+          </ul>
+          <ng-container *ngIf="user$ | async; else guestPanel">
+            <a [href]="panelUrl" class="btn-hero btn-hero--primary btn-hero--compact">Abrir panel</a>
+          </ng-container>
+          <ng-template #guestPanel>
+            <a routerLink="/registro" class="btn-hero btn-hero--primary btn-hero--compact">Probar el panel gratis</a>
+          </ng-template>
+        </div>
+        <div class="panel-mock" aria-hidden="true">
+          <div class="panel-mock-window">
+            <div class="panel-mock-bar">
+              <span></span><span></span><span></span>
+              <em>panel.omitel.co</em>
+            </div>
+            <div class="panel-mock-body">
+              <aside class="panel-mock-sidebar">
+                <div class="panel-mock-nav active">Chats</div>
+                <div class="panel-mock-nav">Interesados</div>
+                <div class="panel-mock-nav">Citas</div>
+                <div class="panel-mock-chat-list">
+                  <div class="panel-mock-chat panel-mock-chat--hot">
+                    <span class="panel-mock-avatar">M</span>
+                    <div>
+                      <strong>María · Interesada</strong>
+                      <small>¿Reservamos para hoy?</small>
+                    </div>
+                  </div>
+                  <div class="panel-mock-chat">
+                    <span class="panel-mock-avatar">C</span>
+                    <div>
+                      <strong>Carlos</strong>
+                      <small>¿Cuánto cuesta el apto?</small>
+                    </div>
+                  </div>
+                  <div class="panel-mock-chat">
+                    <span class="panel-mock-avatar">L</span>
+                    <div>
+                      <strong>Laura</strong>
+                      <small>Gracias, lo pienso</small>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+              <div class="panel-mock-main">
+                <header class="panel-mock-header">
+                  <strong>María</strong>
+                  <span class="panel-mock-badge">IA activa</span>
+                </header>
+                <div class="panel-mock-msgs">
+                  <div class="panel-mock-msg panel-mock-msg--in">¿Tienen mesa para 6 hoy?</div>
+                  <div class="panel-mock-msg panel-mock-msg--out">¡Hola! Sí, hay cupo a las 7pm.</div>
+                  <div class="panel-mock-msg panel-mock-msg--in">Dale, reservamos</div>
+                </div>
+                <div class="panel-mock-alert">Interesado detectado · Listo para cerrar</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Industries -->
+    <section class="industries">
+      <div class="section-inner">
+        <p class="section-eyebrow">Para tu rubro</p>
+        <h2 class="section-title">Negocios que ya usan<br class="br-desktop" /> WhatsApp para vender</h2>
+        <div class="industries-grid">
+          <article class="industry-card" *ngFor="let ind of industries">
+            <h3>{{ ind.name }}</h3>
+            <p>{{ ind.example }}</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Web solutions -->
+    <section class="web-solutions">
+      <div class="section-inner">
+        <div class="web-solutions-head">
+          <div>
+            <p class="section-eyebrow">También desarrollamos</p>
+            <h2 class="section-title">
+              Soluciones web<br class="br-desktop" />
+              para tu negocio
+            </h2>
+            <p class="section-lead">
+              Además de automatizar WhatsApp, diseñamos y construimos páginas web,
+              aplicaciones y sistemas a la medida — conectados con tu operación y listos para vender.
+            </p>
+          </div>
+          <div class="web-solutions-actions">
+            <a routerLink="/extras" class="link-hero">Ver todos los servicios ›</a>
+            <a
+              [href]="webQuoteHref()"
+              class="btn-hero btn-hero--primary btn-hero--compact"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Cotizar por WhatsApp
+            </a>
+          </div>
+        </div>
+
+        <div class="web-grid">
+          <article class="web-card" *ngFor="let item of webOfferings">
+            <span class="web-card-icon web-card-icon--{{ item.icon }}" aria-hidden="true"></span>
+            <div class="web-card-top">
+              <h3>{{ item.title }}</h3>
+              <span class="web-card-price">{{ item.price }}</span>
+            </div>
+            <p class="web-card-line">{{ item.line }}</p>
+            <ul class="web-card-list">
+              <li *ngFor="let h of item.highlights">{{ h }}</li>
+            </ul>
+            <a
+              [href]="webQuoteHref(item.title)"
+              class="web-card-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Cotizar ›
+            </a>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <!-- How it works -->
     <section class="how">
       <div class="how-inner">
         <p class="how-label">Cómo funciona</p>
+        <h2 class="section-title section-title--center">De conectar a cerrar<br class="br-desktop" /> en tres pasos</h2>
         <div class="beats">
           <article class="beat" *ngFor="let b of beats">
             <span class="beat-step">{{ b.step }}</span>
-            <h2>{{ b.title }}</h2>
-            <p>{{ b.line }}</p>
+            <h3>{{ b.title }}</h3>
+            <p class="beat-line">{{ b.line }}</p>
+            <p class="beat-detail">{{ b.detail }}</p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Compare -->
+    <section class="compare">
+      <div class="section-inner">
+        <p class="section-eyebrow">Antes y después</p>
+        <h2 class="section-title section-title--center">Sin Omitel vs con Omitel</h2>
+        <div class="compare-table">
+          <div class="compare-head">
+            <span>Sin Omitel</span>
+            <span>Con Omitel</span>
+          </div>
+          <div class="compare-row" *ngFor="let row of compareRows">
+            <span class="compare-without">{{ row.without }}</span>
+            <span class="compare-with">{{ row.with }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq">
+      <div class="section-inner faq-inner">
+        <p class="section-eyebrow">Preguntas frecuentes</p>
+        <h2 class="section-title">Lo que más nos preguntan</h2>
+        <div class="faq-list">
+          <details class="faq-item" *ngFor="let item of faqs">
+            <summary>{{ item.q }}</summary>
+            <p>{{ item.a }}</p>
+          </details>
         </div>
       </div>
     </section>

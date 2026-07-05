@@ -3,11 +3,11 @@ import { Component, HostBinding, HostListener, OnInit, inject } from '@angular/c
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { filter } from 'rxjs/operators';
 
+import { CONTACT, phoneUrl, whatsappUrl } from '../../core/contact';
 import { environment } from '../../../environments/environment';
 import { UserMe } from '../../core/models/auth.model';
 import { SubscriptionSummary } from '../../core/models/billing.model';
 import { SessionService } from '../../core/services/session.service';
-import { ThemeService, ThemeMode } from '../../core/services/theme.service';
 
 @Component({
   selector: 'app-shell',
@@ -18,32 +18,38 @@ import { ThemeService, ThemeMode } from '../../core/services/theme.service';
 export class ShellComponent implements OnInit {
   private readonly session = inject(SessionService);
   private readonly router = inject(Router);
-  private readonly themeService = inject(ThemeService);
 
   @HostBinding('class.shell-home')
   isHome = false;
 
   readonly appName = environment.appName;
-  readonly panelUrl = environment.panelUrl;
   readonly year = new Date().getFullYear();
+  readonly whatsappHref = whatsappUrl();
+  readonly whatsappDisplay = CONTACT.whatsappDisplay;
+  readonly phoneHref = phoneUrl();
+  readonly phoneDisplay = CONTACT.phoneDisplay;
+
+  /** Mismo origen que la landing (evita perder la cookie entre localhost y 127.0.0.1). */
+  get panelUrl(): string {
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}${environment.panelUrl}`;
+    }
+    return environment.panelUrl;
+  }
   readonly user$ = this.session.user$;
   readonly subscription$ = this.session.subscription$;
 
   userMenuOpen = false;
+  mobileNavOpen = false;
   loggingOut = false;
-  theme: ThemeMode = 'light';
 
   ngOnInit(): void {
-    this.theme = this.themeService.theme;
-    this.themeService.theme$.subscribe((mode) => {
-      this.theme = mode;
-    });
-
     this.syncHomeRoute();
     this.router.events
       .pipe(filter((event) => event instanceof NavigationEnd))
       .subscribe(() => {
         this.userMenuOpen = false;
+        this.mobileNavOpen = false;
         this.syncHomeRoute();
         this.session.refresh();
       });
@@ -57,15 +63,36 @@ export class ShellComponent implements OnInit {
   @HostListener('document:click')
   closeUserMenu(): void {
     this.userMenuOpen = false;
+    if (this.mobileNavOpen) {
+      this.mobileNavOpen = false;
+      this.syncBodyScrollLock();
+    }
+  }
+
+  toggleMobileNav(event: MouseEvent): void {
+    event.stopPropagation();
+    this.mobileNavOpen = !this.mobileNavOpen;
+    if (this.mobileNavOpen) {
+      this.userMenuOpen = false;
+    }
+    this.syncBodyScrollLock();
+  }
+
+  closeMobileNav(): void {
+    this.mobileNavOpen = false;
+    this.syncBodyScrollLock();
+  }
+
+  private syncBodyScrollLock(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.body.style.overflow = this.mobileNavOpen ? 'hidden' : '';
   }
 
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
     this.userMenuOpen = !this.userMenuOpen;
-  }
-
-  toggleTheme(): void {
-    this.themeService.toggle();
   }
 
   displayName(user: UserMe): string {

@@ -312,6 +312,7 @@ def get_or_create_conversation(
     contact_jid: str = "",
     whatsapp_connection_id: Optional[UUID] = None,
     instance_name: str = "",
+    imported_legacy: bool = False,
 ) -> Conversation:
     if whatsapp_connection_id is None:
         raise ValueError("whatsapp_connection_id requerido para conversaciones WA")
@@ -346,6 +347,7 @@ def get_or_create_conversation(
         contact_name=(contact_name or (contact_phone if is_valid_whatsapp_phone(contact_phone) else ""))[:200],
         contact_jid=contact_jid or None,
         whatsapp_connection_id=whatsapp_connection_id,
+        imported_legacy=imported_legacy,
     )
     db.add(conversation)
     db.flush()
@@ -532,8 +534,13 @@ def save_inbound_message(
         publish=publish,
     )
 
-    if publish and conversation.bait_sent and not conversation.ai_active:
-        conversation.ai_active = True
+    from app.application.ai.ai_auto_enable_service import maybe_auto_enable_ai_for_inbound
+
+    if publish and maybe_auto_enable_ai_for_inbound(
+        tenant=tenant,
+        conversation=conversation,
+        body=body,
+    ):
         from app.application.realtime.realtime_service import publish_conversation_updated
 
         publish_conversation_updated(tenant.id, conversation)

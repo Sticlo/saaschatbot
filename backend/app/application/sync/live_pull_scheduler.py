@@ -82,6 +82,11 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
             return 0
 
         since_ts = _read_since_ts(tenant_id)
+        from app.infrastructure.evolution.evolution_store import connection_since_unix
+
+        conn_since = connection_since_unix(session.connection_started_at)
+        if conn_since is not None:
+            since_ts = max(since_ts, conn_since)
         records = fetch_recent_stored_messages(
             settings.evolution_database_url,
             session.instance_name,

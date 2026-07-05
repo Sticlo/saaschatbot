@@ -244,8 +244,10 @@ def _site_url(path: str) -> str:
         if path.startswith(site) or path.startswith(api):
             return path
         return site
-    if path.startswith("/panel") or path.startswith("/api/"):
+    if path.startswith("/api/"):
         return f"{api}{path}"
+    if path.startswith("/panel"):
+        return f"{site}{path}"
     return f"{site}{path}"
 
 
@@ -255,7 +257,7 @@ def _resolve_oauth_redirect(user: User, db: Session, next_url: Optional[str]) ->
 
     subscription = get_tenant_subscription(db, user.tenant_id)
     if subscription and subscription.status == SubscriptionStatus.TRIAL.value:
-        return _site_url("/precios")
+        return _site_url("/panel?welcome=1")
 
     return settings.oauth_success_redirect
 

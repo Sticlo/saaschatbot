@@ -8,12 +8,12 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
   <title>Omitel — Panel</title>
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=33" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=38" />
 </head>
 <body>
   <div id="app">
-    <!-- Login -->
-    <section id="login-view" class="view">
+    <!-- Login legacy (oculto; auth en /login de la landing) -->
+    <section id="login-view" class="view hidden">
       <div class="login-card">
         <div class="login-card-head">
           <div>
@@ -39,20 +39,7 @@
               <input type="email" id="login-email" required autocomplete="username" placeholder="tu@negocio.com" />
             </label>
             <p id="login-error" class="error hidden"></p>
-            <button type="button" id="login-continue-btn" class="btn primary">Continuar con correo</button>
-          </div>
-
-          <div id="login-step-password" class="hidden">
-            <div class="auth-email-chip">
-              <span id="login-email-display"></span>
-              <button type="button" id="login-back-btn" class="link-btn">Cambiar</button>
-            </div>
-            <label>
-              Contraseña
-              <input type="password" id="login-password" autocomplete="current-password" />
-            </label>
-            <p id="login-error-password" class="error hidden"></p>
-            <button type="submit" class="btn primary">Entrar</button>
+            <button type="button" id="login-continue-btn" class="btn primary">Enviar enlace de acceso</button>
           </div>
 
           <div id="login-step-register" class="hidden">
@@ -68,13 +55,19 @@
               Tu nombre
               <input type="text" id="register-owner" autocomplete="name" />
             </label>
-            <label>
-              Contraseña
-              <input type="password" id="register-password" autocomplete="new-password" />
-            </label>
-            <p class="login-hint muted">Mínimo 8 caracteres.</p>
             <p id="login-error-register" class="error hidden"></p>
-            <button type="button" id="register-submit-btn" class="btn primary">Crear cuenta y entrar</button>
+            <button type="button" id="register-submit-btn" class="btn primary">Enviar enlace para crear cuenta</button>
+          </div>
+
+          <div id="login-step-sent" class="hidden">
+            <p class="auth-sent-email" id="login-sent-email"></p>
+            <p id="login-sent-message" class="muted"></p>
+            <p class="login-hint muted">El enlace vence en unos minutos. Revisa también spam.</p>
+            <p id="login-dev-link-wrap" class="magic-sent-box hidden">
+              <span class="muted">Desarrollo local:</span>
+              <a id="login-dev-link" class="dev-link" href="#">Abrir enlace de prueba</a>
+            </p>
+            <button type="button" id="login-sent-back-btn" class="btn ghost">Usar otro correo</button>
           </div>
         </form>
         <p class="login-back muted">
@@ -86,19 +79,23 @@
     </section>
 
     <!-- Panel -->
-    <section id="panel-view" class="view hidden">
+    <section id="panel-view" class="view">
       <header class="topbar">
         <div class="topbar-left">
           <strong id="business-name">—</strong>
           <span id="ws-status" class="badge offline">Sin tiempo real</span>
           <span id="sync-status" class="sync-status" title="Estado de sincronización con el celular">Sync: —</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
-          <button id="wa-connect-btn" class="btn primary small hidden">Conectar WhatsApp</button>
+          <button type="button" id="wa-connect-btn" class="btn primary small">Conectar WhatsApp</button>
           <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
           <a id="wa-chatwoot-link" class="btn ghost small hidden" href="#" target="_blank" rel="noopener noreferrer">Chatwoot</a>
           <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
         </div>
         <div class="topbar-right">
+          <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
+            <span id="plan-status-label" class="plan-status-label"></span>
+            <a href="/precios" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
+          </div>
           <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
             <span>Tema claro</span>
             <input type="checkbox" id="theme-toggle" />
@@ -118,7 +115,8 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-clients" class="sidebar-mode-tab">Buscar clientes</button>
+            <button type="button" id="mode-clients" class="sidebar-mode-tab sidebar-mode-tab--soon" title="Próximamente">Buscar clientes</button>
+            <button type="button" id="mode-appointments" class="sidebar-mode-tab">Sistema de citas</button>
             <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA</button>
           </div>
 
@@ -126,7 +124,7 @@
             <div class="sidebar-header">
               <h2>Chats</h2>
               <div class="sidebar-header-actions">
-                <button id="debug-chats" class="btn ghost small" title="Debug nombres">🐛</button>
+                <button id="debug-chats" class="btn ghost small dev-only hidden" title="Debug nombres">🐛</button>
                 <button id="refresh-chats" class="btn ghost small" title="Reparar nombres">↻</button>
               </div>
             </div>
@@ -134,8 +132,10 @@
               <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
             </div>
             <div class="chat-tabs">
-              <button type="button" id="tab-chats-all" class="chat-tab active">Todos</button>
-              <button type="button" id="tab-chats-interested" class="chat-tab">Interesados</button>
+              <button type="button" id="tab-chats-all" class="chat-tab">Todos</button>
+              <button type="button" id="tab-chats-interested" class="chat-tab active">
+                Interesados <span id="interested-count-badge" class="tab-count-badge hidden">0</span>
+              </button>
               <button type="button" id="tab-chats-not-interested" class="chat-tab">No interesados</button>
             </div>
             <ul id="conversation-list" class="conversation-list"></ul>
@@ -143,11 +143,11 @@
         </aside>
 
         <main class="chat-area" id="chat-area">
-          <div id="empty-chat" class="empty-state">
-            <div id="wa-setup" class="wa-setup hidden">
+            <div id="empty-chat" class="empty-state">
+            <div id="wa-setup" class="wa-setup">
               <h3>Conecta tu WhatsApp</h3>
-              <p class="muted">Escanea el código QR con WhatsApp en tu celular para ver y responder chats.</p>
-              <button id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
+              <p class="muted">Escanea el código QR con WhatsApp en tu celular. Cuando lleguen mensajes, la IA los clasifica y los verás en <strong>Interesados</strong>.</p>
+              <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
               <p id="wa-setup-error" class="error hidden"></p>
             </div>
           </div>
@@ -271,7 +271,7 @@
               <aside class="ai-setup-preview-card">
                 <div class="ai-preview-badge">Vista previa</div>
                 <h3>Tu IA calificará leads sabiendo esto</h3>
-                <p class="ai-preview-note">Saluda, responde preguntas y pasa el chat a ti cuando digan que quieren reservar.</p>
+                <p class="ai-preview-note">Saluda, responde preguntas, envía atajos (menú, fotos…) y pasa el chat a ti cuando quieran reservar.</p>
                 <ul id="biz-summary-list" class="biz-summary-list">
                   <li class="muted">Completa las preguntas y pulsa guardar.</li>
                 </ul>
@@ -281,7 +281,7 @@
             <section class="ai-shortcuts-card">
               <div class="ai-shortcuts-card-head">
                 <h3>Atajos rápidos</h3>
-                <p class="muted small">Los mismos para <strong>todos tus chats</strong> — menú, precios, fotos… Un clic envía al cliente que estés atendiendo.</p>
+                <p class="muted small">Los mismos para <strong>todos tus chats</strong> — menú, precios, fotos… Un clic envía al cliente; la <strong>IA también puede enviarlos sola</strong> cuando pregunten por eso.</p>
               </div>
               <ul id="ai-shortcuts-summary" class="ai-shortcuts-summary">
                 <li class="muted">Cargando…</li>
@@ -290,63 +290,61 @@
             </section>
           </div>
 
+          <div id="appointments-panel" class="appointments-panel hidden">
+            <header class="appointments-hero">
+              <div class="appointments-hero-icon" aria-hidden="true">📅</div>
+              <h2>Sistema de citas</h2>
+              <p>Agenda por horas, ve qué está libre u ocupado y guarda observaciones de cada cliente.</p>
+            </header>
+
+            <section class="appointments-schedule-card">
+              <h3>Horario del negocio</h3>
+              <p class="muted small">Define apertura, cierre y duración de cada bloque.</p>
+              <div class="appointments-schedule-grid">
+                <label>
+                  Apertura
+                  <input type="time" id="schedule-open" value="08:00" />
+                </label>
+                <label>
+                  Cierre
+                  <input type="time" id="schedule-close" value="18:00" />
+                </label>
+                <label>
+                  Duración (min)
+                  <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
+                </label>
+              </div>
+              <button type="button" id="schedule-save-btn" class="btn primary small">Guardar horario</button>
+              <p id="schedule-save-status" class="appointments-status muted small"></p>
+            </section>
+
+            <section class="appointments-day-card">
+              <div class="appointments-day-head">
+                <div class="appointments-day-nav">
+                  <button type="button" id="appointments-prev-day" class="btn ghost small" title="Día anterior">‹</button>
+                  <button type="button" id="appointments-today-btn" class="btn ghost small">Hoy</button>
+                  <button type="button" id="appointments-next-day" class="btn ghost small" title="Día siguiente">›</button>
+                </div>
+                <div class="appointments-day-title">
+                  <h3 id="appointments-day-heading">Agenda</h3>
+                  <span class="appointments-day-date muted small" id="appointments-today-label">—</span>
+                </div>
+                <button type="button" id="appointments-add-btn" class="btn primary small">+ Nueva cita</button>
+              </div>
+              <ul class="appointments-slot-list" id="appointments-slot-list">
+                <li class="muted appointments-loading">Cargando agenda…</li>
+              </ul>
+              <p id="appointments-load-status" class="appointments-status muted small"></p>
+            </section>
+          </div>
+
           <div id="clients-panel" class="clients-panel hidden">
             <header class="clients-hero">
               <div class="clients-hero-icon" aria-hidden="true">🗺️</div>
               <h2>Buscar clientes</h2>
-              <p>Cuéntanos tu negocio y la IA encuentra posibles clientes en Google Maps para que los contactes en frío.</p>
-              <p class="clients-quota-badge">Hasta <strong>100 contactos nuevos</strong> por día</p>
+              <p class="clients-soon-badge">Próximamente</p>
+              <p>Estamos terminando la búsqueda de clientes en Google Maps. Por ahora usa <strong>Interesados</strong> para cerrar las conversaciones que llegan por WhatsApp.</p>
             </header>
-
-            <section class="clients-form-card maps-search-form">
-              <h3>¿De qué es tu negocio?</h3>
-              <p class="clients-field-hint">Ejemplo: <strong>lavandería industrial</strong>, <strong>software contable</strong>, <strong>distribuidora de café</strong>…</p>
-              <textarea id="maps-business-input" rows="3" placeholder="Ej: Lavandería que lava ropa de hoteles y restaurantes en Medellín"></textarea>
-
-              <label class="maps-city-label">
-                ¿En qué ciudad o zona buscas?
-                <input type="text" id="maps-city-input" placeholder="Medellín, Bogotá, Cali…" autocomplete="off" />
-              </label>
-
-              <div class="maps-form-actions">
-                <button type="button" id="maps-search-btn" class="btn primary">Buscar clientes con IA</button>
-                <button type="button" id="maps-reset-btn" class="btn ghost hidden">Nueva búsqueda</button>
-              </div>
-              <p id="maps-search-status" class="clients-status muted small"></p>
-            </section>
-
-            <section id="maps-plan-card" class="clients-form-card maps-plan-card hidden">
-              <div class="maps-plan-header">
-                <span class="maps-plan-badge">Plan de la IA</span>
-                <h3 id="maps-plan-title">Clientes potenciales para tu negocio</h3>
-              </div>
-              <p id="maps-plan-summary" class="maps-plan-summary muted"></p>
-              <ul id="maps-plan-list" class="maps-plan-list"></ul>
-            </section>
-
-            <section id="maps-results-card" class="clients-list-card maps-results-card hidden">
-              <div class="maps-results-header">
-                <div>
-                  <h3 id="maps-results-title">Resultados</h3>
-                  <p id="maps-results-meta" class="muted small"></p>
-                </div>
-                <button type="button" id="maps-download-btn" class="btn primary small">Descargar Excel</button>
-              </div>
-              <div class="maps-results-table-wrap">
-                <table class="maps-results-table">
-                  <thead>
-                    <tr>
-                      <th>Nombre</th>
-                      <th>Teléfono</th>
-                      <th>Dirección</th>
-                      <th>Tipo</th>
-                    </tr>
-                  </thead>
-                  <tbody id="maps-results-body"></tbody>
-                </table>
-              </div>
-              <p class="maps-results-footnote muted small">Vista previa — cuando conectemos el scraper verás datos reales de Google Maps.</p>
-            </section>
           </div>
         </main>
       </div>
@@ -404,6 +402,51 @@
       </div>
     </div>
 
+    <!-- Modal cita -->
+    <div id="appointment-modal" class="modal hidden">
+      <div class="modal-backdrop" id="appointment-modal-backdrop"></div>
+      <div class="modal-card appointment-modal-card">
+        <button id="appointment-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
+        <h3 id="appointment-modal-title">Nueva cita</h3>
+        <form id="appointment-form" class="appointment-form">
+          <input type="hidden" id="appointment-id" value="" />
+          <label>
+            Fecha
+            <input type="date" id="appointment-date" required />
+          </label>
+          <div class="appointment-form-row">
+            <label>
+              Desde
+              <input type="time" id="appointment-start" required />
+            </label>
+            <label>
+              Hasta
+              <input type="time" id="appointment-end" required />
+            </label>
+          </div>
+          <label>
+            Cliente
+            <input type="text" id="appointment-client" maxlength="255" placeholder="Nombre del cliente" required />
+          </label>
+          <label>
+            Teléfono <span class="muted">(opcional)</span>
+            <input type="text" id="appointment-phone" maxlength="64" placeholder="+57…" />
+          </label>
+          <label>
+            Observaciones
+            <span class="ai-field-hint">Ej: pidió corte + barba, mesa para 4, habitación con jacuzzi…</span>
+            <textarea id="appointment-notes" rows="3" maxlength="2000" placeholder="Qué pidió el cliente para esta hora"></textarea>
+          </label>
+          <p id="appointment-form-error" class="error hidden"></p>
+          <div class="appointment-form-actions">
+            <button type="submit" id="appointment-save-btn" class="btn primary">Guardar cita</button>
+            <button type="button" id="appointment-delete-btn" class="btn ghost danger hidden">Eliminar</button>
+            <button type="button" id="appointment-open-chat-btn" class="btn ghost hidden">Abrir chat</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Modal QR WhatsApp -->
     <div id="qr-modal" class="modal hidden">
       <div class="modal-backdrop" id="qr-modal-backdrop"></div>
@@ -419,6 +462,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=70"></script>
+  <script src="/static/panel/app.js?v=94"></script>
 </body>
 </html>

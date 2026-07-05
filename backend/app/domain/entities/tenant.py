@@ -84,6 +84,9 @@ class TenantProfile(Base):
     ai_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     bait_message_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     quick_shortcuts: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    schedule_open_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
+    schedule_close_time: Mapped[str] = mapped_column(String(5), nullable=False, default="18:00")
+    schedule_slot_minutes: Mapped[int] = mapped_column(nullable=False, default=60)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -2,14 +2,14 @@ import { isPlatformBrowser, NgIf } from '@angular/common';
 import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { combineLatest, filter } from 'rxjs';
 
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { oauthStartUrl } from '../../core/oauth-url';
+import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { SessionService } from '../../core/services/session.service';
 
-type AuthStep = 'start' | 'login' | 'register';
+type AuthStep = 'start' | 'signup-details' | 'sent';
 
 @Component({
   selector: 'app-login',
@@ -30,38 +30,43 @@ export class LoginComponent implements OnInit {
   oauthLoading = false;
   backendOnline = true;
   error = '';
+  successMessage = '';
+  devLink: string | null = null;
   signupMode = false;
   providers = { google: false, github: false };
-  nextPath = '/precios';
-  googleOAuthUrl = oauthStartUrl('google', '/precios');
-  githubOAuthUrl = oauthStartUrl('github', '/precios');
+  nextPath = '/panel?welcome=1';
+  googleOAuthUrl = oauthStartUrl('google', '/panel?welcome=1');
+  githubOAuthUrl = oauthStartUrl('github', '/panel?welcome=1');
 
-  readonly emailForm = this.fb.nonNullable.group({
+  readonly authForm = this.fb.nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
+    business_name: [''],
+    owner_name: [''],
   });
 
-  readonly loginForm = this.fb.nonNullable.group({
-    password: ['', [Validators.required, Validators.minLength(1)]],
-  });
-
-  readonly registerForm = this.fb.nonNullable.group({
-    business_name: ['', [Validators.required, Validators.minLength(2)]],
-    owner_name: ['', [Validators.required, Validators.minLength(2)]],
-    password: ['', [Validators.required, Validators.minLength(8)]],
-  });
+  private resolveNextPath(): string {
+    const fromQuery = this.route.snapshot.queryParamMap.get('next')?.trim();
+    if (fromQuery && fromQuery.startsWith('/') && !fromQuery.startsWith('//')) {
+      return fromQuery;
+    }
+    const plan = this.route.snapshot.queryParamMap.get('plan');
+    if (plan) {
+      return `/precios?plan=${encodeURIComponent(plan)}`;
+    }
+    return `${environment.panelUrl}?welcome=1`;
+  }
 
   ngOnInit(): void {
     this.signupMode = this.route.snapshot.routeConfig?.path === 'registro';
+    if (this.signupMode) {
+      this.applySignupValidators();
+    }
     const oauthError = this.route.snapshot.queryParamMap.get('error');
     if (oauthError) {
       this.error = oauthError;
     }
 
-    const plan = this.route.snapshot.queryParamMap.get('plan');
-    this.nextPath = '/precios';
-    if (plan) {
-      this.nextPath = `/precios?plan=${encodeURIComponent(plan)}`;
-    }
+    this.nextPath = this.resolveNextPath();
     this.googleOAuthUrl = oauthStartUrl('google', this.nextPath);
     this.githubOAuthUrl = oauthStartUrl('github', this.nextPath);
 
@@ -69,13 +74,22 @@ export class LoginComponent implements OnInit {
       return;
     }
 
-    combineLatest([this.session.ready$, this.session.user$])
-      .pipe(filter(([ready]) => ready))
-      .subscribe(([, user]) => {
-        if (user && this.session.isLoggedIn()) {
-          this.router.navigate(['/precios']);
+    // Si ya hay sesión válida en el servidor, ir directo al destino (no volver a pedir login).
+    if (this.session.snapshot()) {
+      window.location.replace(`${window.location.origin}${this.nextPath}`);
+      return;
+    }
+    this.auth.getMe().subscribe({
+      next: (user) => {
+        if (user) {
+          this.session.markLoggedIn();
+          window.location.replace(`${window.location.origin}${this.nextPath}`);
         }
-      });
+      },
+      error: () => {
+        /* Sin sesión: mostrar el formulario de login. */
+      },
+    });
 
     this.auth.getProviders().subscribe({
       next: (providers) => {
@@ -121,49 +135,89 @@ export class LoginComponent implements OnInit {
   }
 
   get title(): string {
-    if (this.step === 'login') return 'Bienvenido de nuevo';
-    if (this.step === 'register') return 'Crea tu cuenta';
+    if (this.step === 'sent') return 'Revisa tu correo';
+    if (this.step === 'signup-details') return 'Crea tu cuenta';
     return this.signupMode ? 'Crear cuenta' : 'Entrar al panel';
   }
 
   get subtitle(): string {
-    if (this.step === 'login') return 'Ingresa tu contraseña para continuar.';
-    if (this.step === 'register') return 'Completa los datos de tu negocio.';
-    return 'Elige cómo quieres continuar.';
+    if (this.step === 'sent') {
+      return 'Te enviamos un enlace seguro para entrar sin contraseña.';
+    }
+    if (this.step === 'signup-details') {
+      return 'Completa los datos de tu negocio y te enviamos el enlace.';
+    }
+    if (this.signupMode) {
+      return 'Te enviaremos un enlace a tu correo para activar la cuenta.';
+    }
+    return 'Ingresa tu correo y te enviamos un enlace para entrar.';
   }
 
   get email(): string {
-    return this.emailForm.controls.email.value.trim().toLowerCase();
+    return this.authForm.controls.email.value.trim().toLowerCase();
   }
 
-  startGoogle(): void {
-    this.error = '';
-    this.auth.startGoogleOAuth();
-  }
-
-  startGithub(): void {
-    this.error = '';
-    this.auth.startGithubOAuth();
-  }
-
-  continueWithEmail(): void {
-    if (this.emailForm.invalid || this.submitting) {
-      this.emailForm.markAllAsTouched();
+  submitEmail(): void {
+    if (this.authForm.controls.email.invalid || this.submitting) {
+      this.authForm.controls.email.markAsTouched();
       return;
     }
 
+    const withSignup = this.signupMode || this.step === 'signup-details';
+    if (withSignup && this.authForm.invalid) {
+      this.authForm.markAllAsTouched();
+      return;
+    }
+
+    this.sendMagicLink(withSignup);
+  }
+
+  submitSignupDetails(): void {
+    this.submitEmail();
+  }
+
+  private applySignupValidators(): void {
+    const validators = [Validators.required, Validators.minLength(2)];
+    this.authForm.controls.business_name.setValidators(validators);
+    this.authForm.controls.owner_name.setValidators(validators);
+    this.authForm.controls.business_name.updateValueAndValidity();
+    this.authForm.controls.owner_name.updateValueAndValidity();
+  }
+
+  private sendMagicLink(withSignup: boolean): void {
     this.submitting = true;
     this.error = '';
+    this.devLink = null;
 
-    this.auth.lookupEmail({ email: this.email }).subscribe({
-      next: ({ exists }) => {
+    const body = {
+      email: this.email,
+      ...(withSignup
+        ? {
+            business_name: this.authForm.controls.business_name.value.trim(),
+            owner_name: this.authForm.controls.owner_name.value.trim(),
+          }
+        : {}),
+    };
+
+    this.auth.requestMagicLink(body).subscribe({
+      next: (res) => {
         this.submitting = false;
-        this.step = exists ? 'login' : 'register';
+        if (res.needs_signup) {
+          this.applySignupValidators();
+          this.step = 'signup-details';
+          return;
+        }
+        if (res.sent) {
+          this.successMessage = res.message;
+          this.devLink = res.dev_link ?? null;
+          this.step = 'sent';
+        }
       },
-      error: () => {
+      error: (err) => {
         this.submitting = false;
         this.error =
-          'No pudimos contactar el servidor. Verifica que el backend esté corriendo e intenta de nuevo.';
+          err?.error?.detail ||
+          'No pudimos enviar el enlace. Verifica el correo e intenta de nuevo.';
       },
     });
   }
@@ -171,53 +225,15 @@ export class LoginComponent implements OnInit {
   backToStart(): void {
     this.step = 'start';
     this.error = '';
-    this.loginForm.reset();
-    this.registerForm.reset();
-  }
-
-  submitLogin(): void {
-    if (this.loginForm.invalid || this.submitting) {
-      this.loginForm.markAllAsTouched();
-      return;
+    this.successMessage = '';
+    this.devLink = null;
+    this.authForm.controls.business_name.reset('');
+    this.authForm.controls.owner_name.reset('');
+    if (!this.signupMode) {
+      this.authForm.controls.business_name.clearValidators();
+      this.authForm.controls.owner_name.clearValidators();
+      this.authForm.controls.business_name.updateValueAndValidity();
+      this.authForm.controls.owner_name.updateValueAndValidity();
     }
-
-    this.submitting = true;
-    this.error = '';
-
-    this.auth
-      .login({ email: this.email, password: this.loginForm.controls.password.value })
-      .subscribe({
-        error: (err) => {
-          this.submitting = false;
-          this.error = err?.error?.detail || 'Email o contraseña incorrectos.';
-        },
-      });
-  }
-
-  submitRegister(): void {
-    if (this.registerForm.invalid || this.submitting) {
-      this.registerForm.markAllAsTouched();
-      return;
-    }
-
-    this.submitting = true;
-    this.error = '';
-
-    const { business_name, owner_name, password } = this.registerForm.getRawValue();
-    this.auth
-      .register({
-        business_name,
-        owner_name,
-        email: this.email,
-        password,
-      })
-      .subscribe({
-        error: (err) => {
-          this.submitting = false;
-          this.error =
-            err?.error?.detail ||
-            'No pudimos crear la cuenta. Revisa los datos e intenta de nuevo.';
-        },
-      });
   }
 }

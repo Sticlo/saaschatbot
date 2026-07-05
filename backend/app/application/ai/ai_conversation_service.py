@@ -4,6 +4,12 @@ import logging
 from typing import Optional
 
 from app.application.ai.ai_qualify_service import build_qualify_system_prompt
+from app.application.ai.ai_shortcut_service import (
+    AiGeneratedReply,
+    append_shortcuts_instructions,
+    parse_ai_reply,
+    shortcut_ids,
+)
 from app.config import settings
 from app.domain.entities import Message, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
@@ -20,22 +26,28 @@ Si no sabes algo, dilo con honestidad y ofrece que un humano del equipo le confi
 """
 
 
-def build_system_prompt(tenant: Tenant, profile: Optional[TenantProfile]) -> str:
+def build_system_prompt(
+    tenant: Tenant,
+    profile: Optional[TenantProfile],
+    *,
+    shortcuts: list[dict] | None = None,
+) -> str:
     if profile and profile.ai_system_prompt and profile.ai_system_prompt.strip():
-        return profile.ai_system_prompt.strip()
+        base = profile.ai_system_prompt.strip()
+    else:
+        base = DEFAULT_SYSTEM_PROMPT.format(business_name=tenant.business_name)
+        extras: list[str] = []
+        if profile and profile.onboarding_answers:
+            answers = profile.onboarding_answers
+            if isinstance(answers, dict):
+                for key, value in answers.items():
+                    if value:
+                        extras.append(f"- {key}: {value}")
 
-    base = DEFAULT_SYSTEM_PROMPT.format(business_name=tenant.business_name)
-    extras: list[str] = []
-    if profile and profile.onboarding_answers:
-        answers = profile.onboarding_answers
-        if isinstance(answers, dict):
-            for key, value in answers.items():
-                if value:
-                    extras.append(f"- {key}: {value}")
+        if extras:
+            base += "\n\nContexto del negocio:\n" + "\n".join(extras)
 
-    if extras:
-        base += "\n\nContexto del negocio:\n" + "\n".join(extras)
-    return base
+    return append_shortcuts_instructions(base, shortcuts or [])
 
 
 def format_history(messages: list[Message], *, limit: Optional[int] = None) -> list[dict[str, str]]:
@@ -51,6 +63,23 @@ def format_history(messages: list[Message], *, limit: Optional[int] = None) -> l
     return formatted
 
 
+def _complete_reply(
+    *,
+    system: str,
+    history: list[Message],
+    shortcuts: list[dict],
+) -> AiGeneratedReply:
+    messages = [{"role": "system", "content": system}, *format_history(history)]
+    ids = shortcut_ids(shortcuts)
+    temperature = 0.45 if ids else 0.65
+    raw = chat_completion(
+        messages,
+        temperature=temperature,
+        max_tokens=settings.ai_reply_max_tokens,
+    )
+    return parse_ai_reply(raw, valid_ids=ids)
+
+
 def generate_qualify_reply(
     *,
     tenant: Tenant,
@@ -58,19 +87,19 @@ def generate_qualify_reply(
     contact_name: str,
     history: list[Message],
     is_first_contact: bool = False,
-) -> str:
+    shortcuts: list[dict] | None = None,
+) -> AiGeneratedReply:
+    shortcut_rows = shortcuts or []
     system = build_qualify_system_prompt(
-        tenant, profile, is_first_contact=is_first_contact
+        tenant,
+        profile,
+        is_first_contact=is_first_contact,
+        shortcuts=shortcut_rows,
     )
     if contact_name and not contact_name.startswith("+"):
         system += f"\n\nNombre del contacto: {contact_name}"
 
-    messages = [{"role": "system", "content": system}, *format_history(history)]
-    return chat_completion(
-        messages,
-        temperature=0.65,
-        max_tokens=settings.ai_reply_max_tokens,
-    )
+    return _complete_reply(system=system, history=history, shortcuts=shortcut_rows)
 
 
 def generate_reply(
@@ -79,19 +108,15 @@ def generate_reply(
     profile: Optional[TenantProfile],
     contact_name: str,
     history: list[Message],
-) -> str:
-    system = build_system_prompt(tenant, profile)
+    shortcuts: list[dict] | None = None,
+) -> AiGeneratedReply:
+    shortcut_rows = shortcuts or []
+    system = build_system_prompt(tenant, profile, shortcuts=shortcut_rows)
     if contact_name and not contact_name.startswith("+"):
         system += f"\n\nNombre del contacto: {contact_name}"
 
-    messages = [{"role": "system", "content": system}, *format_history(history)]
-
     try:
-        return chat_completion(
-            messages,
-            temperature=0.65,
-            max_tokens=settings.ai_reply_max_tokens,
-        )
+        return _complete_reply(system=system, history=history, shortcuts=shortcut_rows)
     except DeepSeekError:
         log.exception("Error generando respuesta DeepSeek tenant=%s", tenant.id)
         raise

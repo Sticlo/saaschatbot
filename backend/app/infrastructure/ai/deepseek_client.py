@@ -100,7 +100,7 @@ def chat_completion(
     url = f"{settings.deepseek_api_base.rstrip('/')}/chat/completions"
 
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
             response = client.post(url, json=payload, headers=headers)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code if exc.response is not None else 0
@@ -110,14 +110,11 @@ def chat_completion(
             status_code=status or None,
         ) from exc
     except httpx.HTTPError as exc:
-        msg = str(exc)
-        if "403" in msg:
-            raise DeepSeekError(
-                "No se pudo conectar con DeepSeek (403). Revisa DEEPSEEK_API_KEY "
-                "y que el servidor tenga acceso a internet.",
-                status_code=403,
-            ) from exc
-        raise DeepSeekError(f"No se pudo conectar con DeepSeek: {msg[:200]}") from exc
+        msg = str(exc).strip()
+        raise DeepSeekError(
+            "No se pudo conectar con DeepSeek. Confirma que el backend esté corriendo "
+            f"(./scripts/dev.sh) y que haya internet. Detalle: {msg[:180]}"
+        ) from exc
 
     if response.status_code >= 400:
         detail = response.text[:500]

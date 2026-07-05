@@ -35,7 +35,7 @@
 
         <div class="auth-divider"><span>o con correo</span></div>
 
-        <form [formGroup]="emailForm" (ngSubmit)="continueWithEmail()">
+        <form [formGroup]="authForm" (ngSubmit)="submitEmail()">
           <label>
             Correo electrónico
             <input
@@ -46,10 +46,31 @@
             />
           </label>
 
+          @if (signupMode) {
+            <label>
+              Nombre del negocio
+              <input
+                type="text"
+                formControlName="business_name"
+                autocomplete="organization"
+              />
+            </label>
+            <label>
+              Tu nombre
+              <input type="text" formControlName="owner_name" autocomplete="name" />
+            </label>
+          }
+
           <p class="error" *ngIf="error">{{ error }}</p>
 
           <button class="btn btn-primary full" type="submit" [disabled]="submitting">
-            {{ submitting ? 'Verificando…' : 'Continuar con correo' }}
+            {{
+              submitting
+                ? 'Enviando…'
+                : signupMode
+                  ? 'Enviar enlace de activación'
+                  : 'Enviar enlace de acceso'
+            }}
           </button>
         </form>
 
@@ -64,60 +85,52 @@
         </p>
       }
 
-      @if (step === 'login' || step === 'register') {
+      @if (step === 'signup-details') {
         <div class="auth-email-chip">
           <span>{{ email }}</span>
           <button type="button" class="link-btn" (click)="backToStart()">Cambiar</button>
         </div>
-      }
 
-      @if (step === 'login') {
-        <form [formGroup]="loginForm" (ngSubmit)="submitLogin()">
-          <label>
-            Contraseña
-            <input
-              type="password"
-              formControlName="password"
-              autocomplete="current-password"
-              autofocus
-            />
-          </label>
-
-          <p class="error" *ngIf="error">{{ error }}</p>
-
-          <button class="btn btn-primary full" type="submit" [disabled]="submitting">
-            {{ submitting ? 'Entrando…' : 'Entrar al panel' }}
-          </button>
-
-          <p class="muted center forgot-link">
-            <a routerLink="/recuperar">¿Olvidaste tu contraseña?</a>
-          </p>
-        </form>
-      }
-
-      @if (step === 'register') {
-        <form [formGroup]="registerForm" (ngSubmit)="submitRegister()">
+        <form [formGroup]="authForm" (ngSubmit)="submitSignupDetails()">
           <label>
             Nombre del negocio
-            <input type="text" formControlName="business_name" autocomplete="organization" autofocus />
+            <input
+              type="text"
+              formControlName="business_name"
+              autocomplete="organization"
+              autofocus
+            />
           </label>
           <label>
             Tu nombre
             <input type="text" formControlName="owner_name" autocomplete="name" />
           </label>
-          <label>
-            Contraseña
-            <input type="password" formControlName="password" autocomplete="new-password" />
-          </label>
-
-          <p class="hint muted">Mínimo 8 caracteres.</p>
 
           <p class="error" *ngIf="error">{{ error }}</p>
 
           <button class="btn btn-primary full" type="submit" [disabled]="submitting">
-            {{ submitting ? 'Creando cuenta…' : 'Crear cuenta y entrar' }}
+            {{ submitting ? 'Enviando…' : 'Enviar enlace para crear cuenta' }}
           </button>
         </form>
+      }
+
+      @if (step === 'sent') {
+        <div class="auth-sent">
+          <p class="auth-sent-email">{{ email }}</p>
+          <p class="muted">{{ successMessage }}</p>
+          <p class="hint muted">El enlace vence en unos minutos. Revisa también spam.</p>
+
+          @if (devLink) {
+            <p class="auth-dev-link">
+              <span class="muted">Desarrollo local:</span>
+              <a [href]="devLink">Abrir enlace de prueba</a>
+            </p>
+          }
+
+          <button type="button" class="btn btn-ghost full" (click)="backToStart()">
+            Usar otro correo
+          </button>
+        </div>
       }
     </div>
   </section>

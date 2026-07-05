@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
+from app.domain.entities.enums import MessageDirection
 from app.shared.core.phone import (
     is_lid_placeholder,
     is_valid_whatsapp_phone,
@@ -15,6 +16,53 @@ from app.application.sync.chat_sync_service import _import_messages, _load_messa
 from app.application.realtime.realtime_service import publish_conversation_updated
 
 log = logging.getLogger(__name__)
+
+
+def _finalize_inbound_ai(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+) -> bool:
+    """Auto-activa IA si aplica y encola respuesta al último entrante pendiente."""
+    scheduled = False
+    try:
+        db.refresh(conversation)
+        if tenant.ai_global_enabled and not conversation.ai_active:
+            latest_in = (
+                db.query(Message)
+                .filter(
+                    Message.conversation_id == conversation.id,
+                    Message.direction == MessageDirection.IN.value,
+                )
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+            if latest_in:
+                from app.application.ai.ai_auto_enable_service import (
+                    maybe_auto_enable_ai_for_inbound,
+                )
+
+                if maybe_auto_enable_ai_for_inbound(
+                    tenant=tenant,
+                    conversation=conversation,
+                    body=latest_in.body or "",
+                ):
+                    db.flush()
+                    publish_conversation_updated(tenant.id, conversation)
+
+        from app.application.ai.ai_service import maybe_schedule_ai_for_conversation
+
+        scheduled = maybe_schedule_ai_for_conversation(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+        )
+        if scheduled:
+            log.info("IA encolada tras sync conv=%s", conversation.id)
+    except Exception:
+        log.exception("finalize inbound AI conv=%s", conversation.id)
+    return scheduled
 
 
 def _jids_for_conversation(conversation: Conversation) -> list[str]:
@@ -79,6 +127,7 @@ def pull_live_conversation_messages(
             db.flush()
             publish_conversation_updated(tenant.id, conversation)
 
+        _finalize_inbound_ai(db, tenant=tenant, conversation=conversation)
         db.commit()
     except Exception:
         log.exception(

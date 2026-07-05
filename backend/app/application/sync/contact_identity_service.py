@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.shared.core.phone import (
+    is_lid_derived_phone,
     is_lid_placeholder,
     is_owner_display_name,
     is_placeholder_contact_name,
@@ -348,9 +349,11 @@ def apply_identity_to_conversation(
         conversation.contact_jid = jid
         changed = True
     if contact_phone and is_valid_whatsapp_phone(contact_phone):
-        if conversation.contact_phone != contact_phone:
-            conversation.contact_phone = contact_phone
-            changed = True
+        effective_jid = contact_jid or conversation.contact_jid or jid or ""
+        if not is_lid_derived_phone(contact_phone, effective_jid):
+            if conversation.contact_phone != contact_phone:
+                conversation.contact_phone = contact_phone
+                changed = True
     if contact_name:
         old_placeholder = is_placeholder_contact_name(
             conversation.contact_name, conversation.contact_phone

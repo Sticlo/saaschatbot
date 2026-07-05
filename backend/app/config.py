@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # True solo si Evolution corre dentro de Docker y la API en el host (localhost).
     evolution_in_docker: bool = False
 
+    # Tras escanear QR: solo mensajes nuevos (webhooks), sin importar chats antiguos.
+    whatsapp_import_history_on_connect: bool = False
+
     # WhatsApp provider: waha (Chrome real, recomendado) | evolution
     whatsapp_provider: str = "evolution"
     waha_api_url: str = "http://localhost:3001"

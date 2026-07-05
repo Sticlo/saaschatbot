@@ -1,4 +1,16 @@
 (() => {
+  const host = location.hostname;
+  if (
+    (host === "localhost" || host === "127.0.0.1") &&
+    location.port === "8000" &&
+    location.pathname.startsWith("/panel")
+  ) {
+    location.replace(
+      `${location.protocol}//${host}:4200${location.pathname}${location.search}${location.hash}`
+    );
+    return;
+  }
+
   const API = "/api/v1";
   const LEGACY_STORAGE_KEY = "saaschatbot_token";
   const THEME_STORAGE_KEY = "omitel_panel_theme";
@@ -15,7 +27,9 @@
     canManageGlobal: false,
     canConnectWa: false,
     wa: { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null },
-    chatListTab: "all",
+    chatListTab: "interested",
+    interestedCount: 0,
+    subscription: null,
     syncInProgress: false,
     autoSyncRequested: false,
     syncWatchdog: null,
@@ -27,7 +41,11 @@
     clients: { plan: null, leads: [], business: "", city: "" },
     quickShortcuts: [],
     shortcutsDraft: [],
+    appointmentsDate: null,
+    appointmentsDay: null,
+    appointmentModalConversationId: null,
     aiStatus: null,
+    aiStatusPoll: null,
   };
 
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
@@ -35,14 +53,54 @@
 
   const $ = (id) => document.getElementById(id);
 
-  const BACKEND_OFFLINE_MSG =
-    "El servidor no responde. En una terminal ejecuta: ./scripts/dev.sh — luego recarga esta página (Cmd+R).";
+  function isLocalDev() {
+    const host = location.hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  }
+
+  function isDevToolsEnabled() {
+    return isLocalDev() || new URLSearchParams(location.search).has("debug");
+  }
+
+  function humanizeWaError(msg) {
+    const raw = (msg || "").trim();
+    const lower = raw.toLowerCase();
+    if (!raw) return "No pudimos conectar WhatsApp. Intenta de nuevo en unos segundos.";
+    if (lower.includes("dev.sh") || lower.includes("waha-docker") || lower.includes("evolution-mac")) {
+      return "No pudimos conectar WhatsApp. Intenta de nuevo o recarga la página.";
+    }
+    if (lower.includes("abort") || lower.includes("timeout") || lower.includes("tardó")) {
+      return "La conexión tardó demasiado. Revisa tu internet e intenta otra vez.";
+    }
+    if (lower.includes("backend") || lower.includes("servidor")) {
+      return "El servidor no responde. Espera un momento y recarga la página.";
+    }
+    if (
+      lower.includes("vincular nuevos dispositivos") ||
+      lower.includes("vincular dispositivo") ||
+      lower.includes("unable to link") ||
+      lower.includes("link device")
+    ) {
+      return (
+        "WhatsApp no deja vincular ahora. En el celular: Ajustes → Dispositivos vinculados " +
+        "y cerrá sesiones que no uses. Esperá 2–3 minutos, tocá Conectar otra vez y escaneá el QR nuevo."
+      );
+    }
+    return raw;
+  }
+
+  const BACKEND_OFFLINE_MSG = isLocalDev()
+    ? "El servidor no responde. En una terminal ejecuta: ./scripts/dev.sh — luego recarga esta página (Cmd+R)."
+    : "El servidor no responde. Espera un momento y recarga la página.";
 
   async function pingBackend(timeoutMs = 4000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch("/health", { signal: ctrl.signal, credentials: "include" });
+      const res = await fetch(`${API}/auth/providers`, {
+        signal: ctrl.signal,
+        credentials: "include",
+      });
       clearTimeout(timer);
       return res.ok;
     } catch {
@@ -120,8 +178,8 @@
   const loginForm = $("login-form");
   const loginError = $("login-error");
   const loginStepEmail = $("login-step-email");
-  const loginStepPassword = $("login-step-password");
   const loginStepRegister = $("login-step-register");
+  const loginStepSent = $("login-step-sent");
   let loginEmail = "";
   const conversationList = $("conversation-list");
   const messagesEl = $("messages");
@@ -160,8 +218,11 @@
         data = text;
       }
       if (res.status === 401) {
-        logout();
-        throw new Error("Sesión expirada");
+        const e = new Error(
+          "Sesión expirada. Recarga la página (Cmd+R) o entra de nuevo desde la landing."
+        );
+        e.status = 401;
+        throw e;
       }
       if (!res.ok) {
         const detail = data?.detail;
@@ -200,14 +261,27 @@
     }
   }
 
+  function siteLoginUrl(nextPath) {
+    const next = encodeURIComponent(nextPath || "/panel");
+    if (isLocalDev() && location.port === "8000") {
+      return `${location.protocol}//${location.hostname}:4200/login?next=${next}`;
+    }
+    return `/login?next=${next}`;
+  }
+
+  function redirectToSiteLogin() {
+    const search = location.search || "";
+    const nextPath = `/panel${search}`;
+    window.location.href = siteLoginUrl(nextPath);
+  }
+
   function showLogin() {
-    loginView.classList.remove("hidden");
-    panelView.classList.add("hidden");
+    redirectToSiteLogin();
   }
 
   function showPanel() {
-    loginView.classList.add("hidden");
-    panelView.classList.remove("hidden");
+    loginView?.classList.add("hidden");
+    panelView?.classList.remove("hidden");
   }
 
   function resetPanelState() {
@@ -225,6 +299,9 @@
     state.canConnectWa = false;
     state.canEnqueueOutbound = false;
     state.canImportLeads = false;
+    state.chatListTab = "interested";
+    state.interestedCount = 0;
+    state.subscription = null;
     state.panelMode = "chats";
     state.aiProfile = null;
     state.clients = { leads: [], limits: null, search: "" };
@@ -239,20 +316,24 @@
     activeChat.classList.add("hidden");
     $("ai-setup-panel").classList.add("hidden");
     $("clients-panel").classList.add("hidden");
+    $("appointments-panel").classList.add("hidden");
     $("sidebar-chats").classList.remove("hidden");
     $("mode-chats").classList.add("active");
     $("mode-clients").classList.remove("active");
+    $("mode-appointments").classList.remove("active");
     $("mode-ai").classList.remove("active");
-    $("chat-area").classList.remove("ai-setup-mode", "clients-mode");
+    $("chat-area").classList.remove("ai-setup-mode", "clients-mode", "appointments-mode");
     $("business-name").textContent = "—";
     $("user-label").textContent = "";
+    setChatListTab("interested");
+    updateInterestedBadge();
   }
 
   function resetLoginForm() {
     loginEmail = "";
     showLoginStep("email");
     loginForm?.reset();
-    [loginError, $("login-error-password"), $("login-error-register")].forEach((el) => {
+    [loginError, $("login-error-register")].forEach((el) => {
       if (el) {
         el.textContent = "";
         el.classList.add("hidden");
@@ -274,9 +355,7 @@
     state.token = null;
     disconnectWs();
     resetPanelState();
-    resetLoginForm();
-    showLogin();
-    loadAuthProviders();
+    redirectToSiteLogin();
   }
 
   function roleAtLeast(role, minimum) {
@@ -361,6 +440,8 @@
       const pullLabel = data.imported > 0 ? `+${data.imported}` : "ok";
       state._lastPull = pullLabel;
       updateSyncStatus({ pull: pullLabel });
+
+      if (data.conversation) upsertConversation(data.conversation);
 
       const msgs = dedupeMessages(data.messages || []);
       const sig = msgs.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
@@ -593,10 +674,21 @@
       startLivePoll();
       if (phoneChanged) {
         prepareForNewDevice();
-        triggerAutoSync();
+        state.autoSyncRequested = true;
+        fetchConversations()
+          .then((rows) => {
+            setConversations(rows);
+            renderConversationList();
+          })
+          .catch(() => {});
       } else if (prevStatus !== "connected") {
-        state.autoSyncRequested = false;
-        triggerAutoSync();
+        state.autoSyncRequested = true;
+        fetchConversations()
+          .then((rows) => {
+            setConversations(rows);
+            renderConversationList();
+          })
+          .catch(() => {});
       } else if (!state.syncInProgress) {
         fetchConversations()
           .then((rows) => {
@@ -615,17 +707,31 @@
       state.autoSyncRequested = false;
       clearConversations();
     }
+    renderOnboarding();
+  }
+
+  function applyUserFromMe(me) {
+    if (!me) return;
+    state.user = me;
+    state.canWrite = roleAtLeast(me.role, "agent");
+    state.canManageGlobal = me.role === "owner";
+    state.canConnectWa = !!me;
+    state.canEnqueueOutbound = me.role === "owner";
+    state.canImportLeads = roleAtLeast(me.role, "agent");
+    const userLabel = $("user-label");
+    if (userLabel) userLabel.textContent = `${me.full_name} (${me.role})`;
+    const aiGlobal = $("toggle-ai-global");
+    if (aiGlobal) aiGlobal.disabled = !state.canManageGlobal;
   }
 
   function renderWaUi() {
     const connected = state.wa.status === "connected";
-    const needsConnect = !connected && state.canConnectWa;
-    const canManageWa = state.canConnectWa;
+    const needsConnect = !connected;
 
-    $("wa-connect-btn").classList.toggle("hidden", !needsConnect);
-    $("wa-disconnect-btn").classList.toggle("hidden", !connected || !canManageWa);
-    $("wa-reset-chats-btn").classList.toggle("hidden", !connected || !canManageWa);
-    $("wa-setup").classList.toggle("hidden", !needsConnect);
+    $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect);
+    $("wa-setup")?.classList.toggle("hidden", !needsConnect);
+    $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
+    $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     const cwLink = $("wa-chatwoot-link");
     if (cwLink) {
       const showCw = connected && !!state.wa.chatwoot_inbox_url;
@@ -663,20 +769,33 @@
   }
 
   async function connectWhatsApp() {
-    if (!state.canConnectWa) return;
+    if (!state.user) {
+      const check = await probeSession(5000);
+      if (check.user) {
+        state.user = check.user;
+        applyUserFromMe(check.user);
+      }
+    }
     showQrModal();
     $("qr-loading").textContent = "Generando QR… puede tardar hasta 30 segundos";
     $("wa-setup-error").classList.add("hidden");
+    if (!state.user) {
+      showQrError("No hay sesión activa. Entra desde omitel y vuelve al panel.");
+      return;
+    }
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
-      const health = await fetch("/health", { credentials: "include", signal: ctrl.signal });
+      const health = await fetch(`${API}/auth/providers`, {
+        credentials: "include",
+        signal: ctrl.signal,
+      });
       clearTimeout(t);
       if (!health.ok) throw new Error("Backend no responde");
     } catch (err) {
-      const msg =
-        err.message ||
-        "No pudimos contactar el servidor. Inicia el backend con ./scripts/dev.sh";
+      const msg = humanizeWaError(
+        err.message || "No pudimos contactar el servidor. Intenta de nuevo en unos segundos."
+      );
       showQrError(msg);
       $("wa-setup-error").textContent = msg;
       $("wa-setup-error").classList.remove("hidden");
@@ -686,9 +805,9 @@
       const wa = await api("/whatsapp/connect", { method: "POST" }, 90000);
       applyWaSession(wa);
       if (wa.qr_base64) showQrImage(wa.qr_base64);
-      else showQrError("No se recibió QR. Intenta de nuevo en unos segundos.");
+      else showQrError("No se recibió el código QR. Intenta de nuevo en unos segundos.");
     } catch (err) {
-      const msg = err.message || "Error al conectar";
+      const msg = humanizeWaError(err.message || "Error al conectar WhatsApp");
       showQrError(msg);
       $("wa-setup-error").textContent = msg;
       $("wa-setup-error").classList.remove("hidden");
@@ -782,8 +901,74 @@
     });
   }
 
+  function recalculateInterestedCount(rows) {
+    const list = rows || state.conversations;
+    state.interestedCount = list.filter((c) => getConversationInterest(c) === "interested").length;
+    updateInterestedBadge();
+  }
+
+  function updateInterestedBadge() {
+    const badge = $("interested-count-badge");
+    if (!badge) return;
+    const n = state.interestedCount || 0;
+    badge.textContent = String(n);
+    badge.classList.toggle("hidden", n < 1);
+  }
+
+  function pulseInterestedTab() {
+    const tab = $("tab-chats-interested");
+    if (!tab) return;
+    tab.classList.add("tab-pulse");
+    setTimeout(() => tab.classList.remove("tab-pulse"), 2400);
+  }
+
+  function renderOnboarding() {}
+
+  function renderPlanStatus() {
+    const bar = $("plan-status-bar");
+    const label = $("plan-status-label");
+    const cta = $("plan-status-cta");
+    if (!bar || !label) return;
+
+    const parts = [];
+    const sub = state.subscription;
+    if (sub) {
+      if (sub.is_trial) {
+        parts.push(`Prueba · ${sub.trial_bait_remaining} carnadas restantes`);
+        cta?.classList.remove("hidden");
+      } else if (sub.is_paid && sub.plan?.name) {
+        parts.push(`Plan ${sub.plan.name}`);
+        cta?.classList.add("hidden");
+      } else if (sub.plan?.name) {
+        parts.push(sub.plan.name);
+        cta?.classList.add("hidden");
+      }
+    }
+
+    const ai = state.aiStatus;
+    if (ai && !ai.daily_replies_unlimited && !ai.daily_classifications_unlimited) {
+      const left = ai.daily_classifications_remaining ?? ai.daily_replies_remaining;
+      const cap = ai.daily_classifications_limit ?? ai.daily_replies_limit;
+      if (typeof left === "number" && typeof cap === "number") {
+        const kind = ai.ai_mode === "classify_only" ? "Clasificaciones" : "Respuestas IA";
+        parts.push(`${kind} hoy: ${left}/${cap}`);
+      }
+    }
+
+    if (!parts.length) {
+      bar.classList.add("hidden");
+      return;
+    }
+    label.textContent = parts.join(" · ");
+    bar.classList.remove("hidden");
+  }
+
   function setConversations(rows) {
     state.conversations = sortConversations(rows);
+    if (state.activeId) {
+      const active = state.conversations.find((c) => c.id === state.activeId);
+      if (active) syncChatToggles(active);
+    }
   }
 
   function getConversationInterest(conv) {
@@ -879,6 +1064,7 @@
       const tags = [];
       if (c.interest_status === "interested") tags.push('<span class="interest-tag interested">interesado</span>');
       else if (c.interest_status === "not_interested") tags.push('<span class="interest-tag not">no interesado</span>');
+      if (c.imported_legacy && !c.bait_sent) tags.push('<span class="personal-tag">personal</span>');
       if (c.mode === "manual") tags.push('<span class="mode-tag">manual</span>');
       if (c.ai_active) tags.push('<span class="ai-tag">IA</span>');
       const subtitle = convSubtitle(c);
@@ -1041,16 +1227,20 @@
     state.panelMode = mode;
     const isChats = mode === "chats";
     const isClients = mode === "clients";
+    const isAppointments = mode === "appointments";
     const isAi = mode === "ai";
 
     $("mode-chats").classList.toggle("active", isChats);
     $("mode-clients").classList.toggle("active", isClients);
+    $("mode-appointments").classList.toggle("active", isAppointments);
     $("mode-ai").classList.toggle("active", isAi);
     $("sidebar-chats").classList.toggle("hidden", !isChats);
     $("chat-area").classList.toggle("ai-setup-mode", isAi);
     $("chat-area").classList.toggle("clients-mode", isClients);
+    $("chat-area").classList.toggle("appointments-mode", isAppointments);
     $("ai-setup-panel").classList.toggle("hidden", !isAi);
     $("clients-panel").classList.toggle("hidden", !isClients);
+    $("appointments-panel").classList.toggle("hidden", !isAppointments);
 
     if (isChats) {
       if (state.activeId) {
@@ -1065,8 +1255,278 @@
       activeChat.classList.add("hidden");
       if (isAi) loadAiSetupPanel();
       if (isClients) loadClientsPanel();
+      if (isAppointments) loadAppointmentsPanel();
     }
     renderQuickShortcuts();
+  }
+
+  function isoToTimeInput(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+
+  function formatDateISO(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function parseDateISO(value) {
+    const [y, m, d] = String(value || "").split("-").map(Number);
+    if (!y || !m || !d) return new Date();
+    return new Date(y, m - 1, d);
+  }
+
+  function shiftDateISO(iso, days) {
+    const d = parseDateISO(iso);
+    d.setDate(d.getDate() + days);
+    return formatDateISO(d);
+  }
+
+  function formatDayLabel(iso) {
+    return parseDateISO(iso).toLocaleDateString("es-CO", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+  }
+
+  function setAppointmentsStatus(msg, isError = false) {
+    const el = $("appointments-load-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.toggle("error", Boolean(isError && msg));
+  }
+
+  function setScheduleStatus(msg) {
+    const el = $("schedule-save-status");
+    if (el) el.textContent = msg || "";
+  }
+
+  function hideAppointmentModal() {
+    $("appointment-modal")?.classList.add("hidden");
+    $("appointment-form-error")?.classList.add("hidden");
+    state.appointmentModalConversationId = null;
+  }
+
+  function showAppointmentFormError(msg) {
+    const el = $("appointment-form-error");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+
+  function fillScheduleForm(schedule) {
+    if (!schedule) return;
+    if ($("schedule-open")) $("schedule-open").value = schedule.open_time || "08:00";
+    if ($("schedule-close")) $("schedule-close").value = schedule.close_time || "18:00";
+    if ($("schedule-slot-minutes")) {
+      $("schedule-slot-minutes").value = String(schedule.slot_minutes || 60);
+    }
+  }
+
+  function renderAppointmentsSlots(dayPayload) {
+    const list = $("appointments-slot-list");
+    if (!list) return;
+    const slots = dayPayload?.slots || [];
+    if (!slots.length) {
+      list.innerHTML =
+        '<li class="muted appointments-empty">No hay bloques para este día. Ajusta el horario del negocio.</li>';
+      return;
+    }
+    list.innerHTML = slots
+      .map((slot) => {
+        const busy = slot.status === "busy" && slot.appointment;
+        const cls = busy ? "appointments-slot-busy" : "appointments-slot-free";
+        const time = `${escapeHtml(slot.start)} – ${escapeHtml(slot.end)}`;
+        let statusHtml;
+        if (busy) {
+          const name = escapeHtml(slot.appointment.client_name || "Cliente");
+          const notes = slot.appointment.notes
+            ? `<span class="appointments-slot-notes">${escapeHtml(slot.appointment.notes)}</span>`
+            : "";
+          statusHtml = `<span class="appointments-slot-status">Ocupado · ${name}</span>${notes}`;
+        } else {
+          statusHtml = '<span class="appointments-slot-status">Libre · clic para agendar</span>';
+        }
+        const data = busy
+          ? `data-appointment-id="${escapeHtml(slot.appointment.id)}"`
+          : `data-slot-start="${escapeHtml(slot.start)}" data-slot-end="${escapeHtml(slot.end)}"`;
+        return `<li class="appointments-slot ${cls}" ${data} role="button" tabindex="0">
+          <span class="appointments-slot-time">${time}</span>
+          <div class="appointments-slot-meta">${statusHtml}</div>
+        </li>`;
+      })
+      .join("");
+
+    list.querySelectorAll(".appointments-slot").forEach((el) => {
+      el.addEventListener("click", () => {
+        const appointmentId = el.getAttribute("data-appointment-id");
+        if (appointmentId) {
+          const appt = slots
+            .map((s) => s.appointment)
+            .find((a) => a && a.id === appointmentId);
+          openAppointmentModal({ appointment: appt });
+          return;
+        }
+        openAppointmentModal({
+          start: el.getAttribute("data-slot-start"),
+          end: el.getAttribute("data-slot-end"),
+        });
+      });
+    });
+  }
+
+  async function loadAppointmentsDay(iso) {
+    state.appointmentsDate = iso;
+    const label = $("appointments-today-label");
+    const heading = $("appointments-day-heading");
+    if (label) label.textContent = formatDayLabel(iso);
+    if (heading) {
+      const todayIso = formatDateISO(new Date());
+      heading.textContent = iso === todayIso ? "Hoy" : "Agenda";
+    }
+    if ($("appointment-date")) $("appointment-date").value = iso;
+
+    const list = $("appointments-slot-list");
+    if (list) list.innerHTML = '<li class="muted appointments-loading">Cargando agenda…</li>';
+    setAppointmentsStatus("");
+
+    try {
+      const day = await api(`/appointments/day?day=${encodeURIComponent(iso)}`);
+      state.appointmentsDay = day;
+      fillScheduleForm(day.schedule);
+      renderAppointmentsSlots(day);
+    } catch (err) {
+      if (list) {
+        list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
+      }
+      setAppointmentsStatus(err.message, true);
+    }
+  }
+
+  async function loadAppointmentsPanel() {
+    setScheduleStatus("");
+    if (!state.appointmentsDate) {
+      state.appointmentsDate = formatDateISO(new Date());
+    }
+    try {
+      const schedule = await api("/appointments/schedule");
+      fillScheduleForm(schedule);
+    } catch (err) {
+      setScheduleStatus(err.message);
+    }
+    await loadAppointmentsDay(state.appointmentsDate);
+  }
+
+  function openAppointmentModal({ appointment = null, start = "", end = "" } = {}) {
+    const isEdit = Boolean(appointment?.id);
+    $("appointment-modal-title").textContent = isEdit ? "Editar cita" : "Nueva cita";
+    $("appointment-id").value = appointment?.id || "";
+    if (appointment?.starts_at) {
+      $("appointment-date").value = formatDateISO(new Date(appointment.starts_at));
+    } else {
+      $("appointment-date").value = state.appointmentsDate || formatDateISO(new Date());
+    }
+    $("appointment-start").value = start || isoToTimeInput(appointment?.starts_at) || "09:00";
+    $("appointment-end").value = end || isoToTimeInput(appointment?.ends_at) || "10:00";
+    $("appointment-client").value = appointment?.client_name || "";
+    $("appointment-phone").value = appointment?.client_phone || "";
+    $("appointment-notes").value = appointment?.notes || "";
+    state.appointmentModalConversationId = appointment?.conversation_id || null;
+
+    $("appointment-delete-btn")?.classList.toggle("hidden", !isEdit);
+    const chatBtn = $("appointment-open-chat-btn");
+    if (chatBtn) {
+      const showChat = Boolean(appointment?.conversation_id);
+      chatBtn.classList.toggle("hidden", !showChat);
+    }
+    $("appointment-form-error")?.classList.add("hidden");
+    $("appointment-modal")?.classList.remove("hidden");
+    $("appointment-client")?.focus();
+  }
+
+  async function saveAppointmentSchedule() {
+    if (!state.canManageGlobal) {
+      setScheduleStatus("Solo el dueño puede cambiar el horario");
+      return;
+    }
+    const btn = $("schedule-save-btn");
+    btn.disabled = true;
+    setScheduleStatus("Guardando…");
+    try {
+      const payload = {
+        open_time: $("schedule-open")?.value || "08:00",
+        close_time: $("schedule-close")?.value || "18:00",
+        slot_minutes: Number($("schedule-slot-minutes")?.value || 60),
+      };
+      await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
+      setScheduleStatus("✓ Horario guardado");
+      await loadAppointmentsDay(state.appointmentsDate);
+    } catch (err) {
+      setScheduleStatus(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function submitAppointmentForm(event) {
+    event.preventDefault();
+    const id = $("appointment-id")?.value?.trim();
+    const payload = {
+      date: $("appointment-date")?.value,
+      start_time: $("appointment-start")?.value,
+      end_time: $("appointment-end")?.value,
+      client_name: $("appointment-client")?.value?.trim(),
+      client_phone: $("appointment-phone")?.value?.trim() || null,
+      notes: $("appointment-notes")?.value?.trim() || null,
+    };
+    const btn = $("appointment-save-btn");
+    btn.disabled = true;
+    $("appointment-form-error")?.classList.add("hidden");
+    try {
+      if (id) {
+        await api(`/appointments/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      } else {
+        await api("/appointments", { method: "POST", body: JSON.stringify(payload) });
+      }
+      hideAppointmentModal();
+      const dayIso = payload.date || state.appointmentsDate;
+      if (dayIso !== state.appointmentsDate) {
+        state.appointmentsDate = dayIso;
+      }
+      await loadAppointmentsDay(state.appointmentsDate);
+      setAppointmentsStatus(id ? "Cita actualizada" : "Cita creada");
+    } catch (err) {
+      showAppointmentFormError(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function deleteCurrentAppointment() {
+    const id = $("appointment-id")?.value?.trim();
+    if (!id || !confirm("¿Eliminar esta cita?")) return;
+    try {
+      await api(`/appointments/${id}`, { method: "DELETE" });
+      hideAppointmentModal();
+      await loadAppointmentsDay(state.appointmentsDate);
+      setAppointmentsStatus("Cita eliminada");
+    } catch (err) {
+      showAppointmentFormError(err.message);
+    }
+  }
+
+  async function openAppointmentChat() {
+    const convId = state.appointmentModalConversationId;
+    if (!convId) return;
+    hideAppointmentModal();
+    switchPanelMode("chats");
+    await selectConversation(convId);
   }
 
   const MAPS_MOCK_PLANS = {
@@ -1201,15 +1661,7 @@
   }
 
   function loadClientsPanel() {
-    resetMapsProspectPanel();
-    api("/outbound/business-profile")
-      .then((profile) => {
-        state.clients.business = profile?.maps_prospect_business || profile?.industry || "";
-        state.clients.city = profile?.maps_prospect_city || "";
-        if ($("maps-business-input")) $("maps-business-input").value = state.clients.business;
-        if ($("maps-city-input")) $("maps-city-input").value = state.clients.city;
-      })
-      .catch(() => {});
+    /* Próximamente — panel estático en index.html */
   }
 
   async function persistMapsProspectFields(business, city) {
@@ -1358,6 +1810,7 @@
       state.aiProfile = profile;
       fillBizForm(profile);
       setBizSaveStatus("✓ Guardado — tu IA ya conoce tu negocio");
+      renderOnboarding();
     } catch (err) {
       setBizSaveStatus(err.message);
     } finally {
@@ -1565,15 +2018,102 @@
   }
 
   function aiBlockReasonForConv(conv) {
-    if (!conv?.ai_active) return "";
+    if (!conv) return "";
     if (state.tenant && !state.tenant.ai_global_enabled) {
-      return "IA global apagada — actívala arriba a la derecha";
+      return "Activa «IA global» arriba a la derecha para que la IA pueda responder.";
     }
-    if (conv.mode === "manual") return "Modo manual activo — la IA no interviene";
+    if (!conv.ai_active) {
+      if (conv.imported_legacy && !conv.bait_sent) {
+        return "Chat personal — activa «IA activa» si quieres que responda en este hilo.";
+      }
+      return "Activa «IA activa» para que responda sola a este contacto.";
+    }
+    if (conv.mode === "manual") return "Modo manual activo — apágalo para que la IA responda";
+    if (state.aiStatus && !state.aiStatus.configured) {
+      return "Falta configurar DeepSeek en el servidor (DEEPSEEK_API_KEY).";
+    }
     if (state.aiStatus && !state.aiStatus.provider_ok && state.aiStatus.provider_error) {
       return state.aiStatus.provider_error;
     }
     return "";
+  }
+
+  async function patchConversationAi(enabled) {
+    if (!state.activeId) {
+      alert("Selecciona un chat primero.");
+      return;
+    }
+    if (!state.canWrite) {
+      alert("Tu usuario no puede editar chats. Pide acceso de agente o dueño.");
+      return;
+    }
+    const input = $("toggle-ai-chat");
+    const prev = !!input?.checked;
+    if (input) input.checked = !!enabled;
+    try {
+      const conv = await api(`/conversations/${state.activeId}/ai`, {
+        method: "PATCH",
+        body: JSON.stringify({ ai_active: !!enabled }),
+      });
+      upsertConversation(conv);
+      if (conv.id === state.activeId) syncChatToggles(conv);
+      if (enabled && conv.ai_active && conv.mode !== "manual") {
+        try {
+          await api(`/conversations/${state.activeId}/ai/trigger`, { method: "POST" }, 20000);
+        } catch (triggerErr) {
+          const msg = String(triggerErr.message || "");
+          if (!/pendiente|manual|global|desactivada/i.test(msg)) {
+            console.warn("IA trigger:", msg);
+          }
+        }
+      }
+    } catch (err) {
+      if (input) input.checked = prev;
+      alert(err.message || "No se pudo cambiar la IA en este chat");
+    }
+  }
+
+  async function syncDeepSeekFromHealth() {
+    try {
+      const res = await fetch("/health/deepseek", { credentials: "include" });
+      if (!res.ok) return null;
+      const data = await res.json();
+      console.info("[Omitel] DeepSeek health:", data);
+      if (data.ok) {
+        state.aiStatus = {
+          ...(state.aiStatus || {}),
+          configured: true,
+          provider_ok: true,
+          provider_error: null,
+        };
+        renderAiAlerts();
+        if (state.activeId) {
+          const conv = state.conversations.find((c) => c.id === state.activeId);
+          if (conv) syncChatToggles(conv);
+        }
+      }
+      return data;
+    } catch (err) {
+      console.warn("[Omitel] DeepSeek health ping failed:", err);
+      return null;
+    }
+  }
+
+  async function refreshAiStatus() {
+    try {
+      const fresh = await api("/ai/status", {}, 15000);
+      if (!fresh) return;
+      state.aiStatus = fresh;
+      if (fresh.provider_ok) state.aiStatus.provider_error = null;
+      console.info("[Omitel] AI status:", fresh);
+      renderAiAlerts();
+      if (state.activeId) {
+        const conv = state.conversations.find((c) => c.id === state.activeId);
+        if (conv) syncChatToggles(conv);
+      }
+    } catch (_) {
+      /* panel sin sesión o backend caído */
+    }
   }
 
   function renderAiAlerts() {
@@ -1585,36 +2125,24 @@
     if (state.aiStatus && state.aiStatus.configured && !state.aiStatus.provider_ok && state.aiStatus.provider_error) {
       parts.push(state.aiStatus.provider_error);
     }
-    if (
-      state.aiStatus?.ai_mode === "classify_only"
-      && state.aiStatus?.daily_classifications_unlimited
-      && state.aiStatus?.provider_ok
-    ) {
-      /* Sin banner — clasificación ilimitada en plan pagado */
-    } else if (state.aiStatus?.daily_replies_unlimited && state.aiStatus?.provider_ok) {
-      /* Premium — respuestas IA ilimitadas */
-    } else {
-      const aiLeft = state.aiStatus?.daily_classifications_remaining ?? state.aiStatus?.daily_replies_remaining;
-      if (typeof aiLeft === "number" && aiLeft <= 50) {
-        const label = state.aiStatus?.ai_mode === "classify_only" ? "clasificaciones" : "respuestas IA";
-        parts.push(`Te quedan ${aiLeft} ${label} hoy — activa tu plan para IA ilimitada.`);
-      }
-    }
     if (!parts.length) {
       banner.classList.add("hidden");
       banner.textContent = "";
+      renderPlanStatus();
       return;
     }
     banner.textContent = parts.join(" · ");
     banner.classList.toggle("error", !!(state.aiStatus && !state.aiStatus.provider_ok));
     banner.classList.remove("hidden");
+    renderPlanStatus();
   }
 
   function syncChatToggles(conv) {
     $("toggle-mode-manual").checked = conv.mode === "manual";
     $("toggle-ai-chat").checked = !!conv.ai_active;
-    $("toggle-mode-manual").disabled = !state.canWrite;
-    $("toggle-ai-chat").disabled = !state.canWrite;
+    const canEdit = state.canWrite && state.wa.status === "connected";
+    $("toggle-mode-manual").disabled = !canEdit;
+    $("toggle-ai-chat").disabled = !canEdit;
     syncInterestButtons(conv);
     const canRetry = state.canWrite && conv.ai_active && state.tenant?.ai_global_enabled && conv.mode !== "manual";
     $("ai-retry-btn").classList.toggle("hidden", !canRetry);
@@ -1702,46 +2230,75 @@
   async function loadInitial() {
     conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
     try {
-      const [me, tenant, wa, aiStatus] = await Promise.all([
-        api("/auth/me"),
-        api("/tenants/me"),
-        api("/whatsapp/status", {}, 8000),
-        api("/ai/status", {}, 15000).catch(() => null),
-      ]);
-      await loadQuickShortcuts();
+      const me = state.user || (await api("/auth/me"));
+      applyUserFromMe(me);
 
-      state.user = me;
+      const [tenant, wa, aiStatus, bizProfile, subscription] = await Promise.all([
+        api("/tenants/me").catch(() => null),
+        api("/whatsapp/status", {}, 8000).catch(() => ({
+          status: "disconnected",
+          qr_base64: null,
+          phone_number: null,
+          chatwoot_inbox_url: null,
+        })),
+        api("/ai/status", {}, 15000).catch(() => null),
+        api("/outbound/business-profile").catch(() => null),
+        api("/subscriptions/me").catch(() => null),
+      ]);
+      await loadQuickShortcuts().catch(() => {});
+
       state.tenant = tenant;
       state.aiStatus = aiStatus;
-      state.canWrite = roleAtLeast(me.role, "agent");
-      state.canManageGlobal = me.role === "owner";
-      state.canConnectWa = me.role === "owner";
-      state.canEnqueueOutbound = me.role === "owner";
-      state.canImportLeads = roleAtLeast(me.role, "agent");
+      state.aiProfile = bizProfile;
+      state.subscription = subscription;
+      if (state.aiStatus?.provider_ok) {
+        state.aiStatus.provider_error = null;
+      }
 
-      $("business-name").textContent = tenant.business_name;
-      $("user-label").textContent = `${me.full_name} (${me.role})`;
-      $("toggle-ai-global").checked = tenant.ai_global_enabled;
-      $("toggle-ai-global").disabled = !state.canManageGlobal;
+      if (tenant) {
+        $("business-name").textContent = tenant.business_name;
+        $("toggle-ai-global").checked = tenant.ai_global_enabled;
+      }
 
       applyWaSession(wa);
+      setChatListTab(state.chatListTab);
       if (state.wa.status === "connected" && !state.syncInProgress) {
-        setConversations(await api("/conversations?archived=false", {}, 30000));
+        try {
+          const all = sortConversations(await api("/conversations?archived=false", {}, 30000));
+          recalculateInterestedCount(all);
+          const filtered =
+            state.chatListTab === "all"
+              ? all
+              : all.filter((c) => matchesInterestTab(c, state.chatListTab));
+          setConversations(filtered);
+        } catch {
+          state.conversations = [];
+          recalculateInterestedCount([]);
+        }
       } else {
         state.conversations = [];
+        recalculateInterestedCount([]);
       }
       sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
       messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
 
       renderConversationList();
-      renderWaUi();
       renderAiAlerts();
+      renderOnboarding();
       connectWs();
+      await syncDeepSeekFromHealth().catch(() => {});
+      refreshAiStatus();
+      if (!state.aiStatusPoll) {
+        state.aiStatusPoll = setInterval(() => {
+          if (!state.aiStatus?.provider_ok) refreshAiStatus();
+        }, 20000);
+      }
       startWaHeartbeat();
       if (state.wa.status === "connected") startLivePoll();
     } catch (err) {
       conversationList.innerHTML = `<li class="conversation-item"><span class="error">${escapeHtml(err.message)}</span></li>`;
-      throw err;
+    } finally {
+      renderWaUi();
     }
   }
 
@@ -1806,9 +2363,6 @@
         break;
       case "conversations.cleared":
         prepareForNewDevice();
-        if (state.wa.status === "connected") {
-          triggerAutoSync();
-        }
         break;
       case "message.in":
       case "message.out":
@@ -1832,7 +2386,17 @@
         break;
       case "conversation.updated":
         if (event.conversation) {
+          const prev = state.conversations.find((c) => c.id === event.conversation.id);
+          const wasInterested = prev && getConversationInterest(prev) === "interested";
+          const nowInterested = getConversationInterest(event.conversation) === "interested";
           upsertConversation(event.conversation);
+          if (!wasInterested && nowInterested) {
+            pulseInterestedTab();
+          }
+          api("/conversations?archived=false", {}, 15000)
+            .then((rows) => recalculateInterestedCount(sortConversations(rows)))
+            .catch(() => {});
+          renderOnboarding();
         }
         break;
       case "whatsapp.status":
@@ -1841,9 +2405,6 @@
           qr_base64: event.qr_base64,
           phone_number: event.phone_number,
         });
-        if (event.status !== "connected") {
-          clearConversations();
-        }
         break;
       case "tenant.settings":
         if (state.tenant) {
@@ -1924,17 +2485,28 @@
         break;
       case "ai.error":
         if (event.error) {
-          state.aiStatus = {
-            ...(state.aiStatus || {}),
-            configured: true,
-            provider_ok: false,
-            provider_error: String(event.error).includes("402")
-              ? "Sin saldo en DeepSeek — recarga en platform.deepseek.com"
-              : String(event.error).includes("403")
-                ? "DeepSeek rechazó la conexión (403) — revisa DEEPSEEK_API_KEY en .env"
-                : String(event.error).slice(0, 200),
-          };
-          renderAiAlerts();
+          const errText = String(event.error);
+          const actionable =
+            /402|401|saldo|l[ií]mite|quota|inv[aá]lida|no configurada|whatsapp|enviar/i.test(errText);
+          if (actionable) {
+            state.aiStatus = {
+              ...(state.aiStatus || {}),
+              configured: true,
+              provider_ok: errText.includes("402") || errText.includes("401") ? false : state.aiStatus?.provider_ok,
+              provider_error: errText.includes("402")
+                ? "Sin saldo en DeepSeek — recarga en platform.deepseek.com"
+                : errText.includes("enviar") || errText.includes("WhatsApp")
+                  ? errText.slice(0, 200)
+                  : errText.slice(0, 200),
+            };
+            renderAiAlerts();
+          }
+          const hintEl = $("chat-ai-hint");
+          if (hintEl && state.activeId && event.conversation_id === state.activeId) {
+            hintEl.textContent = errText.slice(0, 220);
+            hintEl.classList.remove("hidden");
+          }
+          refreshAiStatus();
           if (state.activeId) {
             const conv = state.conversations.find((c) => c.id === state.activeId);
             if (conv) syncChatToggles(conv);
@@ -1948,14 +2520,43 @@
 
   function showLoginStep(step) {
     loginStepEmail?.classList.toggle("hidden", step !== "email");
-    loginStepPassword?.classList.toggle("hidden", step !== "password");
     loginStepRegister?.classList.toggle("hidden", step !== "register");
-    [loginError, $("login-error-password"), $("login-error-register")].forEach((el) => {
+    loginStepSent?.classList.toggle("hidden", step !== "sent");
+    [loginError, $("login-error-register")].forEach((el) => {
       if (el) {
         el.textContent = "";
         el.classList.add("hidden");
       }
     });
+  }
+
+  function showMagicLinkSent(email, message, devLink) {
+    $("login-sent-email").textContent = email;
+    $("login-sent-message").textContent = message || "Te enviamos un enlace seguro a tu correo.";
+    const devWrap = $("login-dev-link-wrap");
+    const devAnchor = $("login-dev-link");
+    if (devLink && devWrap && devAnchor) {
+      devAnchor.href = devLink;
+      devWrap.classList.remove("hidden");
+    } else {
+      devWrap?.classList.add("hidden");
+    }
+    showLoginStep("sent");
+  }
+
+  async function requestMagicLink({ email, business_name, owner_name }) {
+    const body = { email };
+    if (business_name) body.business_name = business_name;
+    if (owner_name) body.owner_name = owner_name;
+    const res = await fetch(`${API}/auth/magic-link`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "No pudimos enviar el enlace");
+    return data;
   }
 
   function setLoginError(el, message) {
@@ -1964,16 +2565,26 @@
     el.classList.remove("hidden");
   }
 
-  async function lookupLoginEmail(email) {
-    const res = await fetch(`${API}/auth/lookup-email`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
+  async function sendLoginMagicLink(withSignup = false) {
+    const business_name = withSignup ? ($("register-business")?.value || "").trim() : "";
+    const owner_name = withSignup ? ($("register-owner")?.value || "").trim() : "";
+    if (withSignup && (!business_name || !owner_name)) {
+      setLoginError($("login-error-register"), "Completa el nombre del negocio y tu nombre");
+      return;
+    }
+    const data = await requestMagicLink({
+      email: loginEmail,
+      ...(withSignup ? { business_name, owner_name } : {}),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "No pudimos verificar el correo");
-    return data;
+    if (data.needs_signup) {
+      $("register-email-display").textContent = loginEmail;
+      showLoginStep("register");
+      $("register-business")?.focus();
+      return;
+    }
+    if (data.sent) {
+      showMagicLinkSent(loginEmail, data.message, data.dev_link);
+    }
   }
 
   async function completeAuth(data) {
@@ -2059,16 +2670,7 @@
     const btn = $("login-continue-btn");
     btn.disabled = true;
     try {
-      const data = await lookupLoginEmail(loginEmail);
-      if (data.exists) {
-        $("login-email-display").textContent = loginEmail;
-        showLoginStep("password");
-        $("login-password")?.focus();
-      } else {
-        $("register-email-display").textContent = loginEmail;
-        showLoginStep("register");
-        $("register-business")?.focus();
-      }
+      await sendLoginMagicLink(false);
     } catch (err) {
       setLoginError(loginError, err.message);
     } finally {
@@ -2076,39 +2678,23 @@
     }
   });
 
-  $("login-back-btn")?.addEventListener("click", () => {
-    $("login-password").value = "";
-    showLoginStep("email");
-  });
-
   $("register-back-btn")?.addEventListener("click", () => {
     $("register-business").value = "";
     $("register-owner").value = "";
-    $("register-password").value = "";
     showLoginStep("email");
   });
 
+  $("login-sent-back-btn")?.addEventListener("click", () => {
+    $("login-dev-link-wrap")?.classList.add("hidden");
+    resetLoginForm();
+  });
+
   $("register-submit-btn")?.addEventListener("click", async () => {
-    const business_name = ($("register-business")?.value || "").trim();
-    const owner_name = ($("register-owner")?.value || "").trim();
-    const password = $("register-password")?.value || "";
     const errEl = $("login-error-register");
-    if (!business_name || !owner_name || password.length < 8) {
-      setLoginError(errEl, "Completa todos los campos (contraseña mín. 8 caracteres)");
-      return;
-    }
     const btn = $("register-submit-btn");
     btn.disabled = true;
     try {
-      const res = await fetch(`${API}/auth/register`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business_name, owner_name, email: loginEmail, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "No pudimos crear la cuenta");
-      await completeAuth(data);
+      await sendLoginMagicLink(true);
     } catch (err) {
       setLoginError(errEl, err.message);
     } finally {
@@ -2116,34 +2702,22 @@
     }
   });
 
-  loginForm.addEventListener("submit", async (e) => {
+  loginForm?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!loginStepEmail?.classList.contains("hidden")) {
       $("login-continue-btn")?.click();
-      return;
-    }
-    if (loginStepPassword?.classList.contains("hidden")) return;
-
-    const password = $("login-password")?.value || "";
-    const errEl = $("login-error-password");
-    try {
-      const res = await fetch(`${API}/auth/login`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Login fallido");
-      await completeAuth(data);
-    } catch (err) {
-      setLoginError(errEl, err.message);
     }
   });
 
   $("logout-btn").addEventListener("click", logout);
-  $("wa-connect-btn").addEventListener("click", connectWhatsApp);
-  $("wa-setup-btn").addEventListener("click", connectWhatsApp);
+  $("wa-connect-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    connectWhatsApp();
+  });
+  $("wa-setup-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    connectWhatsApp();
+  });
   $("wa-disconnect-btn").addEventListener("click", async () => {
     if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel.")) return;
     try {
@@ -2404,10 +2978,27 @@
 
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
   $("mode-clients").addEventListener("click", () => switchPanelMode("clients"));
+  $("mode-appointments").addEventListener("click", () => switchPanelMode("appointments"));
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
+  $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
+  $("appointments-prev-day")?.addEventListener("click", () => {
+    loadAppointmentsDay(shiftDateISO(state.appointmentsDate, -1));
+  });
+  $("appointments-next-day")?.addEventListener("click", () => {
+    loadAppointmentsDay(shiftDateISO(state.appointmentsDate, 1));
+  });
+  $("appointments-today-btn")?.addEventListener("click", () => {
+    loadAppointmentsDay(formatDateISO(new Date()));
+  });
+  $("appointments-add-btn")?.addEventListener("click", () => openAppointmentModal());
+  $("appointment-form")?.addEventListener("submit", submitAppointmentForm);
+  $("appointment-delete-btn")?.addEventListener("click", () => deleteCurrentAppointment());
+  $("appointment-open-chat-btn")?.addEventListener("click", () => openAppointmentChat());
+  $("appointment-modal-close")?.addEventListener("click", hideAppointmentModal);
+  $("appointment-modal-backdrop")?.addEventListener("click", hideAppointmentModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
-  $("maps-search-btn").addEventListener("click", () => runMapsProspectMock());
+  $("maps-search-btn")?.addEventListener("click", () => runMapsProspectMock());
   $("maps-reset-btn").addEventListener("click", () => resetMapsProspectPanel());
   $("maps-download-btn").addEventListener("click", () => {
     if (!state.clients.leads?.length) return;
@@ -2452,7 +3043,6 @@
     const btn = sendForm.querySelector("button");
     btn.disabled = true;
     try {
-      await api("/whatsapp/status", {}, 8000).catch(() => null);
       const msg = await api(`/conversations/${state.activeId}/messages`, {
         method: "POST",
         body: JSON.stringify({ text }),
@@ -2474,7 +3064,10 @@
   });
 
   $("toggle-mode-manual").addEventListener("change", async (e) => {
-    if (!state.activeId || !state.canWrite) return;
+    if (!state.activeId || !state.canWrite || state.wa.status !== "connected") {
+      e.target.checked = !e.target.checked;
+      return;
+    }
     const mode = e.target.checked ? "manual" : "auto";
     try {
       const conv = await api(`/conversations/${state.activeId}/mode`, {
@@ -2493,18 +3086,8 @@
   $("mark-not-interested-btn").addEventListener("click", () => setConversationInterest("not_interested"));
 
   $("toggle-ai-chat").addEventListener("change", async (e) => {
-    if (!state.activeId || !state.canWrite) return;
-    try {
-      const conv = await api(`/conversations/${state.activeId}/ai`, {
-        method: "PATCH",
-        body: JSON.stringify({ ai_active: e.target.checked }),
-      });
-      upsertConversation(conv);
-      if (conv.id === state.activeId) syncChatToggles(conv);
-    } catch (err) {
-      alert(err.message);
-      e.target.checked = !e.target.checked;
-    }
+    const enabled = !!e.target.checked;
+    await patchConversationAi(enabled);
   });
 
   $("ai-retry-btn").addEventListener("click", async () => {
@@ -2558,27 +3141,73 @@
     /* ignore */
   }
 
+  if (isDevToolsEnabled()) {
+    document.querySelectorAll(".dev-only").forEach((el) => el.classList.remove("hidden"));
+  }
+
+  showPanel();
   syncThemeToggles(getTheme());
   bindThemeToggle($("theme-toggle"));
   bindThemeToggle($("theme-toggle-login"));
-  loadAuthProviders();
 
-  async function tryRestoreSession() {
-    if (!(await pingBackend(4000))) {
-      setBackendOfflineBanner(true);
-      showLogin();
-      return;
-    }
-    setBackendOfflineBanner(false);
+  // Devuelve { user, status }. status 0 = no se pudo contactar el backend.
+  async function probeSession(timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const me = await api("/auth/me", {}, 4000);
-      state.user = me;
-      showPanel();
-      await loadInitial();
+      const res = await fetch(`${API}/auth/me`, {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) return { user: null, status: res.status };
+      const text = await res.text();
+      return { user: text ? JSON.parse(text) : null, status: 200 };
     } catch {
-      showLogin();
+      clearTimeout(timer);
+      return { user: null, status: 0 };
     }
   }
 
-  tryRestoreSession();
+  async function tryRestoreSession() {
+    let result = await probeSession(5000);
+    // Reintenta si el backend no respondió (reload, red lenta) — sin botar al usuario.
+    for (let i = 0; i < 2 && result.status === 0; i++) {
+      setBackendOfflineBanner(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      result = await probeSession(5000);
+    }
+
+    if (result.status === 401) {
+      redirectToSiteLogin();
+      return;
+    }
+    if (!result.user) {
+      // Backend caído: no tiene sentido mandar al login. Mostramos aviso y reintentamos.
+      setBackendOfflineBanner(true);
+      setTimeout(tryRestoreSession, 3000);
+      return;
+    }
+
+    state.user = result.user;
+    applyUserFromMe(result.user);
+    setBackendOfflineBanner(false);
+    renderWaUi();
+    renderOnboarding();
+    connectWs();
+    try {
+      await loadInitial();
+    } catch (err) {
+      console.error(err);
+      renderWaUi();
+    }
+  }
+
+  tryRestoreSession().catch((err) => console.error(err));
+
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && !state.user) {
+      tryRestoreSession().catch((err) => console.error(err));
+    }
+  });
 })();

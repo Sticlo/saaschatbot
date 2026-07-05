@@ -12,6 +12,7 @@ from app.application.ai.ai_classifier_service import classify_inbound_message
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
 from app.application.ai.ai_qualify_service import detect_purchase_intent, handoff_reply
+from app.application.ai.ai_shortcut_service import send_reply_with_shortcut
 from app.application.ai.ai_usage_service import (
     check_daily_classify_quota,
     check_daily_reply_quota,
@@ -21,6 +22,7 @@ from app.application.ai.ai_usage_service import (
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 from app.application.messaging.message_service import _detect_media_type_from_body
 from app.application.outbound.outbound_dedup_service import mark_phone_excluded
+from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
 from app.application.whatsapp.whatsapp_service import send_text_message
 from app.config import settings
@@ -133,6 +135,7 @@ def maybe_schedule_ai_for_conversation(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         message_id=latest_in.id,
+        db=db,
     )
     return True
 
@@ -203,6 +206,43 @@ def _publish_quota_error(tenant: Tenant, conversation_id: uuid.UUID, err: str) -
             "error": err,
         },
     )
+
+
+def _publish_ai_send_error(
+    tenant: Tenant, conversation_id: uuid.UUID, err: str
+) -> None:
+    publish_panel_event(
+        tenant.id,
+        {
+            "type": "ai.error",
+            "conversation_id": str(conversation_id),
+            "error": err[:300],
+        },
+    )
+
+
+def _publish_ai_error_if_actionable(
+    tenant: Tenant, conversation_id: uuid.UUID, err: str
+) -> None:
+    """Solo alerta en panel si el usuario debe actuar (cuota, key, saldo)."""
+    text = (err or "").lower()
+    actionable = any(
+        k in text
+        for k in (
+            "límite",
+            "limite",
+            "quota",
+            "saldo",
+            "402",
+            "401",
+            "inválida",
+            "invalida",
+            "no configurada",
+            "deepseek_api_key",
+        )
+    )
+    if actionable:
+        _publish_quota_error(tenant, conversation_id, err[:300])
 
 
 def _run_classification(
@@ -290,6 +330,7 @@ def _handoff_to_human(
     conversation: Conversation,
     session: WhatsAppSession,
 ) -> bool:
+    """Clasifica como interesado y avisa que un humano cierra — sin agendar ni vender."""
     conversation.interest_status = ConversationInterest.INTERESTED.value
     conversation.mode = ConversationMode.MANUAL.value
     publish_conversation_updated(tenant.id, conversation)
@@ -325,7 +366,7 @@ def _process_qualify(
     session: WhatsAppSession,
     profile: Optional[TenantProfile],
 ) -> bool:
-    """Saluda, responde dudas y pasa a humano cuando hay intención de reserva/compra."""
+    """Saluda, responde dudas y clasifica interés — el humano cierra la venta."""
     classification = _run_classification(
         db, tenant=tenant, conversation=conversation, message=message, profile=profile
     )
@@ -389,41 +430,58 @@ def _process_qualify(
     history = _load_history(db, conversation.id)
     inbound_count = sum(1 for m in history if m.direction == MessageDirection.IN.value)
     is_first_contact = inbound_count <= 1
+    shortcuts = get_shortcuts(db, tenant.id)
 
     reply = FALLBACK_REPLY
+    generated_reply = None
     used_fallback = False
     try:
-        generated = generate_qualify_reply(
+        generated_reply = generate_qualify_reply(
             tenant=tenant,
             profile=profile,
             contact_name=conversation.contact_name,
             history=history,
             is_first_contact=is_first_contact,
+            shortcuts=shortcuts,
         )
-        if generated.strip():
-            reply = generated.strip()
+        if generated_reply.message.strip():
+            reply = generated_reply.message.strip()
             increment_daily_reply_count(tenant.id)
     except DeepSeekError as exc:
         used_fallback = True
         log.warning("IA qualify fallback conv=%s: %s", conversation.id, exc)
-        _publish_quota_error(tenant, conversation.id, str(exc)[:300])
+        _publish_ai_error_if_actionable(tenant, conversation.id, str(exc)[:300])
 
     if not reply.strip():
         return True
 
     try:
-        send_text_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            text=reply.strip(),
-            source=MessageSource.BOT.value,
-        )
+        if generated_reply is not None and not used_fallback:
+            send_reply_with_shortcut(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                reply=generated_reply,
+            )
+        else:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=reply.strip(),
+                source=MessageSource.BOT.value,
+            )
         if used_fallback:
             log.info("IA qualify respondió con fallback conv=%s", conversation.id)
-    except Exception:
+    except Exception as exc:
         log.exception("Error enviando respuesta qualify conv=%s", conversation.id)
+        _publish_ai_send_error(
+            tenant,
+            conversation.id,
+            f"No se pudo enviar la respuesta por WhatsApp: {exc}"[:300],
+        )
         return False
 
     return True
@@ -488,39 +546,56 @@ def _process_full_reply(
         return True
 
     history = _load_history(db, conversation.id)
+    shortcuts = get_shortcuts(db, tenant.id)
     reply = FALLBACK_REPLY
+    generated_reply = None
     used_fallback = False
     try:
-        generated = generate_reply(
+        generated_reply = generate_reply(
             tenant=tenant,
             profile=profile,
             contact_name=conversation.contact_name,
             history=history,
+            shortcuts=shortcuts,
         )
-        if generated.strip():
-            reply = generated.strip()
+        if generated_reply.message.strip():
+            reply = generated_reply.message.strip()
             increment_daily_reply_count(tenant.id)
     except DeepSeekError as exc:
         used_fallback = True
         log.warning("IA fallback conv=%s: %s", conversation.id, exc)
-        _publish_quota_error(tenant, conversation.id, str(exc)[:300])
+        _publish_ai_error_if_actionable(tenant, conversation.id, str(exc)[:300])
 
     if not reply.strip():
         return True
 
     try:
-        send_text_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            text=reply.strip(),
-            source=MessageSource.BOT.value,
-        )
+        if generated_reply is not None and not used_fallback:
+            send_reply_with_shortcut(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                reply=generated_reply,
+            )
+        else:
+            send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=reply.strip(),
+                source=MessageSource.BOT.value,
+            )
         if used_fallback:
             log.info("IA respondió con fallback conv=%s", conversation.id)
-    except Exception:
+    except Exception as exc:
         log.exception("Error enviando respuesta IA conv=%s", conversation.id)
+        _publish_ai_send_error(
+            tenant,
+            conversation.id,
+            f"No se pudo enviar la respuesta por WhatsApp: {exc}"[:300],
+        )
         return False
 
     return True

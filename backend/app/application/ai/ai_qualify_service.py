@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from app.application.ai.ai_shortcut_service import append_shortcuts_instructions
 from app.application.billing.tenant_profile_service import answers_from_profile
 from app.domain.entities import Tenant, TenantProfile
 
@@ -12,7 +13,7 @@ Tu trabajo:
 1. Saludar y dar la bienvenida cuando es el inicio de la conversación.
 2. Responder preguntas al comienzo (precios, horarios, qué ofrecen, cómo funciona).
 3. Acompañar con paciencia hasta que el cliente muestre interés en reservar, comprar o contratar.
-4. NO cerrar la venta tú solo — cuando quieran reservar/comprar, indica que alguien del equipo los atiende enseguida.
+4. NO cierres la venta tú — no agendes, no confirmes citas ni pidas datos de pago. Cuando quieran reservar/comprar, di que alguien del equipo los atiende enseguida.
 
 No inventes precios, plazos ni promesas. Si no sabes algo, dilo y ofrece que el equipo confirme.
 {context_block}
@@ -79,12 +80,13 @@ def build_qualify_system_prompt(
     profile: Optional[TenantProfile],
     *,
     is_first_contact: bool = False,
+    shortcuts: list[dict] | None = None,
 ) -> str:
     if profile and profile.ai_system_prompt and profile.ai_system_prompt.strip():
         base = profile.ai_system_prompt.strip()
         base += (
-            "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y cuando quieran "
-            "reservar/comprar indica que alguien del equipo los atiende."
+            "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y NO cierres la venta. "
+            "Cuando quieran reservar/comprar, indica que alguien del equipo los atiende."
         )
     else:
         answers = answers_from_profile(profile) if profile else {}
@@ -112,7 +114,7 @@ def build_qualify_system_prompt(
 
     if is_first_contact:
         base += "\n\nEs el primer mensaje del contacto — incluye un saludo breve de bienvenida."
-    return base
+    return append_shortcuts_instructions(base, shortcuts or [])
 
 
 def handoff_reply(business_name: str) -> str:

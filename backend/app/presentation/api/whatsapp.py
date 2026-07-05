@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.shared.core.deps import RequireAgent, RequireOwner
+from app.shared.core.deps import RequireAgent, RequireOwner, RequireViewer
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, WhatsAppSession
 from app.domain.entities.enums import WhatsAppStatus
@@ -80,7 +80,7 @@ def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
 @router.post("/connect", response_model=WhatsAppConnectResponse)
 def connect_whatsapp(
     request: Request,
-    current: RequireOwner,
+    current: RequireViewer,
     db: Session = Depends(get_db),
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
@@ -121,7 +121,7 @@ def connect_whatsapp(
 @router.post("/reconnect", response_model=WhatsAppConnectResponse)
 def reconnect_whatsapp(
     request: Request,
-    current: RequireOwner,
+    current: RequireViewer,
     db: Session = Depends(get_db),
 ):
     """Regenera QR cuando la sesión cayó (desconectado, restringido o baneado)."""
@@ -154,7 +154,7 @@ def reconnect_whatsapp(
 
 
 @router.get("/status", response_model=WhatsAppStatusResponse)
-def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
+def whatsapp_status(current: RequireViewer, db: Session = Depends(get_db)):
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
@@ -198,8 +198,14 @@ def whatsapp_status(current: RequireAgent, db: Session = Depends(get_db)):
             )
             .count()
         )
+        from app.config import settings
+
         boot_key = f"tenant:{tenant.id}:auto_sync:{session.active_connection_id}"
-        if conv_count == 0 and get_redis().set(boot_key, "1", nx=True, ex=600):
+        if (
+            settings.whatsapp_import_history_on_connect
+            and conv_count == 0
+            and get_redis().set(boot_key, "1", nx=True, ex=600)
+        ):
             ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:

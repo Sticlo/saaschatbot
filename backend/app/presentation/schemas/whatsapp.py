@@ -47,6 +47,7 @@ class ConversationResponse(BaseModel):
     mode: str
     ai_active: bool
     bait_sent: bool
+    imported_legacy: bool = False
     status: str
     interest_status: Optional[str] = None
     is_archived: bool = False
@@ -165,3 +166,4 @@ class ConversationLiveSyncResponse(BaseModel):
     message_count: int
     conversation_id: uuid.UUID
     messages: list[MessageResponse]
+    conversation: Optional[ConversationResponse] = None

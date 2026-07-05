@@ -12,7 +12,9 @@ from app.config import settings
 from app.shared.core.phone import (
     evolution_send_target,
     instance_name_for_tenant,
+    is_lid_derived_phone,
     is_valid_whatsapp_phone,
+    lid_digits_from_jid,
     normalize_phone,
     phone_to_evolution_number,
 )
@@ -40,6 +42,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     gateway_request,
     instance_exists as gateway_instance_exists,
     logout_instance as gateway_logout_instance,
+    restart_instance as gateway_restart_instance,
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
     send_image as gateway_send_image,
@@ -50,6 +53,93 @@ from app.application.whatsapp.whatsapp_status import apply_session_status, can_s
 
 # Alias para compatibilidad con handlers que capturan EvolutionAPIError
 EvolutionAPIError = WhatsAppGatewayError
+
+
+def _trusted_lid_alt_phone(
+    alt_phone: str,
+    *,
+    lid_jid: str,
+) -> str:
+    phone = (alt_phone or "").strip()
+    if not phone or not is_valid_whatsapp_phone(phone):
+        return ""
+    if is_lid_derived_phone(phone, lid_jid):
+        return ""
+    return normalize_phone(phone)
+
+
+def _resolve_lid_send_recipient(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+) -> tuple[Conversation, str]:
+    """Destino Evolution para chats @lid; solo sustituye por teléfono si es real."""
+    if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
+        if is_lid_derived_phone(conversation.contact_phone, conversation.contact_jid):
+            lid_digits = lid_digits_from_jid(conversation.contact_jid)
+            if lid_digits:
+                conversation.contact_phone = f"lid:{lid_digits}"
+                db.flush()
+
+    recipient = evolution_send_target(conversation)
+    if uses_waha() or not conversation.contact_jid or not conversation.contact_jid.endswith("@lid"):
+        return conversation, recipient
+
+    from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
+
+    alt_phone = fetch_lid_alt_phone(
+        settings.evolution_database_url,
+        session.instance_name,
+        conversation.contact_jid,
+    )
+    if not alt_phone and session.active_connection_id:
+        from app.application.conversations.contact_resolver_service import _load_link_maps
+
+        _lid_map, _ = _load_link_maps(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=session.active_connection_id,
+        )
+        alt_phone = _lid_map.get(conversation.contact_jid) or ""
+
+    trusted = _trusted_lid_alt_phone(alt_phone, lid_jid=conversation.contact_jid)
+    if not trusted:
+        return conversation, recipient
+
+    from app.application.sync.contact_identity_service import apply_identity_to_conversation
+    from app.application.conversations.contact_resolver_service import (
+        record_contact_link,
+        repair_duplicates_for_contact,
+    )
+
+    record_contact_link(
+        db,
+        tenant_id=tenant.id,
+        whatsapp_connection_id=session.active_connection_id,
+        lid_jid=conversation.contact_jid,
+        phone_e164=trusted,
+        verified=True,
+    )
+    apply_identity_to_conversation(
+        conversation,
+        contact_phone=trusted,
+        contact_name=conversation.contact_name,
+        contact_jid=conversation.contact_jid,
+    )
+    if session.active_connection_id:
+        canonical = repair_duplicates_for_contact(
+            db,
+            tenant_id=tenant.id,
+            whatsapp_connection_id=session.active_connection_id,
+            phone=trusted,
+            lid_jid=conversation.contact_jid,
+            instance_name=session.instance_name,
+        )
+        if canonical is not None and canonical.id != conversation.id:
+            conversation = canonical
+    return conversation, phone_to_evolution_number(trusted)
 
 log = logging.getLogger(__name__)
 
@@ -162,9 +252,51 @@ def _instance_needs_clean_qr(meta: Optional[dict]) -> bool:
         return True
     if meta.get("disconnectionReasonCode") in (401, 403, 428):
         return True
+    disc = str(meta.get("disconnectionObject") or "")
+    if "device_removed" in disc or '"conflict"' in disc:
+        return True
     if status == "connecting" and meta.get("ownerJid"):
         return True
     return False
+
+
+def _reset_gateway_instance_credentials(
+    session: WhatsAppSession,
+    *,
+    webhook_url: str,
+    webhook_secret: str,
+) -> None:
+    """Borra credenciales atascadas. Logout falla si Evolution está en 'connecting'."""
+    name = session.instance_name
+
+    try:
+        gateway_logout_instance(name)
+    except WhatsAppGatewayError as exc:
+        log.info("logout %s omitido (%s) — se recreará instancia", name, exc)
+
+    try:
+        gateway_delete_instance(name)
+    except WhatsAppGatewayError as exc:
+        if exc.status_code != 404:
+            log.warning("delete %s: %s", name, exc)
+
+    if settings.evolution_database_url and not uses_waha():
+        from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
+        purge_instance_stored_data(settings.evolution_database_url, name)
+
+    try:
+        gateway_create_instance(name, webhook_url, webhook_secret)
+        log.info("Instancia %s recreada para QR limpio", name)
+    except WhatsAppGatewayError as exc:
+        if exc.status_code in (400, 403, 409) and gateway_instance_exists(name):
+            try:
+                gateway_restart_instance(name)
+                log.info("Instancia %s reiniciada tras recreate fallido", name)
+            except WhatsAppGatewayError as restart_exc:
+                log.warning("restart %s: %s", name, restart_exc)
+        elif exc.status_code not in (400, 403, 409):
+            raise
 
 
 def _prepare_instance_for_new_qr(
@@ -173,51 +305,40 @@ def _prepare_instance_for_new_qr(
     *,
     webhook_url: str,
     webhook_secret: str,
+    force: bool = False,
 ) -> None:
     """Logout/borrado en Evolution para vincular otro celular sin error en el QR."""
-    from app.config import settings
-    from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-
     meta = None
     try:
         meta = gateway_fetch_instance(session.instance_name)
     except WhatsAppGatewayError:
         pass
 
-    if not _instance_needs_clean_qr(meta):
+    if not force and not _instance_needs_clean_qr(meta):
         return
 
     log.info(
-        "Limpiando sesión WhatsApp instancia=%s (vincular celular nuevo)",
+        "Limpiando sesión WhatsApp instancia=%s (vincular celular nuevo, force=%s)",
         session.instance_name,
+        force,
     )
-    try:
-        gateway_logout_instance(session.instance_name)
-    except WhatsAppGatewayError as exc:
-        log.warning("logout antes de QR %s: %s", session.instance_name, exc)
 
-    try:
-        meta_after = gateway_fetch_instance(session.instance_name)
-    except WhatsAppGatewayError:
-        meta_after = None
-
-    if _instance_needs_clean_qr(meta_after):
+    if uses_waha():
+        try:
+            gateway_logout_instance(session.instance_name)
+        except WhatsAppGatewayError:
+            pass
         try:
             gateway_delete_instance(session.instance_name)
-            if settings.evolution_database_url and not uses_waha():
-                from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-
-                purge_instance_stored_data(
-                    settings.evolution_database_url, session.instance_name
-                )
-            gateway_create_instance(
-                session.instance_name,
-                webhook_url,
-                webhook_secret,
-            )
-            log.info("Instancia %s recreada para QR limpio", session.instance_name)
+            gateway_create_instance(session.instance_name, webhook_url, webhook_secret)
         except WhatsAppGatewayError as exc:
-            log.warning("delete/recreate %s: %s", session.instance_name, exc)
+            log.warning("waha reset %s: %s", session.instance_name, exc)
+    else:
+        _reset_gateway_instance_credentials(
+            session,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+        )
 
     session.phone_number = None
     session.bound_owner_jid = None
@@ -238,6 +359,13 @@ def reconnect_session(db: Session, tenant: Tenant) -> WhatsAppSession:
 
 def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
     session = get_or_create_session(db, tenant)
+
+    try:
+        refresh_session_status(db, tenant, session)
+    except EvolutionAPIError:
+        pass
+    if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
+        return session
 
     try:
         if not gateway_instance_exists(session.instance_name):
@@ -406,31 +534,6 @@ def refresh_session_status(
         owner_jid=str(owner) if owner else None,
     )
 
-    if (
-        mapped in {
-            WhatsAppStatus.DISCONNECTED.value,
-            WhatsAppStatus.BANNED.value,
-            WhatsAppStatus.RESTRICTED.value,
-        }
-        and previous_status == WhatsAppStatus.CONNECTED.value
-    ):
-        from app.config import settings
-        from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-        from app.application.conversations.whatsapp_conversation_service import (
-            notify_conversations_cleared,
-            purge_all_tenant_whatsapp_conversations,
-        )
-
-        purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
-        if settings.evolution_database_url and not uses_waha():
-            from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-
-            purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
-        session.active_connection_id = None
-        session.connection_started_at = None
-        session.bound_owner_jid = None
-        notify_conversations_cleared(tenant.id)
-
     phone_changed = phone_before != session.phone_number or (
         bound_before != session.bound_owner_jid and session.bound_owner_jid is not None
     )
@@ -505,59 +608,12 @@ def send_text_message(
             "Pide que te escriba de nuevo por WhatsApp."
         )
 
-    recipient = evolution_send_target(conversation)
-    if not uses_waha():
-        from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
-
-        alt_phone = ""
-        if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
-            alt_phone = fetch_lid_alt_phone(
-                settings.evolution_database_url,
-                session.instance_name,
-                conversation.contact_jid,
-            )
-            if not alt_phone and session.active_connection_id:
-                from app.application.conversations.contact_resolver_service import _load_link_maps
-
-                _lid_map, _ = _load_link_maps(
-                    db,
-                    tenant_id=tenant.id,
-                    whatsapp_connection_id=session.active_connection_id,
-                )
-                alt_phone = _lid_map.get(conversation.contact_jid) or ""
-            if alt_phone and is_valid_whatsapp_phone(alt_phone):
-                recipient = phone_to_evolution_number(alt_phone)
-                from app.application.sync.contact_identity_service import apply_identity_to_conversation
-                from app.application.conversations.contact_resolver_service import (
-                    record_contact_link,
-                    repair_duplicates_for_contact,
-                )
-
-                record_contact_link(
-                    db,
-                    tenant_id=tenant.id,
-                    whatsapp_connection_id=session.active_connection_id,
-                    lid_jid=conversation.contact_jid,
-                    phone_e164=normalize_phone(alt_phone),
-                    verified=True,
-                )
-                apply_identity_to_conversation(
-                    conversation,
-                    contact_phone=normalize_phone(alt_phone),
-                    contact_name=conversation.contact_name,
-                    contact_jid=conversation.contact_jid,
-                )
-                if session.active_connection_id:
-                    canonical = repair_duplicates_for_contact(
-                        db,
-                        tenant_id=tenant.id,
-                        whatsapp_connection_id=session.active_connection_id,
-                        phone=normalize_phone(alt_phone),
-                        lid_jid=conversation.contact_jid,
-                        instance_name=session.instance_name,
-                    )
-                    if canonical is not None and canonical.id != conversation.id:
-                        conversation = canonical
+    conversation, recipient = _resolve_lid_send_recipient(
+        db,
+        tenant=tenant,
+        session=session,
+        conversation=conversation,
+    )
 
     result = gateway_send_text(session.instance_name, recipient, text)
 
@@ -652,62 +708,12 @@ def _prepare_outbound_recipient(
             "Pide que te escriba de nuevo por WhatsApp."
         )
 
-    recipient = evolution_send_target(conversation)
-    if uses_waha():
-        return conversation, recipient
-
-    from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
-
-    alt_phone = ""
-    if conversation.contact_jid and conversation.contact_jid.endswith("@lid"):
-        alt_phone = fetch_lid_alt_phone(
-            settings.evolution_database_url,
-            session.instance_name,
-            conversation.contact_jid,
-        )
-        if not alt_phone and session.active_connection_id:
-            from app.application.conversations.contact_resolver_service import _load_link_maps
-
-            _lid_map, _ = _load_link_maps(
-                db,
-                tenant_id=tenant.id,
-                whatsapp_connection_id=session.active_connection_id,
-            )
-            alt_phone = _lid_map.get(conversation.contact_jid) or ""
-        if alt_phone and is_valid_whatsapp_phone(alt_phone):
-            recipient = phone_to_evolution_number(alt_phone)
-            from app.application.sync.contact_identity_service import apply_identity_to_conversation
-            from app.application.conversations.contact_resolver_service import (
-                record_contact_link,
-                repair_duplicates_for_contact,
-            )
-
-            record_contact_link(
-                db,
-                tenant_id=tenant.id,
-                whatsapp_connection_id=session.active_connection_id,
-                lid_jid=conversation.contact_jid,
-                phone_e164=normalize_phone(alt_phone),
-                verified=True,
-            )
-            apply_identity_to_conversation(
-                conversation,
-                contact_phone=normalize_phone(alt_phone),
-                contact_name=conversation.contact_name,
-                contact_jid=conversation.contact_jid,
-            )
-            if session.active_connection_id:
-                canonical = repair_duplicates_for_contact(
-                    db,
-                    tenant_id=tenant.id,
-                    whatsapp_connection_id=session.active_connection_id,
-                    phone=normalize_phone(alt_phone),
-                    lid_jid=conversation.contact_jid,
-                    instance_name=session.instance_name,
-                )
-                if canonical is not None and canonical.id != conversation.id:
-                    conversation = canonical
-    return conversation, recipient
+    return _resolve_lid_send_recipient(
+        db,
+        tenant=tenant,
+        session=session,
+        conversation=conversation,
+    )
 
 
 def _record_outbound_message(

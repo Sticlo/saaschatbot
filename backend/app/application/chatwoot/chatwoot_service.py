@@ -76,6 +76,7 @@ def ensure_chatwoot_integration(
     if uses_waha():
         return _ensure_waha_chatwoot_app(db, tenant=tenant, session=session, existing=existing)
 
+    import_history = settings.whatsapp_import_history_on_connect
     payload = {
         "enabled": True,
         "accountId": settings.chatwoot_account_id,
@@ -87,9 +88,11 @@ def ensure_chatwoot_integration(
         "conversationPending": False,
         "nameInbox": session.instance_name,
         "mergeBrazilContacts": True,
-        "importContacts": True,
-        "importMessages": True,
-        "daysLimitImportMessages": settings.chatwoot_days_limit_import_messages,
+        "importContacts": import_history,
+        "importMessages": import_history,
+        "daysLimitImportMessages": (
+            settings.chatwoot_days_limit_import_messages if import_history else 1
+        ),
         "autoCreate": True,
     }
     try:

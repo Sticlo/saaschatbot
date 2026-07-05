@@ -1,0 +1,218 @@
+<app-shell>
+  <section class="extras-light-zone">
+    <div class="extras-hero">
+      <div class="extras-hero-glow" aria-hidden="true"></div>
+      <div class="container extras-page">
+        <div class="extras-hero-inner">
+          <p class="eyebrow">Más allá del panel</p>
+          <h1>Servicios y productos <span class="text-gradient">Extras</span></h1>
+          <p class="lead">
+            Web, sistemas, SEO, contenido y accesorios para tu negocio.
+            Cotiza rápido por WhatsApp — sin vueltas.
+          </p>
+          <div class="extras-hero-actions">
+            <a [href]="whatsappHref()" class="btn-hero-wa" target="_blank" rel="noopener noreferrer">
+              Cotizar por WhatsApp
+            </a>
+            <a routerLink="/precios" class="btn-hero-ghost">Ver planes Omitel</a>
+          </div>
+          <ul class="extras-stats">
+            <li *ngFor="let stat of heroStats">
+              <strong>{{ stat.value }}</strong>
+              <span>{{ stat.label }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="container extras-page">
+      <div class="section-intro">
+        <h2>Servicios digitales</h2>
+        <p>Proyectos listos para vender más: desde una landing hasta plataformas completas.</p>
+      </div>
+
+      <div class="extras-grid">
+        <article
+          class="extra-card"
+          *ngFor="let service of digitalServices"
+          [class.extra-card--featured]="service.featured"
+          [style.--card-accent]="service.accent"
+          [style.--card-accent-soft]="service.accentSoft"
+        >
+          <figure class="extra-card-visual" [class.extra-card-visual--placeholder]="!imageReady(service.image)">
+            <img
+              [src]="service.image"
+              [alt]="service.title"
+              loading="lazy"
+              (error)="onImageError(service.image)"
+            />
+            <div class="extra-card-visual-fallback" aria-hidden="true">
+              <span class="extra-card-visual-tag">{{ service.shortLabel }}</span>
+            </div>
+            <span class="extra-card-badge" *ngIf="service.featured">Más completo</span>
+          </figure>
+
+          <div class="extra-card-body">
+            <h3>{{ service.title }}</h3>
+            <p class="extra-desc">{{ service.description }}</p>
+
+            <div class="extra-price-chip">
+              <span class="extra-price-tag" *ngIf="service.tag">{{ service.tag }}</span>
+              <span class="extra-price">{{ service.price }}</span>
+              <span class="extra-period" *ngIf="service.period">{{ service.period }}</span>
+            </div>
+
+            <ul class="extra-highlights">
+              <li *ngFor="let item of service.highlights">
+                <span class="check" aria-hidden="true"></span>
+                {{ item }}
+              </li>
+            </ul>
+
+            <a
+              [href]="whatsappHref(service.title)"
+              class="extra-card-cta"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Cotizar este servicio
+            </a>
+          </div>
+        </article>
+      </div>
+
+      <section class="accessories-section">
+        <div class="accessories-head">
+          <div>
+            <p class="eyebrow">Tienda</p>
+            <h2>Accesorios y periféricos</h2>
+            <p class="lead lead--left">
+              Cargadores, audífonos, diademas, mouse, teclados y más.
+              Cotiza según modelo y cantidad.
+            </p>
+          </div>
+          <a [href]="whatsappHref('Accesorios y periféricos')" class="accessories-head-cta" target="_blank" rel="noopener noreferrer">
+            Pedir catálogo
+          </a>
+        </div>
+
+        <div class="accessories-grid">
+          <article class="accessory-card" *ngFor="let cat of accessoryCategories">
+            <button
+              type="button"
+              class="accessory-visual"
+              [class.accessory-visual--placeholder]="!accessoryImageReady(cat)"
+              [class.accessory-visual--multi]="accessoryImages(cat).length > 1"
+              [disabled]="!accessoryImageReady(cat)"
+              (click)="openGallery(cat)"
+              [attr.aria-label]="
+                accessoryImages(cat).length > 1
+                  ? 'Ver fotos de ' + cat.title
+                  : 'Ver foto de ' + cat.title
+              "
+            >
+              <img
+                [src]="accessoryPreview(cat)"
+                [alt]="cat.title"
+                loading="lazy"
+                (error)="onImageError(accessoryPreview(cat))"
+              />
+              <span class="accessory-photo-badge" *ngIf="accessoryImages(cat).length > 1">
+                {{ accessoryImages(cat).length }} fotos · tocar para ver
+              </span>
+              <div class="accessory-visual-fallback" aria-hidden="true"></div>
+            </button>
+            <div class="accessory-body">
+              <h3>{{ cat.title }}</h3>
+              <ul>
+                <li *ngFor="let item of cat.items">{{ item }}</li>
+              </ul>
+              <a
+                [href]="whatsappHref(cat.title)"
+                class="accessory-cta"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Cotizar
+              </a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <article class="extras-cta-card">
+        <div class="extras-cta-glow" aria-hidden="true"></div>
+        <div class="extras-cta-content">
+          <h2>¿Listo para empezar?</h2>
+          <p>
+            Escríbenos por WhatsApp y te armamos la propuesta con alcance, tiempos y precio final.
+          </p>
+          <div class="extras-cta-actions">
+            <a [href]="whatsappHref()" class="btn-extras-primary" target="_blank" rel="noopener noreferrer">
+              WhatsApp {{ whatsappDisplay }}
+            </a>
+            <a routerLink="/registro" class="btn-extras-ghost">Crear cuenta Omitel</a>
+          </div>
+        </div>
+      </article>
+
+      <p class="extras-note muted">
+        Precios en pesos colombianos (COP). Los valores «desde» pueden variar según alcance del proyecto.
+      </p>
+    </div>
+  </section>
+
+  <div
+    class="accessory-gallery"
+    *ngIf="galleryOpen"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'Galería ' + galleryTitle"
+    (click)="closeGallery()"
+  >
+    <div class="accessory-gallery-panel" (click)="$event.stopPropagation()">
+      <button type="button" class="accessory-gallery-close" (click)="closeGallery()" aria-label="Cerrar">
+        ×
+      </button>
+      <p class="accessory-gallery-title">{{ galleryTitle }}</p>
+      <div
+        class="accessory-gallery-stage"
+        (touchstart)="onGalleryTouchStart($event)"
+        (touchend)="onGalleryTouchEnd($event)"
+      >
+        <button
+          type="button"
+          class="accessory-gallery-nav accessory-gallery-nav--prev"
+          *ngIf="galleryImages.length > 1"
+          (click)="prevGallery()"
+          aria-label="Foto anterior"
+        >
+          ‹
+        </button>
+        <img [src]="galleryImages[galleryIndex]" [alt]="galleryTitle + ' ' + (galleryIndex + 1)" />
+        <button
+          type="button"
+          class="accessory-gallery-nav accessory-gallery-nav--next"
+          *ngIf="galleryImages.length > 1"
+          (click)="nextGallery()"
+          aria-label="Foto siguiente"
+        >
+          ›
+        </button>
+      </div>
+      <div class="accessory-gallery-dots" *ngIf="galleryImages.length > 1">
+        <button
+          type="button"
+          *ngFor="let _ of galleryImages; let i = index"
+          [class.active]="i === galleryIndex"
+          (click)="galleryIndex = i"
+          [attr.aria-label]="'Foto ' + (i + 1)"
+        ></button>
+      </div>
+      <p class="accessory-gallery-hint" *ngIf="galleryImages.length > 1">
+        {{ galleryIndex + 1 }} / {{ galleryImages.length }} · desliza o usa las flechas
+      </p>
+    </div>
+  </div>
+</app-shell>

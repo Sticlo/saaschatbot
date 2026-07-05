@@ -22,12 +22,10 @@ _provider_cache: dict[str, object] = {"checked_at": 0.0, "ok": False, "error": N
 @router.get("/status")
 def ai_status(current: RequireViewer, db: Session = Depends(get_db)):
     """Estado del proveedor IA (DeepSeek) para el panel."""
-    now = time.time()
-    if now - float(_provider_cache.get("checked_at") or 0) > 300:
-        ok, err = check_provider_health()
-        _provider_cache["checked_at"] = now
-        _provider_cache["ok"] = ok
-        _provider_cache["error"] = err
+    ok, err = check_provider_health()
+    _provider_cache["checked_at"] = time.time()
+    _provider_cache["ok"] = ok
+    _provider_cache["error"] = None if ok else err
 
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     profile = get_or_create_tenant_profile(db, current.tenant_id) if tenant else None

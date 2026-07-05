@@ -13,7 +13,7 @@ from app.presentation.websockets.panel_ws import router as panel_ws_router
 from app.presentation.api.router import api_router
 from app.presentation.api.webhooks import router as webhooks_router
 from app.presentation.api.chatwoot_webhooks import router as chatwoot_webhooks_router
-from app.config import settings
+from app.config import settings, ALLOWED_DEEPSEEK_MODEL
 from app.infrastructure.persistence.database import SessionLocal
 from app.infrastructure.cache.redis_client import get_redis, redis_ping
 from app.application.billing.plan_service import ensure_default_plan
@@ -227,4 +227,26 @@ def health():
         "ai_slots_active": ai_slots_active,
         "ai_max_parallel": settings.ai_max_parallel_jobs,
         "env": settings.app_env,
+    }
+
+
+@app.get("/health/deepseek")
+def health_deepseek():
+    """Diagnóstico público de DeepSeek (sin login). Abre en el navegador para debug."""
+    from app.infrastructure.ai.deepseek_client import check_provider_health, is_configured
+
+    if not is_configured():
+        return {
+            "ok": False,
+            "configured": False,
+            "error": "DEEPSEEK_API_KEY no configurada en .env",
+            "model": ALLOWED_DEEPSEEK_MODEL,
+        }
+    ok, err = check_provider_health()
+    return {
+        "ok": ok,
+        "configured": True,
+        "error": err,
+        "model": ALLOWED_DEEPSEEK_MODEL,
+        "api_base": settings.deepseek_api_base,
     }

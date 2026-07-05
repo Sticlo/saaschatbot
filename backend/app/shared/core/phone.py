@@ -85,6 +85,29 @@ def is_lid_placeholder(phone: str) -> bool:
     return bool(phone) and phone.startswith("lid:")
 
 
+def lid_digits_from_jid(contact_jid: str) -> str:
+    jid = (contact_jid or "").strip()
+    if not jid.endswith("@lid"):
+        return ""
+    return jid.split("@")[0].split(":")[0]
+
+
+def phone_matches_lid_digits(phone: str, contact_jid: str = "") -> bool:
+    """True si el teléfono es solo los dígitos del @lid (no un número WA real)."""
+    lid_digits = lid_digits_from_jid(contact_jid)
+    if not lid_digits:
+        return False
+    phone_digits = re.sub(r"\D", "", phone or "")
+    return bool(phone_digits) and phone_digits == lid_digits
+
+
+def is_lid_derived_phone(phone: str, contact_jid: str = "") -> bool:
+    """Teléfono inferido desde @lid o placeholder lid:… — no usar para sendText por número."""
+    if is_lid_placeholder(phone):
+        return True
+    return phone_matches_lid_digits(phone, contact_jid)
+
+
 def is_placeholder_contact_name(name: str, phone: str) -> bool:
     if not name:
         return True
@@ -243,6 +266,10 @@ def evolution_send_target(conversation) -> str:
     if jid and "@" in jid:
         return jid
     phone = conversation.contact_phone or ""
+    if is_lid_derived_phone(phone, jid):
+        lid_digits = phone[4:] if is_lid_placeholder(phone) else lid_digits_from_jid(jid)
+        if lid_digits:
+            return f"{lid_digits}@lid"
     if phone.startswith("lid:"):
         lid = phone[4:]
         return f"{lid}@lid" if "@" not in lid else lid
@@ -251,7 +278,13 @@ def evolution_send_target(conversation) -> str:
 
 def resolve_contact_phone(remote_jid: str, *, key: Optional[dict] = None) -> str:
     """Resuelve E.164 desde JID de WhatsApp (incluye remoteJidAlt para @lid)."""
-    return pick_trusted_phone(collect_phone_candidates(remote_jid, key=key))
+    candidates = collect_phone_candidates(remote_jid, key=key)
+    if remote_jid.endswith("@lid"):
+        lid_digits = remote_jid.split("@")[0].split(":")[0]
+        candidates = [
+            p for p in candidates if re.sub(r"\D", "", p or "") != lid_digits
+        ]
+    return pick_trusted_phone(candidates)
 
 
 def collect_phone_candidates(remote_jid: str, *, key: Optional[dict] = None) -> list[str]:

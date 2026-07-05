@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from datetime import datetime
@@ -31,13 +32,13 @@ from app.application.realtime.realtime_service import publish_conversation_updat
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_service import (
-    refresh_session_status,
     send_image_message,
     send_text_message,
 )
 from app.application.outbound.quick_shortcut_service import find_shortcut
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+log = logging.getLogger(__name__)
 
 
 def _to_conversation_response(
@@ -425,11 +426,13 @@ def sync_live_conversation(
         session=session,
         conversation=conversation,
     )
+    db.refresh(conversation)
     return ConversationLiveSyncResponse(
         imported=imported,
         message_count=len(messages),
         conversation_id=conversation.id,
         messages=[MessageResponse.model_validate(m) for m in messages],
+        conversation=_conversation_api_response(db, current.tenant_id, conversation),
     )
 
 
@@ -457,13 +460,6 @@ def send_message(
     )
     if tenant is None or session is None or conversation is None:
         raise HTTPException(status_code=404, detail="Conversación o WhatsApp no encontrado")
-
-    try:
-        refresh_session_status(db, tenant, session)
-        db.commit()
-        db.refresh(tenant)
-    except EvolutionAPIError:
-        db.rollback()
 
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
@@ -523,13 +519,6 @@ def send_shortcut_message(
     shortcut = find_shortcut(db, tenant.id, body.shortcut_id)
     if shortcut is None:
         raise HTTPException(status_code=404, detail="Atajo no encontrado")
-
-    try:
-        refresh_session_status(db, tenant, session)
-        db.commit()
-        db.refresh(tenant)
-    except EvolutionAPIError:
-        db.rollback()
 
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
@@ -626,11 +615,16 @@ def update_conversation_ai(
     if body.ai_active:
         from app.application.ai.ai_service import maybe_schedule_ai_for_conversation
 
-        maybe_schedule_ai_for_conversation(
+        scheduled = maybe_schedule_ai_for_conversation(
             db,
             tenant_id=current.tenant_id,
             conversation_id=conversation.id,
         )
+        if not scheduled:
+            log.info(
+                "IA no reprogramada al activar conv=%s (modo manual, sin mensaje entrante o ya respondido)",
+                conversation_id,
+            )
     return _conversation_api_response(db, current.tenant_id, conversation)
 
 

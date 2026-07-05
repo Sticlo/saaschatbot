@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.entities import Conversation, WhatsAppContactLink
 from app.shared.core.phone import (
+    is_lid_derived_phone,
     is_lid_placeholder,
     is_placeholder_contact_name,
     is_untrusted_contact_phone,
@@ -108,6 +109,8 @@ def record_contact_link(
 ) -> None:
     """Persiste o actualiza el puente @lid ↔ teléfono (solo verified=True desde message key)."""
     if not lid_jid.endswith("@lid") or not is_valid_whatsapp_phone(phone_e164):
+        return
+    if is_lid_derived_phone(phone_e164, lid_jid):
         return
     if is_untrusted_contact_phone(phone_e164):
         return
@@ -220,6 +223,8 @@ def _load_link_maps(
     )
     for row in rows:
         if is_untrusted_contact_phone(row.phone_e164):
+            continue
+        if is_lid_derived_phone(row.phone_e164, row.lid_jid):
             continue
         if row.lid_jid not in lid_to_phone:
             lid_to_phone[row.lid_jid] = row.phone_e164

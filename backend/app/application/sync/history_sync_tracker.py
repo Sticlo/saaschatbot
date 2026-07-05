@@ -146,8 +146,12 @@ def finalize_history_sync(tenant_id: uuid.UUID, *, reason: str) -> None:
         pass
 
     try:
+        from app.config import settings
         from app.application.sync.sync_scheduler import schedule_whatsapp_sync
         from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+
+        if not settings.whatsapp_import_history_on_connect:
+            return
 
         if chatwoot_sync_mode():
             schedule_whatsapp_sync(

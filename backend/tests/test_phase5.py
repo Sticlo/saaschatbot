@@ -166,7 +166,7 @@ def test_classify_only_marks_interested_no_reply(_sleep, mock_classify, mock_sen
 
 
 @requires_db
-@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.classify_inbound_message")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
@@ -176,13 +176,14 @@ def test_qualify_replies_without_marking_interested(
     mock_generate,
     mock_send,
 ):
+    from app.application.ai.ai_shortcut_service import AiGeneratedReply
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
     from app.application.ai.ai_service import process_ai_reply
 
     mock_classify.return_value = {"category": "duda", "reason": "precio"}
-    mock_generate.return_value = "¡Hola! El menú del día cuesta $25.000."
+    mock_generate.return_value = AiGeneratedReply(message="¡Hola! El menú del día cuesta $25.000.")
 
     with SessionLocal() as db:
         tenant = Tenant(
@@ -243,7 +244,7 @@ def test_qualify_replies_without_marking_interested(
 @patch("app.application.ai.ai_service.send_text_message")
 @patch("app.application.ai.ai_service.classify_inbound_message")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_qualify_handoff_marks_interested_and_manual(_sleep, mock_classify, mock_send):
+def test_qualify_purchase_intent_hands_off_to_human(_sleep, mock_classify, mock_send):
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
@@ -307,7 +308,7 @@ def test_qualify_handoff_marks_interested_and_manual(_sleep, mock_classify, mock
 
 
 @requires_db
-@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_reply")
 @patch("app.application.ai.ai_service.classify_inbound_message")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
@@ -317,13 +318,14 @@ def test_process_ai_reply_sends_message(
     mock_generate,
     mock_send,
 ):
+    from app.application.ai.ai_shortcut_service import AiGeneratedReply
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
     from app.application.ai.ai_service import process_ai_reply
 
     mock_classify.return_value = {"category": "interesado", "reason": "test"}
-    mock_generate.return_value = "¡Hola! Claro que sí, cuéntame."
+    mock_generate.return_value = AiGeneratedReply(message="¡Hola! Claro que sí, cuéntame.")
 
     with SessionLocal() as db:
         tenant = Tenant(

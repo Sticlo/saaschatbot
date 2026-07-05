@@ -368,12 +368,21 @@ def ensure_whatsapp_sync_after_connect(tenant_id: uuid.UUID, *, force: bool = Fa
             ensure_chatwoot_integration,
         )
 
+        import_history = settings.whatsapp_import_history_on_connect
+
         if chatwoot_only_mode():
             if chatwoot_token_configured():
                 ensure_chatwoot_integration(db, tenant=tenant, session=session, force=force)
                 db.commit()
 
             if chatwoot_sync_mode():
+                if not import_history:
+                    log.info(
+                        "Chatwoot inbox sync omitido — sin importar historial tenant=%s",
+                        tenant_id,
+                    )
+                    return True
+
                 from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
 
                 def _cw_sync():
@@ -411,6 +420,13 @@ def ensure_whatsapp_sync_after_connect(tenant_id: uuid.UUID, *, force: bool = Fa
                 "CHATWOOT_ENABLED sin CHATWOOT_API_TOKEN — sync Evolution como fallback tenant=%s",
                 tenant_id,
             )
+
+        if not import_history:
+            log.info(
+                "Sync post-conexión omitido — solo mensajes nuevos tenant=%s",
+                tenant_id,
+            )
+            return True
 
         conv_count = (
             db.query(Conversation)
