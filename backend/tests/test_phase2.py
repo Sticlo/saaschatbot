@@ -191,11 +191,33 @@ def test_webhook_rejects_wrong_instance(client: TestClient):
 
 
 @requires_db
-@patch("app.application.whatsapp.whatsapp_service.evolution_client")
-def test_connect_whatsapp_returns_qr(mock_evo, client: TestClient):
-    mock_evo.instance_exists.return_value = False
-    mock_evo.create_instance.return_value = {"instance": {"instanceName": "t_test"}}
-    mock_evo.connect_instance.return_value = {"base64": "data:image/png;base64,abc"}
+@patch(
+    "app.application.whatsapp.whatsapp_service.gateway_fetch_instance",
+    return_value=None,
+)
+@patch(
+    "app.application.whatsapp.whatsapp_service.gateway_connection_state",
+    return_value={"instance": {"state": "close"}},
+)
+@patch(
+    "app.application.whatsapp.whatsapp_service.gateway_connect",
+    return_value={"base64": "data:image/png;base64,abc"},
+)
+@patch("app.application.whatsapp.whatsapp_service.gateway_ensure_realtime")
+@patch("app.application.whatsapp.whatsapp_service.gateway_create_instance")
+@patch(
+    "app.application.whatsapp.whatsapp_service.gateway_instance_exists",
+    return_value=False,
+)
+def test_connect_whatsapp_returns_qr(
+    _mock_exists,
+    _mock_create,
+    _mock_realtime,
+    _mock_connect,
+    _mock_state,
+    _mock_fetch,
+    client: TestClient,
+):
 
     auth = client.post(
         "/api/v1/auth/register",

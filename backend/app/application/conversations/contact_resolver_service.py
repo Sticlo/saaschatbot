@@ -79,6 +79,13 @@ def record_contact_link(
     verified: bool = False,
 ) -> None:
     """Persiste o actualiza el puente @lid ↔ teléfono (solo verified=True desde message key)."""
+    if not verified:
+        log.debug(
+            "Enlace @lid no persistido sin evidencia verificada tenant=%s lid=%s",
+            tenant_id,
+            lid_jid,
+        )
+        return
     if not lid_jid.endswith("@lid") or not is_valid_whatsapp_phone(phone_e164):
         return
     if is_lid_derived_phone(phone_e164, lid_jid):
@@ -89,32 +96,26 @@ def record_contact_link(
     phone_e164 = normalize_phone(phone_e164)
 
     def _find_by_lid() -> Optional[WhatsAppContactLink]:
-        rows = (
+        return (
             db.query(WhatsAppContactLink)
             .filter(
                 WhatsAppContactLink.tenant_id == tenant_id,
+                WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
                 WhatsAppContactLink.lid_jid == lid_jid,
             )
-            .all()
+            .first()
         )
-        for row in rows:
-            if row.whatsapp_connection_id == whatsapp_connection_id:
-                return row
-        return rows[0] if rows else None
 
     def _find_by_phone() -> Optional[WhatsAppContactLink]:
-        rows = (
+        return (
             db.query(WhatsAppContactLink)
             .filter(
                 WhatsAppContactLink.tenant_id == tenant_id,
+                WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
                 WhatsAppContactLink.phone_e164 == phone_e164,
             )
-            .all()
+            .first()
         )
-        for row in rows:
-            if row.whatsapp_connection_id == whatsapp_connection_id:
-                return row
-        return rows[0] if rows else None
 
     existing_lid = _find_by_lid()
     existing_phone = _find_by_phone()
@@ -221,7 +222,6 @@ def _enrich_lid_phone_maps(
     from app.infrastructure.evolution.evolution_store import (
         fetch_bidirectional_lid_mappings,
         fetch_lid_alt_phone,
-        infer_phone_for_lid_from_timeline,
     )
 
     if not lid_jid or not lid_jid.endswith("@lid"):
@@ -231,36 +231,24 @@ def _enrich_lid_phone_maps(
     # Nunca usar "último outbound reciente": mezclaba mensajes de otros chats
     # en el único contacto al que acababas de escribir.
     alt_phone = ""
-    alt_from_evolution = False
     if instance_name and settings.evolution_database_url:
-        explicit = fetch_lid_alt_phone(
+        alt_phone = fetch_lid_alt_phone(
             settings.evolution_database_url, instance_name, lid_jid
-        )
-        if explicit:
-            alt_phone = explicit
-            alt_from_evolution = True
-        else:
-            alt_phone = (
-                infer_phone_for_lid_from_timeline(
-                    settings.evolution_database_url, instance_name, lid_jid
-                )
-                or ""
-            )
+        ) or ""
 
     if alt_phone and is_valid_whatsapp_phone(alt_phone) and not is_untrusted_contact_phone(alt_phone):
         norm = normalize_phone(alt_phone)
         lid_to_phone.setdefault(lid_jid, norm)
         if norm not in phones_to_try:
             phones_to_try.append(norm)
-        if alt_from_evolution:
-            record_contact_link(
-                db,
-                tenant_id=tenant_id,
-                whatsapp_connection_id=whatsapp_connection_id,
-                lid_jid=lid_jid,
-                phone_e164=norm,
-                verified=False,
-            )
+        record_contact_link(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            lid_jid=lid_jid,
+            phone_e164=norm,
+            verified=True,
+        )
 
     if instance_name and settings.evolution_database_url:
         evo_lid, evo_phone = fetch_bidirectional_lid_mappings(
@@ -589,26 +577,13 @@ def resolve_canonical_conversation(
         push_name=push_name,
     )
 
-    if len(candidates) > 1 and not has_verified_pair:
-        merged = _merge_if_same_person(
+    if len(candidates) > 1 and has_verified_pair:
+        conv = _merge_to_canonical(
             db,
             tenant_id=tenant_id,
-            whatsapp_connection_id=whatsapp_connection_id,
             candidates=candidates,
-            phone=phone,
-            lid_jid=lid,
-            instance_name=instance_name,
             owner_names=owner_names,
         )
-        if merged is not None:
-            conv = merged
-        else:
-            conv = _pick_exact_conversation(
-                candidates,
-                remote_jid=remote_jid,
-                phone=phone,
-                lid_jid=lid,
-            )
     else:
         conv = _pick_exact_conversation(
             candidates,
@@ -623,11 +598,19 @@ def resolve_canonical_conversation(
         trusted_phone = phone if is_valid_whatsapp_phone(phone) and not is_untrusted_contact_phone(phone) else ""
         if trusted_phone and is_lid_placeholder(conv.contact_phone):
             trusted_phone = ""
+        trusted_lid = conv.contact_jid or ""
+        if has_verified_pair:
+            trusted_lid = verified_lid
+        elif lid and (
+            conv.contact_jid == lid
+            or is_lid_placeholder(conv.contact_phone)
+        ):
+            trusted_lid = lid
         apply_identity_to_conversation(
             conv,
             contact_phone=trusted_phone or conv.contact_phone,
             contact_name="",
-            contact_jid=lid or conv.contact_jid or "",
+            contact_jid=trusted_lid,
         )
     else:
         return None, phone, lid

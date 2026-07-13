@@ -38,7 +38,7 @@
     searchTimer: null,
     panelMode: "chats",
     aiProfile: null,
-    clients: { plan: null, leads: [], business: "", city: "" },
+    clients: { contacts: [], selected: new Set(), omittedAmbiguous: 0 },
     quickShortcuts: [],
     shortcutsDraft: [],
     appointmentsDate: null,
@@ -304,7 +304,7 @@
     state.subscription = null;
     state.panelMode = "chats";
     state.aiProfile = null;
-    state.clients = { leads: [], limits: null, search: "" };
+    state.clients = { contacts: [], selected: new Set(), omittedAmbiguous: 0 };
     state.quickShortcuts = [];
     state.shortcutsDraft = [];
     state.wa = { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null };
@@ -1661,8 +1661,133 @@
     $("maps-city-input")?.removeAttribute("disabled");
   }
 
-  function loadClientsPanel() {
-    /* Próximamente — panel estático en index.html */
+  function renderWhatsAppContacts() {
+    const list = $("wa-contacts-list");
+    if (!list) return;
+    const contacts = state.clients.contacts || [];
+    const selected = state.clients.selected || new Set();
+    $("wa-contacts-count").textContent = `${contacts.length} contactos seguros`;
+    $("wa-contacts-meta").textContent = state.clients.omittedAmbiguous
+      ? `${state.clients.omittedAmbiguous} contactos omitidos porque WhatsApp no entregó un número confiable`
+      : "Solo números verificados de la vinculación actual";
+    if (!contacts.length) {
+      list.innerHTML = '<p class="muted">No encontramos contactos con número verificable.</p>';
+      return;
+    }
+    list.innerHTML = contacts.map((contact) => `
+      <label class="wa-contact-row">
+        <input
+          type="checkbox"
+          data-wa-contact="${escapeHtml(contact.phone_e164)}"
+          ${selected.has(contact.phone_e164) ? "checked" : ""}
+        />
+        <span class="wa-contact-copy">
+          <strong>${escapeHtml(contact.name || contact.phone_e164)}</strong>
+          <span class="muted small">${escapeHtml(contact.phone_e164)}</span>
+        </span>
+        <span class="wa-contact-safe">Verificado</span>
+      </label>
+    `).join("");
+    list.querySelectorAll("[data-wa-contact]").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        const phone = event.target.dataset.waContact;
+        if (event.target.checked && state.clients.selected.size >= 100) {
+          event.target.checked = false;
+          $("wa-campaign-status").textContent = "Máximo 100 contactos por campaña.";
+          return;
+        }
+        if (event.target.checked) state.clients.selected.add(phone);
+        else state.clients.selected.delete(phone);
+        $("wa-campaign-status").textContent =
+          `${state.clients.selected.size} seleccionados`;
+      });
+    });
+  }
+
+  async function loadClientsPanel() {
+    const list = $("wa-contacts-list");
+    if (list) list.innerHTML = '<p class="muted">Sincronizando contactos seguros…</p>';
+    try {
+      const result = await api("/outbound/whatsapp-contacts?limit=500", {}, 60000);
+      state.clients.contacts = result.contacts || [];
+      state.clients.omittedAmbiguous = result.omitted_ambiguous || 0;
+      const available = new Set(state.clients.contacts.map((item) => item.phone_e164));
+      state.clients.selected = new Set(
+        [...state.clients.selected].filter((phone) => available.has(phone))
+      );
+      renderWhatsAppContacts();
+    } catch (err) {
+      state.clients.contacts = [];
+      state.clients.selected = new Set();
+      if (list) {
+        list.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+      }
+      $("wa-contacts-count").textContent = "0 contactos seguros";
+      $("wa-contacts-meta").textContent = "";
+    }
+  }
+
+  function toggleAllWhatsAppContacts() {
+    const contacts = state.clients.contacts || [];
+    const selectable = contacts.slice(0, 100);
+    const allSelected =
+      selectable.length > 0 && selectable.every((item) => state.clients.selected.has(item.phone_e164));
+    state.clients.selected = allSelected
+      ? new Set()
+      : new Set(selectable.map((item) => item.phone_e164));
+    renderWhatsAppContacts();
+    $("wa-campaign-status").textContent =
+      `${state.clients.selected.size} seleccionados`;
+  }
+
+  async function enqueueWhatsAppContactCampaign() {
+    const phones = [...state.clients.selected];
+    const message = $("wa-campaign-message")?.value.trim() || "";
+    const name = $("wa-campaign-name")?.value.trim() || "Difusión WhatsApp";
+    const status = $("wa-campaign-status");
+    const button = $("wa-campaign-send");
+    if (!phones.length) {
+      status.textContent = "Selecciona al menos un contacto.";
+      return;
+    }
+    if (message.length < 3) {
+      status.textContent = "Escribe el mensaje de la campaña.";
+      return;
+    }
+    if (!confirm(`¿Encolar ${phones.length} mensajes? Se enviarán uno a uno con pausas.`)) return;
+    button.disabled = true;
+    status.textContent = "Validando contactos…";
+    try {
+      await api("/outbound/whatsapp-contacts/import", {
+        method: "POST",
+        body: JSON.stringify({ phones }),
+      }, 60000);
+      const leads = await api("/outbound/leads?status=pending&limit=500", {}, 30000);
+      const selected = new Set(phones);
+      const leadIds = leads
+        .filter((lead) => selected.has(lead.phone_e164))
+        .map((lead) => lead.id);
+      if (!leadIds.length) {
+        throw new Error("Estos contactos ya fueron enviados o excluidos anteriormente.");
+      }
+      status.textContent = "Encolando campaña…";
+      const result = await api("/outbound/campaigns/enqueue", {
+        method: "POST",
+        body: JSON.stringify({
+          lead_ids: leadIds,
+          name,
+          message_template: message,
+          limit: Math.min(leadIds.length, 100),
+        }),
+      }, 30000);
+      state.clients.selected = new Set();
+      renderWhatsAppContacts();
+      status.textContent = `✓ ${result.queued || 0} mensajes en cola`;
+    } catch (err) {
+      status.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function persistMapsProspectFields(business, city) {
@@ -3000,11 +3125,14 @@
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("maps-search-btn")?.addEventListener("click", () => runMapsProspectMock());
-  $("maps-reset-btn").addEventListener("click", () => resetMapsProspectPanel());
-  $("maps-download-btn").addEventListener("click", () => {
+  $("maps-reset-btn")?.addEventListener("click", () => resetMapsProspectPanel());
+  $("maps-download-btn")?.addEventListener("click", () => {
     if (!state.clients.leads?.length) return;
     downloadMapsMockExcel(state.clients.leads, state.clients.business, state.clients.city);
   });
+  $("wa-contacts-refresh")?.addEventListener("click", () => loadClientsPanel());
+  $("wa-contacts-select-all")?.addEventListener("click", toggleAllWhatsAppContacts);
+  $("wa-campaign-send")?.addEventListener("click", enqueueWhatsAppContactCampaign);
 
   $("shortcuts-add-btn").addEventListener("click", () => {
     if (state.shortcutsDraft.length >= 12) return;

@@ -501,13 +501,26 @@ def fetch_lid_phone_mappings(dsn: str, instance_name: str) -> dict[str, str]:
 def fetch_bidirectional_lid_mappings(
     dsn: str, instance_name: str,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """Mapas lid_jid↔teléfono E.164 desde mensajes (ambas direcciones)."""
+    """Mapas lid_jid↔teléfono E.164 solo cuando la relación es unívoca.
+
+    Evolution puede conservar claves contradictorias de sesiones antiguas. Si un
+    @lid apunta a varios teléfonos (o viceversa), se omite por completo para no
+    mezclar personas.
+    """
     lid_to_phone: dict[str, str] = {}
     phone_to_lid: dict[str, str] = {}
+    lid_candidates: dict[str, set[str]] = {}
+    phone_candidates: dict[str, set[str]] = {}
     if not dsn:
         return lid_to_phone, phone_to_lid
     try:
-        from app.shared.core.phone import jid_to_phone, phone_to_evolution_number
+        from app.shared.core.phone import (
+            is_untrusted_contact_phone,
+            is_valid_whatsapp_phone,
+            jid_to_phone,
+            normalize_phone,
+            phone_to_evolution_number,
+        )
 
         with psycopg.connect(_normalize_dsn(dsn), **_CONNECT_KWARGS) as conn:
             with conn.cursor() as cur:
@@ -533,12 +546,16 @@ def fetch_bidirectional_lid_mappings(
                 )
                 def _record(lid_jid: str, phone_jid_or_num: str) -> None:
                     phone = jid_to_phone(phone_jid_or_num)
-                    if not phone or not lid_jid.endswith("@lid"):
+                    if (
+                        not phone
+                        or not lid_jid.endswith("@lid")
+                        or not is_valid_whatsapp_phone(phone)
+                        or is_untrusted_contact_phone(phone)
+                    ):
                         return
-                    lid_to_phone.setdefault(lid_jid, phone)
-                    digits = phone_to_evolution_number(phone)
-                    phone_to_lid.setdefault(digits, lid_jid)
-                    phone_to_lid.setdefault(phone, lid_jid)
+                    normalized = normalize_phone(phone)
+                    lid_candidates.setdefault(lid_jid, set()).add(normalized)
+                    phone_candidates.setdefault(normalized, set()).add(lid_jid)
 
                 for main_jid, alt_jid in cur.fetchall():
                     if not main_jid or not alt_jid:
@@ -577,6 +594,29 @@ def fetch_bidirectional_lid_mappings(
                     phone_src = str(sender_pn or participant_pn or participant_alt or "")
                     if lid_jid and phone_src:
                         _record(lid_jid, phone_src)
+
+        for lid_jid, phones in lid_candidates.items():
+            if len(phones) != 1:
+                log.warning(
+                    "Mapeo @lid ambiguo omitido instancia=%s lid=%s phones=%s",
+                    instance_name,
+                    lid_jid,
+                    sorted(phones),
+                )
+                continue
+            phone = next(iter(phones))
+            lids = phone_candidates.get(phone, set())
+            if len(lids) != 1:
+                log.warning(
+                    "Mapeo teléfono ambiguo omitido instancia=%s phone=%s lids=%s",
+                    instance_name,
+                    phone,
+                    sorted(lids),
+                )
+                continue
+            lid_to_phone[lid_jid] = phone
+            phone_to_lid[phone] = lid_jid
+            phone_to_lid[phone_to_evolution_number(phone)] = lid_jid
     except Exception as exc:
         log.warning("No se pudo leer mapeos @lid bidireccionales: %s", exc)
     return lid_to_phone, phone_to_lid

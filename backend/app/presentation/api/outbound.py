@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.shared.core.deps import RequireAgent, RequireOwner, RequireViewer
 from app.infrastructure.persistence.database import get_db
-from app.domain.entities import Campaign, Lead, Tenant
+from app.domain.entities import Campaign, Lead, Tenant, WhatsAppSession
+from app.domain.entities.enums import WhatsAppStatus
 from app.application.outbound.bait_limit_service import build_limits_summary
 from app.application.outbound.bait_scheduler import is_outbound_paused, set_outbound_paused
 from app.application.outbound.outbound_service import enqueue_campaign, get_queue_stats, import_leads
@@ -20,10 +21,13 @@ from app.presentation.schemas.outbound import (
     EnqueueCampaignResponse,
     ImportLeadsRequest,
     ImportLeadsResponse,
+    ImportWhatsAppContactsRequest,
+    ImportWhatsAppContactsResponse,
     LeadResponse,
     OutboundLimitsResponse,
     PauseOutboundRequest,
     QueueStatsResponse,
+    WhatsAppContactDirectoryResponse,
 )
 
 router = APIRouter(prefix="/outbound", tags=["outbound"])
@@ -77,6 +81,84 @@ def create_leads(
         user_id=current.id,
         action="outbound.leads_imported",
         details=result,
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return result
+
+
+def _connected_whatsapp_session(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+) -> WhatsAppSession:
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == tenant_id)
+        .first()
+    )
+    if (
+        session is None
+        or session.status != WhatsAppStatus.CONNECTED.value
+        or session.active_connection_id is None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Conecta WhatsApp para sincronizar contactos",
+        )
+    return session
+
+
+@router.get("/whatsapp-contacts", response_model=WhatsAppContactDirectoryResponse)
+def whatsapp_contacts(
+    current: RequireViewer,
+    db: Session = Depends(get_db),
+    limit: int = 500,
+):
+    from app.application.outbound.whatsapp_contact_directory_service import (
+        list_safe_whatsapp_contacts,
+    )
+
+    session = _connected_whatsapp_session(db, tenant_id=current.tenant_id)
+    return list_safe_whatsapp_contacts(db, session=session, limit=limit)
+
+
+@router.post(
+    "/whatsapp-contacts/import",
+    response_model=ImportWhatsAppContactsResponse,
+)
+def import_whatsapp_contacts(
+    body: ImportWhatsAppContactsRequest,
+    request: Request,
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    from app.application.outbound.whatsapp_contact_directory_service import (
+        validate_selected_contact_phones,
+    )
+
+    session = _connected_whatsapp_session(db, tenant_id=current.tenant_id)
+    selected, rejected = validate_selected_contact_phones(
+        db,
+        session=session,
+        phones=body.phones,
+    )
+    result = import_leads(
+        db,
+        tenant_id=current.tenant_id,
+        items=selected,
+        source="whatsapp_contacts",
+    )
+    result["rejected"] = rejected
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="outbound.whatsapp_contacts_imported",
+        details={
+            **result,
+            "selected": len(body.phones),
+        },
         ip_address=request.client.host if request.client else None,
     )
     db.commit()

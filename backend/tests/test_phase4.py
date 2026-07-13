@@ -37,8 +37,8 @@ def test_import_leads_dedup(client: TestClient):
 
     payload = {
         "leads": [
-            {"phone": "3001234567", "name": "Lead A"},
-            {"phone": "+573001234567", "name": "Duplicado"},
+            {"phone": "3004583560", "name": "Lead A"},
+            {"phone": "+573004583560", "name": "Duplicado"},
             {"phone": "abc", "name": "Inválido"},
         ]
     }
@@ -151,7 +151,7 @@ def test_record_bait_sent_increments_trial(client: TestClient):
 
 
 @requires_db
-@patch("app.application.outbound.outbound_service.send_text_message")
+@patch("app.application.outbound.outbound_service.send_bait_message")
 def test_process_send_marks_bait_sent(mock_send, client: TestClient):
     from datetime import datetime, timezone
 

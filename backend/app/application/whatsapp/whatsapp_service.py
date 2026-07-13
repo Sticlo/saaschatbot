@@ -87,22 +87,16 @@ def _resolve_lid_send_recipient(
     if uses_waha() or not conversation.contact_jid or not conversation.contact_jid.endswith("@lid"):
         return conversation, recipient
 
-    from app.infrastructure.evolution.evolution_store import fetch_lid_alt_phone
-
-    alt_phone = fetch_lid_alt_phone(
-        settings.evolution_database_url,
-        session.instance_name,
-        conversation.contact_jid,
-    )
-    if not alt_phone and session.active_connection_id:
+    alt_phone = ""
+    if session.active_connection_id:
         from app.application.conversations.contact_resolver_service import _load_link_maps
 
-        _lid_map, _ = _load_link_maps(
+        lid_map, _ = _load_link_maps(
             db,
             tenant_id=tenant.id,
             whatsapp_connection_id=session.active_connection_id,
         )
-        alt_phone = _lid_map.get(conversation.contact_jid) or ""
+        alt_phone = lid_map.get(conversation.contact_jid) or ""
 
     trusted = _trusted_lid_alt_phone(alt_phone, lid_jid=conversation.contact_jid)
     if not trusted:
@@ -110,18 +104,9 @@ def _resolve_lid_send_recipient(
 
     from app.application.sync.contact_identity_service import apply_identity_to_conversation
     from app.application.conversations.contact_resolver_service import (
-        record_contact_link,
         repair_duplicates_for_contact,
     )
 
-    record_contact_link(
-        db,
-        tenant_id=tenant.id,
-        whatsapp_connection_id=session.active_connection_id,
-        lid_jid=conversation.contact_jid,
-        phone_e164=trusted,
-        verified=True,
-    )
     apply_identity_to_conversation(
         conversation,
         contact_phone=trusted,

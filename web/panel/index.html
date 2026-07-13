@@ -117,7 +117,7 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-clients" class="sidebar-mode-tab sidebar-mode-tab--soon" title="Próximamente">Buscar clientes</button>
+            <button type="button" id="mode-clients" class="sidebar-mode-tab">Difusión</button>
             <button type="button" id="mode-appointments" class="sidebar-mode-tab">Sistema de citas</button>
             <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA</button>
           </div>
@@ -342,11 +342,40 @@
 
           <div id="clients-panel" class="clients-panel hidden">
             <header class="clients-hero">
-              <div class="clients-hero-icon" aria-hidden="true">🗺️</div>
-              <h2>Buscar clientes</h2>
-              <p class="clients-soon-badge">Próximamente</p>
-              <p>Estamos terminando la búsqueda de clientes en Google Maps. Por ahora usa <strong>Interesados</strong> para cerrar las conversaciones que llegan por WhatsApp.</p>
+              <div class="clients-hero-icon" aria-hidden="true">WA</div>
+              <h2>Difusión a tus contactos</h2>
+              <p>Selecciona contactos sincronizados por WhatsApp. Omitel excluye IDs ambiguos y solo envía a números verificados.</p>
             </header>
+            <section class="wa-contacts-card">
+              <div class="wa-contacts-toolbar">
+                <div>
+                  <strong id="wa-contacts-count">0 contactos seguros</strong>
+                  <p id="wa-contacts-meta" class="muted small"></p>
+                </div>
+                <div class="wa-contacts-actions">
+                  <button type="button" id="wa-contacts-select-all" class="btn ghost small">Seleccionar todos</button>
+                  <button type="button" id="wa-contacts-refresh" class="btn ghost small">Actualizar</button>
+                </div>
+              </div>
+              <div id="wa-contacts-list" class="wa-contacts-list">
+                <p class="muted">Conecta WhatsApp para ver contactos.</p>
+              </div>
+            </section>
+            <section class="wa-campaign-card">
+              <label>
+                Nombre de campaña
+                <input id="wa-campaign-name" type="text" maxlength="80" value="Difusión WhatsApp" />
+              </label>
+              <label>
+                Mensaje
+                <textarea id="wa-campaign-message" rows="5" maxlength="1000" placeholder="Hola {name}, queremos contarte…"></textarea>
+              </label>
+              <p class="muted small">Se envía uno a uno con pausas. Usa <code>{name}</code> para personalizar. Envía solo a personas que esperan tus mensajes.</p>
+              <div class="wa-campaign-footer">
+                <span id="wa-campaign-status" class="muted small"></span>
+                <button type="button" id="wa-campaign-send" class="btn primary">Encolar difusión</button>
+              </div>
+            </section>
           </div>
         </main>
       </div>

@@ -185,7 +185,7 @@ def ensure_whatsapp_binding_ready(
         session.bound_owner_jid,
         session.phone_number,
     )
-    if owner_changed or phone_changed:
+    if owner_changed or phone_changed or missing_binding:
         start_new_whatsapp_binding(
             db,
             tenant=tenant,
@@ -193,24 +193,6 @@ def ensure_whatsapp_binding_ready(
             instance_name=session.instance_name,
             owner_jid=owner,
         )
-    elif session.active_connection_id is None:
-        existing = (
-            db.query(Conversation.whatsapp_connection_id)
-            .filter(
-                Conversation.tenant_id == tenant.id,
-                Conversation.whatsapp_connection_id.isnot(None),
-            )
-            .order_by(Conversation.created_at.desc())
-            .first()
-        )
-        if existing and existing[0]:
-            session.active_connection_id = existing[0]
-            if session.connection_started_at is None:
-                session.connection_started_at = datetime.now(timezone.utc)
-        else:
-            begin_whatsapp_connection(session, owner_jid=owner)
-    elif session.connection_started_at is None:
-        session.connection_started_at = datetime.now(timezone.utc)
     return True
 
 

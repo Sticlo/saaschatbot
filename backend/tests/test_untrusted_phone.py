@@ -154,8 +154,8 @@ def test_repair_does_not_merge_different_contacts_with_same_short_outbound():
         )
         assert len(remaining) == 2
 @requires_db
-def test_repair_merges_lid_named_with_real_phone_chat():
-    """@lid con nombre + chat con teléfono real — conserva el historial del teléfono."""
+def test_repair_ignores_link_from_previous_connection():
+    """Una vinculación QR vieja nunca puede fusionar contactos de la actual."""
     from app.domain.entities import WhatsAppContactLink
     from app.infrastructure.persistence.database import SessionLocal
 
@@ -225,7 +225,7 @@ def test_repair_merges_lid_named_with_real_phone_chat():
         )
         db.commit()
 
-        assert merged >= 1
+        assert merged == 0
         remaining = (
             db.query(Conversation)
             .filter(
@@ -234,15 +234,7 @@ def test_repair_merges_lid_named_with_real_phone_chat():
             )
             .all()
         )
-        assert len(remaining) == 1
-        assert remaining[0].contact_phone == "+573004583560"
-        assert remaining[0].contact_name in {"Primito", "Julián Alarcón"}
-        msg_count = (
-            db.query(Message)
-            .filter(Message.conversation_id == remaining[0].id)
-            .count()
-        )
-        assert msg_count >= 3
+        assert len(remaining) == 2
 
 
 @requires_db

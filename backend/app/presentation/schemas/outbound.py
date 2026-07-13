@@ -23,6 +23,26 @@ class ImportLeadsResponse(BaseModel):
     invalid: int
 
 
+class WhatsAppContactResponse(BaseModel):
+    phone_e164: str
+    name: str
+    source: str
+    verified: bool = True
+
+
+class WhatsAppContactDirectoryResponse(BaseModel):
+    contacts: list[WhatsAppContactResponse]
+    omitted_ambiguous: int = 0
+
+
+class ImportWhatsAppContactsRequest(BaseModel):
+    phones: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class ImportWhatsAppContactsResponse(ImportLeadsResponse):
+    rejected: list[str] = Field(default_factory=list)
+
+
 class LeadResponse(BaseModel):
     id: uuid.UUID
     phone_e164: str
@@ -37,8 +57,8 @@ class LeadResponse(BaseModel):
 class EnqueueCampaignRequest(BaseModel):
     lead_ids: Optional[list[uuid.UUID]] = None
     limit: Optional[int] = Field(None, ge=1, le=100)
-    name: str = "Campaña"
-    message_template: Optional[str] = None
+    name: str = Field("Campaña", min_length=1, max_length=80)
+    message_template: Optional[str] = Field(None, min_length=3, max_length=1000)
     bait_template_id: Optional[uuid.UUID] = None
 
 

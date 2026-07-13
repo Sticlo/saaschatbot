@@ -9,7 +9,11 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.shared.core.phone import is_valid_whatsapp_phone, normalize_phone
+from app.shared.core.phone import (
+    is_untrusted_contact_phone,
+    is_valid_whatsapp_phone,
+    normalize_phone,
+)
 from app.domain.entities import (
     Campaign,
     Conversation,
@@ -80,7 +84,11 @@ def import_leads(
     for item in items:
         raw_phone = str(item.get("phone") or item.get("phone_e164") or "").strip()
         phone = normalize_phone(raw_phone)
-        if not phone or not is_valid_whatsapp_phone(phone):
+        if (
+            not phone
+            or not is_valid_whatsapp_phone(phone)
+            or is_untrusted_contact_phone(phone)
+        ):
             invalid += 1
             continue
 
@@ -258,6 +266,13 @@ def process_send_queue_item(db: Session, item: SendQueueItem) -> bool:
 
     if session.active_connection_id is None:
         _fail_item(item, "WhatsApp no vinculado")
+        return True
+    if (
+        not is_valid_whatsapp_phone(item.phone_e164)
+        or is_untrusted_contact_phone(item.phone_e164)
+    ):
+        _skip_item(item, "invalid_recipient")
+        _update_campaign(db, item.campaign_id, skipped=True)
         return True
 
     # Pausa por tenant

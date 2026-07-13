@@ -14,6 +14,7 @@ from app.shared.core.phone import (
     jid_to_phone,
     lid_jid_from_lid_phone,
     normalize_phone,
+    pair_lid_phone_from_message_key,
     phone_match_tail,
     phone_to_evolution_number,
     resolve_contact_phone,
@@ -373,7 +374,7 @@ def _save_message(
         db,
         tenant_id=tenant.id,
         conversation_id=conversation.id,
-        evolution_message_id=evolution_message_id,
+        evolution_message_id=evolution_message_id or None,
         body=body,
         created_at=ts,
     )
@@ -388,7 +389,7 @@ def _save_message(
         source=source,
         body=body.strip(),
         status=status,
-        evolution_message_id=evolution_message_id,
+        evolution_message_id=evolution_message_id or None,
     )
     message.created_at = ts
     bump_conversation_last_message_at(conversation, ts)
@@ -504,11 +505,20 @@ def save_inbound_message(
             if not owner_names or not is_owner_display_name(display_name, owner_names):
                 from app.application.sync.contact_identity_service import apply_identity_to_conversation
 
+                verified_lid, _ = pair_lid_phone_from_message_key(message_key)
+                safe_jid = conversation.contact_jid or ""
+                if verified_lid:
+                    safe_jid = verified_lid
+                elif contact_jid and (
+                    conversation.contact_jid == contact_jid
+                    or is_lid_placeholder(conversation.contact_phone)
+                ):
+                    safe_jid = contact_jid
                 apply_identity_to_conversation(
                     conversation,
                     contact_phone=phone or conversation.contact_phone,
                     contact_name=display_name,
-                    contact_jid=contact_jid or conversation.contact_jid or "",
+                    contact_jid=safe_jid,
                 )
     elif push_name and is_placeholder_contact_name(
         conversation.contact_name, conversation.contact_phone
@@ -705,13 +715,22 @@ def save_outbound_from_phone(
             instance_name=inst,
         )
     else:
+        verified_lid, verified_phone = pair_lid_phone_from_message_key(message_key)
+        safe_jid = conversation.contact_jid or ""
+        if verified_lid and verified_phone:
+            safe_jid = verified_lid
+        elif contact_jid and (
+            conversation.contact_jid == contact_jid
+            or is_lid_placeholder(conversation.contact_phone)
+        ):
+            safe_jid = contact_jid
         apply_identity_to_conversation(
             conversation,
-            contact_phone=phone,
+            contact_phone=verified_phone or phone,
             contact_name="",
-            contact_jid=contact_jid,
+            contact_jid=safe_jid,
         )
-        if contact_jid.endswith("@lid") and is_valid_whatsapp_phone(phone):
+        if verified_lid and verified_phone:
             from app.application.conversations.contact_resolver_service import (
                 record_contact_link,
             )
@@ -720,8 +739,8 @@ def save_outbound_from_phone(
                 db,
                 tenant_id=tenant.id,
                 whatsapp_connection_id=whatsapp_connection_id,
-                lid_jid=contact_jid,
-                phone_e164=phone,
+                lid_jid=verified_lid,
+                phone_e164=verified_phone,
                 verified=True,
             )
 

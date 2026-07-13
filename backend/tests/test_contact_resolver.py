@@ -85,7 +85,9 @@ def test_resolve_canonical_picks_phone_without_merging_lid_chat():
             )
             .count()
         )
-        assert remaining == 2
+        # El message key trae teléfono + @lid juntos: es evidencia fuerte y
+        # ambos registros se consolidan en una sola persona.
+        assert remaining == 1
 
         record_contact_link(
             db,
@@ -93,6 +95,7 @@ def test_resolve_canonical_picks_phone_without_merging_lid_chat():
             whatsapp_connection_id=connection_id,
             lid_jid="236429376532542@lid",
             phone_e164="+573219469201",
+            verified=True,
         )
         db.commit()
 

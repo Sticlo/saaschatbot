@@ -1044,6 +1044,111 @@ textarea { resize: vertical; min-height: 44px; }
   line-height: 1.45;
 }
 
+.wa-contacts-card,
+.wa-campaign-card {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.wa-contacts-toolbar,
+.wa-campaign-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.wa-contacts-toolbar p {
+  margin: 0.25rem 0 0;
+}
+
+.wa-contacts-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.wa-contacts-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  max-height: 390px;
+  margin-top: 1rem;
+  overflow-y: auto;
+}
+
+.wa-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.wa-contact-row:hover {
+  background: var(--surface2);
+}
+
+.wa-contact-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.wa-contact-copy strong,
+.wa-contact-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-contact-safe {
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.wa-campaign-card {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.wa-campaign-card label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.wa-campaign-card input,
+.wa-campaign-card textarea {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+@media (max-width: 720px) {
+  .wa-contacts-list {
+    grid-template-columns: 1fr;
+  }
+
+  .wa-contacts-toolbar,
+  .wa-campaign-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .clients-quota-badge {
   display: inline-block;
   margin-top: 0.75rem;

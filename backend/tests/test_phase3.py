@@ -114,4 +114,4 @@ def test_panel_websocket_receives_redis_event(client: TestClient):
 def test_panel_route(client: TestClient):
     response = client.get("/panel")
     assert response.status_code == 200
-    assert "SaasChatbot" in response.text
+    assert "Omitel" in response.text

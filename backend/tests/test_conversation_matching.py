@@ -49,7 +49,7 @@ def test_find_conversation_by_phone_tail():
 
 
 @requires_db
-def test_outbound_webhook_reuses_lid_chat_when_panel_sent_first():
+def test_outbound_phone_echo_does_not_reuse_unverified_lid_chat():
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Message, Tenant
     from app.domain.entities.enums import MessageDirection, MessageSource, MessageStatus
@@ -98,7 +98,7 @@ def test_outbound_webhook_reuses_lid_chat_when_panel_sent_first():
             whatsapp_connection_id=connection_id,
         )
         assert echoed is not None
-        assert echoed.conversation_id == girlfriend.id
+        assert echoed.conversation_id != girlfriend.id
 
         count = (
             db.query(Conversation)
@@ -108,7 +108,7 @@ def test_outbound_webhook_reuses_lid_chat_when_panel_sent_first():
             )
             .count()
         )
-        assert count == 1
+        assert count == 2
 
 
 def test_pick_merge_primary_prefers_lid_over_owner_name():
@@ -136,8 +136,10 @@ def test_pick_merge_primary_prefers_lid_over_owner_name():
         phone_chat,
         owner_names={"Juan Aguilar"},
     )
-    assert primary is lid_chat
-    assert secondary is phone_chat
+    # Con un merge ya verificado, conservar la identidad con teléfono apto
+    # para envío es más seguro que el placeholder @lid.
+    assert primary is phone_chat
+    assert secondary is lid_chat
 
 
 @requires_db
@@ -196,11 +198,8 @@ def test_outbound_from_phone_finds_lid_chat_via_remote_jid_alt():
 
 
 @requires_db
-def test_outbound_lid_echo_reuses_single_recent_chat_with_message_id():
-    """Panel envió 'te quiero' a la novia; el eco vuelve como @lid sin mapeo.
-
-    No debe crear un chat nuevo: hay un único saliente reciente con ese texto.
-    """
+def test_outbound_lid_echo_does_not_guess_recent_chat_without_verified_key():
+    """Un @lid sin pareja verificada nunca se asigna por similitud de texto."""
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Tenant
     from app.domain.entities.enums import MessageDirection, MessageSource, MessageStatus
@@ -249,7 +248,7 @@ def test_outbound_lid_echo_reuses_single_recent_chat_with_message_id():
             whatsapp_connection_id=connection_id,
         )
         assert echoed is not None
-        assert echoed.conversation_id == novia.id
+        assert echoed.conversation_id != novia.id
         db.commit()
 
         count = (
@@ -260,12 +259,10 @@ def test_outbound_lid_echo_reuses_single_recent_chat_with_message_id():
             )
             .count()
         )
-        assert count == 1
+        assert count == 2
 
         db.refresh(novia)
-        # El @lid quedó enlazado al chat de teléfono para futuros ecos.
-        assert novia.contact_jid == "236429376532542@lid"
-        # Nunca se filtró el nombre del dueño.
+        assert novia.contact_jid == ""
         assert novia.contact_name == "+573219469201"
 
 
