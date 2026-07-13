@@ -423,9 +423,9 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
         _CONNECT_EVENTS = {"connection.update", "qrcode.updated"}
         if (
             event not in _CONNECT_EVENTS
-            and event != "messages.upsert"
             and tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value
         ):
+            # Incluye messages.upsert: si el panel desvinculó, nada de mensajes ni IA.
             log.debug("Webhook ignorado — WhatsApp desconectado tenant=%s event=%s", tenant_id, event)
             return
 

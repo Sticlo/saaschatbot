@@ -36,39 +36,10 @@ def infer_phone_from_recent_outbound(
     whatsapp_connection_id: UUID,
     window_seconds: int = _RECENT_OUTBOUND_WINDOW_SECONDS,
 ) -> Optional[str]:
-    """Si el negocio acaba de escribir a un solo cliente (teléfono), el @lid entrante es ese chat.
+    """Desactivado: adivinar teléfono por el último outbound mezclaba chats distintos.
 
-    Solo devuelve teléfono cuando hay exactamente un destino reciente — evita mezclar clientes.
+    Antes: si solo había un destino reciente con teléfono, mapeaba cualquier @lid a ese número.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from app.domain.entities import Conversation, Message
-    from app.domain.entities.enums import MessageDirection
-
-    since = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
-    rows = (
-        db.query(Conversation.contact_phone)
-        .join(Message, Message.conversation_id == Conversation.id)
-        .filter(
-            Conversation.tenant_id == tenant_id,
-            Conversation.whatsapp_connection_id == whatsapp_connection_id,
-            Message.tenant_id == tenant_id,
-            Message.direction == MessageDirection.OUT.value,
-            Message.created_at >= since,
-        )
-        .distinct()
-        .all()
-    )
-    phones: list[str] = []
-    for (raw_phone,) in rows:
-        if raw_phone and is_valid_whatsapp_phone(raw_phone) and not is_untrusted_contact_phone(
-            raw_phone
-        ):
-            norm = normalize_phone(raw_phone)
-            if norm not in phones:
-                phones.append(norm)
-    if len(phones) == 1:
-        return phones[0]
     return None
 
 
@@ -209,18 +180,17 @@ def _load_link_maps(
 ) -> tuple[dict[str, str], dict[str, str]]:
     lid_to_phone: dict[str, str] = {}
     phone_to_lid: dict[str, str] = {}
+    # Solo enlaces de la vinculación actual: reutilizar QR anteriores enrutaba
+    # mensajes al chat equivocado cuando un enlace viejo quedó corrupto.
     rows = (
         db.query(WhatsAppContactLink)
-        .filter(WhatsAppContactLink.tenant_id == tenant_id)
+        .filter(
+            WhatsAppContactLink.tenant_id == tenant_id,
+            WhatsAppContactLink.whatsapp_connection_id == whatsapp_connection_id,
+        )
         .all()
     )
-    # Priorizar enlaces de la vinculación actual; fallback a enlaces de QR anteriores.
-    rows.sort(
-        key=lambda r: (
-            0 if r.whatsapp_connection_id == whatsapp_connection_id else 1,
-            str(r.updated_at or r.created_at or ""),
-        )
-    )
+    rows.sort(key=lambda r: str(r.updated_at or r.created_at or ""))
     for row in rows:
         if is_untrusted_contact_phone(row.phone_e164):
             continue
@@ -246,7 +216,7 @@ def _enrich_lid_phone_maps(
     lid_to_phone: dict[str, str],
     phones_to_try: list[str],
 ) -> None:
-    """Amplía mapas @lid↔teléfono desde BD local, Evolution, timeline y envíos recientes."""
+    """Amplía mapas @lid↔teléfono desde BD local y Evolution (nunca por heurística de envíos)."""
     from app.config import settings
     from app.infrastructure.evolution.evolution_store import (
         fetch_bidirectional_lid_mappings,
@@ -257,36 +227,40 @@ def _enrich_lid_phone_maps(
     if not lid_jid or not lid_jid.endswith("@lid"):
         return
 
+    # Solo mapear @lid → teléfono con evidencia de Evolution para ese lid.
+    # Nunca usar "último outbound reciente": mezclaba mensajes de otros chats
+    # en el único contacto al que acababas de escribir.
     alt_phone = ""
+    alt_from_evolution = False
     if instance_name and settings.evolution_database_url:
-        alt_phone = (
-            fetch_lid_alt_phone(settings.evolution_database_url, instance_name, lid_jid)
-            or infer_phone_for_lid_from_timeline(
-                settings.evolution_database_url, instance_name, lid_jid
-            )
-            or ""
+        explicit = fetch_lid_alt_phone(
+            settings.evolution_database_url, instance_name, lid_jid
         )
-
-    if not alt_phone:
-        alt_phone = infer_phone_from_recent_outbound(
-            db,
-            tenant_id=tenant_id,
-            whatsapp_connection_id=whatsapp_connection_id,
-        ) or ""
+        if explicit:
+            alt_phone = explicit
+            alt_from_evolution = True
+        else:
+            alt_phone = (
+                infer_phone_for_lid_from_timeline(
+                    settings.evolution_database_url, instance_name, lid_jid
+                )
+                or ""
+            )
 
     if alt_phone and is_valid_whatsapp_phone(alt_phone) and not is_untrusted_contact_phone(alt_phone):
         norm = normalize_phone(alt_phone)
         lid_to_phone.setdefault(lid_jid, norm)
         if norm not in phones_to_try:
             phones_to_try.append(norm)
-        record_contact_link(
-            db,
-            tenant_id=tenant_id,
-            whatsapp_connection_id=whatsapp_connection_id,
-            lid_jid=lid_jid,
-            phone_e164=norm,
-            verified=False,
-        )
+        if alt_from_evolution:
+            record_contact_link(
+                db,
+                tenant_id=tenant_id,
+                whatsapp_connection_id=whatsapp_connection_id,
+                lid_jid=lid_jid,
+                phone_e164=norm,
+                verified=False,
+            )
 
     if instance_name and settings.evolution_database_url:
         evo_lid, evo_phone = fetch_bidirectional_lid_mappings(

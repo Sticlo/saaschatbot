@@ -124,6 +124,22 @@ def list_conversations(
         db.refresh(session)
 
     if not conversations_visible_for_tenant(db, tenant=tenant, session=session):
+        from app.application.conversations.whatsapp_conversation_service import (
+            purge_ephemeral_whatsapp_data,
+        )
+
+        # Sin sesión WA viva no hay historial en el panel (vive en el celular).
+        if (
+            db.query(Conversation.id)
+            .filter(Conversation.tenant_id == tenant.id)
+            .limit(1)
+            .first()
+            is not None
+        ):
+            purge_ephemeral_whatsapp_data(
+                db, tenant=tenant, session=session, notify=True
+            )
+            db.commit()
         return []
 
     from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox

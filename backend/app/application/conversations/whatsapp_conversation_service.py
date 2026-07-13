@@ -26,7 +26,9 @@ def begin_whatsapp_connection(session: WhatsAppSession, *, owner_jid: Optional[s
 
 
 def purge_all_tenant_whatsapp_conversations(db: Session, *, tenant_id: UUID) -> int:
-    """Elimina todos los chats WA del tenant y sus mensajes."""
+    """Elimina chats WA del tenant (efímeros: viven solo mientras el celular está vinculado)."""
+    from app.domain.entities import WhatsAppContactLink
+
     conv_ids = [
         row[0]
         for row in db.query(Conversation.id)
@@ -42,7 +44,46 @@ def purge_all_tenant_whatsapp_conversations(db: Session, *, tenant_id: UUID) -> 
         .filter(Conversation.tenant_id == tenant_id)
         .delete(synchronize_session=False)
     )
+    db.query(WhatsAppContactLink).filter(
+        WhatsAppContactLink.tenant_id == tenant_id
+    ).delete(synchronize_session=False)
     log.info("Chats WA tenant=%s eliminados count=%s", tenant_id, deleted)
+    return deleted
+
+
+def purge_ephemeral_whatsapp_data(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    notify: bool = True,
+) -> int:
+    """Borra historial del panel cuando la sesión WA muere (desvío, caída o refresh)."""
+    from app.application.sync.tenant_sync_state import clear_tenant_sync_state
+    from app.config import settings
+
+    try:
+        clear_tenant_sync_state(tenant.id)
+    except Exception:
+        pass
+
+    deleted = purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
+    if settings.evolution_database_url:
+        try:
+            from app.application.whatsapp.whatsapp_gateway import uses_waha
+            from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
+
+            if not uses_waha() and session.instance_name:
+                purge_instance_stored_data(
+                    settings.evolution_database_url, session.instance_name
+                )
+        except Exception as exc:
+            log.warning("purge Evolution store omitido: %s", exc)
+
+    session.active_connection_id = None
+    session.connection_started_at = None
+    if notify and deleted:
+        notify_conversations_cleared(tenant.id)
     return deleted
 
 

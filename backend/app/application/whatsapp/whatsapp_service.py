@@ -452,8 +452,17 @@ def refresh_session_status(
     try:
         state_payload = gateway_connection_state(session.instance_name)
     except WhatsAppGatewayError:
+        from app.application.conversations.whatsapp_conversation_service import (
+            purge_ephemeral_whatsapp_data,
+        )
+
+        if previous_status == WhatsAppStatus.CONNECTED.value:
+            purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
         session.status = WhatsAppStatus.DISCONNECTED.value
         tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
+        session.phone_number = None
+        session.qr_base64 = None
+        session.bound_owner_jid = None
         db.flush()
         return SessionRefreshResult(
             session=session,
@@ -534,6 +543,32 @@ def refresh_session_status(
         owner_jid=str(owner) if owner else None,
     )
 
+    # Historial del panel = sesión viva. Si se cae el celular, no dejar basura en BD.
+    if mapped in {
+        WhatsAppStatus.DISCONNECTED.value,
+        WhatsAppStatus.BANNED.value,
+        WhatsAppStatus.RESTRICTED.value,
+    } and previous_status == WhatsAppStatus.CONNECTED.value:
+        from app.application.conversations.whatsapp_conversation_service import (
+            purge_ephemeral_whatsapp_data,
+        )
+
+        purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
+    elif mapped != WhatsAppStatus.CONNECTED.value:
+        # Ya estaba desconectado pero quedaron chats (caída sin purge).
+        leftover = (
+            db.query(Conversation.id)
+            .filter(Conversation.tenant_id == tenant.id)
+            .limit(1)
+            .first()
+        )
+        if leftover is not None:
+            from app.application.conversations.whatsapp_conversation_service import (
+                purge_ephemeral_whatsapp_data,
+            )
+
+            purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
+
     phone_changed = phone_before != session.phone_number or (
         bound_before != session.bound_owner_jid and session.bound_owner_jid is not None
     )
@@ -560,30 +595,28 @@ def refresh_session_status(
 
 def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) -> None:
     from app.application.conversations.whatsapp_conversation_service import (
-        notify_conversations_cleared,
-        purge_all_tenant_whatsapp_conversations,
+        purge_ephemeral_whatsapp_data,
     )
-    from app.application.sync.tenant_sync_state import clear_tenant_sync_state
 
-    clear_tenant_sync_state(tenant.id)
-
-    purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
-    if settings.evolution_database_url and not uses_waha():
-        from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-
-        purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
-    session.active_connection_id = None
-    session.connection_started_at = None
-    session.bound_owner_jid = None
-    notify_conversations_cleared(tenant.id)
+    purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
 
     try:
         gateway_logout_instance(session.instance_name)
     except WhatsAppGatewayError as exc:
         log.warning("WhatsApp logout failed for %s: %s", session.instance_name, exc)
 
+    # Borrar la instancia para que Evolution deje de emitir webhooks aunque el
+    # logout haya fallado — si no, la IA sigue contestando "desvinculada".
+    try:
+        gateway_delete_instance(session.instance_name)
+    except WhatsAppGatewayError as exc:
+        if exc.status_code != 404:
+            log.warning("WhatsApp delete instance failed for %s: %s", session.instance_name, exc)
+
     session.status = WhatsAppStatus.DISCONNECTED.value
     session.qr_base64 = None
+    session.bound_owner_jid = None
+    session.phone_number = None
     session.last_disconnected_at = datetime.now(timezone.utc)
     tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
     db.flush()

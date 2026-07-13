@@ -706,6 +706,7 @@
       state.syncInProgress = false;
       state.autoSyncRequested = false;
       clearConversations();
+      renderConversationList();
     }
     renderOnboarding();
   }
