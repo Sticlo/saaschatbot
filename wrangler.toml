@@ -1,4 +1,4 @@
-name = "omitel-site"
+name = "saaschatbot"
 compatibility_date = "2024-07-01"
 
 # Build output de Angular (web/site): npm run build → dist/site
