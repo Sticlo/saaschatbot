@@ -20,7 +20,12 @@ from app.application.ai.ai_usage_service import (
     increment_daily_reply_count,
 )
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
-from app.application.messaging.message_service import _detect_media_type_from_body
+from app.application.ai.ai_transcription_service import can_transcribe, ensure_transcript
+from app.application.messaging.message_service import (
+    _detect_media_type_from_body,
+    is_reaction_only,
+    text_for_ai,
+)
 from app.application.outbound.outbound_dedup_service import mark_phone_excluded
 from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
@@ -71,7 +76,7 @@ def is_respondable_text(body: str) -> bool:
     text = (body or "").strip()
     if not text:
         return False
-    if _detect_media_type_from_body(text):
+    if _detect_media_type_from_body(text) or is_reaction_only(text):
         return False
     return True
 
@@ -98,7 +103,7 @@ def _close_on_interest(
 ) -> bool:
     """La primera vez que se detecta interés o desinterés la IA se apaga y el chat pasa a manual.
     Si el agente reactivó la IA después, solo se actualiza la etiqueta. True = no seguir respondiendo."""
-    interest = _detect_interest(category, message.body)
+    interest = _detect_interest(category, text_for_ai(message))
     if interest is None:
         return False
 
@@ -154,16 +159,10 @@ def maybe_schedule_ai_for_conversation(
     profile = get_or_create_tenant_profile(db, tenant_id)
     classify_mode = is_classify_only(profile)
 
-    latest_in = (
-        db.query(Message)
-        .filter(
-            Message.conversation_id == conversation_id,
-            Message.direction == MessageDirection.IN.value,
-        )
-        .order_by(Message.created_at.desc())
-        .first()
-    )
-    if latest_in is None or not is_respondable_text(latest_in.body):
+    latest_in = _latest_meaningful_inbound(db, conversation_id)
+    if latest_in is None:
+        return False
+    if not is_respondable_text(text_for_ai(latest_in)) and not can_transcribe(latest_in):
         return False
 
     if not classify_mode and _bot_already_replied(db, conversation_id, latest_in):
@@ -213,16 +212,23 @@ def register_opt_out(
     publish_conversation_updated(tenant.id, conversation)
 
 
-def _is_latest_inbound(db: Session, conversation_id: uuid.UUID, message_id: uuid.UUID) -> bool:
-    latest = (
+def _latest_meaningful_inbound(db: Session, conversation_id: uuid.UUID) -> Optional[Message]:
+    """Último entrante ignorando reacciones/emojis, para que un ❤️ no tape la pregunta anterior."""
+    recent = (
         db.query(Message)
         .filter(
             Message.conversation_id == conversation_id,
             Message.direction == MessageDirection.IN.value,
         )
         .order_by(Message.created_at.desc())
-        .first()
+        .limit(20)
+        .all()
     )
+    return next((m for m in recent if not is_reaction_only(m.body)), None)
+
+
+def _is_latest_inbound(db: Session, conversation_id: uuid.UUID, message_id: uuid.UUID) -> bool:
+    latest = _latest_meaningful_inbound(db, conversation_id)
     return latest is not None and latest.id == message_id
 
 
@@ -307,7 +313,7 @@ def _run_classification(
 ) -> Optional[dict]:
     try:
         return classify_inbound_message(
-            message.body,
+            text_for_ai(message),
             business_name=tenant.business_name,
         )
     except Exception:
@@ -645,7 +651,9 @@ def process_ai_reply(
         log.info("IA skip conv=%s: %s", conversation_id, reason)
         return True
 
-    if not is_respondable_text(message.body):
+    if can_transcribe(message):
+        ensure_transcript(db, tenant=tenant, conversation=conversation, message=message)
+    if not is_respondable_text(text_for_ai(message)):
         log.info("IA skip conv=%s: mensaje no respondible (%r)", conversation_id, message.body[:80])
         return True
 

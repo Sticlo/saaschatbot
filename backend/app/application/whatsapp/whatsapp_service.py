@@ -436,17 +436,11 @@ def refresh_session_status(
     try:
         state_payload = gateway_connection_state(session.instance_name)
     except WhatsAppGatewayError:
-        from app.application.conversations.whatsapp_conversation_service import (
-            purge_ephemeral_whatsapp_data,
-        )
-
-        if previous_status == WhatsAppStatus.CONNECTED.value:
-            purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
+        # Evolution no respondió: se marca caído pero se conserva la vinculación para reconectar.
         session.status = WhatsAppStatus.DISCONNECTED.value
         tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
         session.phone_number = None
         session.qr_base64 = None
-        session.bound_owner_jid = None
         db.flush()
         return SessionRefreshResult(
             session=session,
@@ -500,7 +494,6 @@ def refresh_session_status(
 
     if needs_new_whatsapp_binding(
         session,
-        previous_status=previous_status,
         mapped_status=mapped,
         owner_jid=str(owner) if owner else None,
     ):
@@ -526,32 +519,6 @@ def refresh_session_status(
         mapped,
         owner_jid=str(owner) if owner else None,
     )
-
-    # Historial del panel = sesión viva. Si se cae el celular, no dejar basura en BD.
-    if mapped in {
-        WhatsAppStatus.DISCONNECTED.value,
-        WhatsAppStatus.BANNED.value,
-        WhatsAppStatus.RESTRICTED.value,
-    } and previous_status == WhatsAppStatus.CONNECTED.value:
-        from app.application.conversations.whatsapp_conversation_service import (
-            purge_ephemeral_whatsapp_data,
-        )
-
-        purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
-    elif mapped != WhatsAppStatus.CONNECTED.value:
-        # Ya estaba desconectado pero quedaron chats (caída sin purge).
-        leftover = (
-            db.query(Conversation.id)
-            .filter(Conversation.tenant_id == tenant.id)
-            .limit(1)
-            .first()
-        )
-        if leftover is not None:
-            from app.application.conversations.whatsapp_conversation_service import (
-                purge_ephemeral_whatsapp_data,
-            )
-
-            purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
 
     phone_changed = phone_before != session.phone_number or (
         bound_before != session.bound_owner_jid and session.bound_owner_jid is not None

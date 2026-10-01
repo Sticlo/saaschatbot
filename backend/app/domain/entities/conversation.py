@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -91,6 +91,8 @@ class Message(Base):
     direction: Mapped[str] = mapped_column(String(10), nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
     body: Mapped[str] = mapped_column(String(65535), nullable=False, default="")
+    # Notas de voz: None = sin transcribir, "" = se intentó y no había voz entendible.
+    transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     evolution_message_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True, index=True

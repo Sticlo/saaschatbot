@@ -63,6 +63,8 @@ def detect_purchase_intent(text: str) -> bool:
         "listo para",
         "hagámoslo",
         "hagamoslo",
+        # Gemini marca así las fotos de transferencias (Nequi, Daviplata…): el cliente ya pagó.
+        "comprobante de pago",
     )
     if any(p in lower for p in strong_phrases):
         return True

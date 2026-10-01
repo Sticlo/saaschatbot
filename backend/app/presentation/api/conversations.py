@@ -124,22 +124,6 @@ def list_conversations(
         db.refresh(session)
 
     if not conversations_visible_for_tenant(db, tenant=tenant, session=session):
-        from app.application.conversations.whatsapp_conversation_service import (
-            purge_ephemeral_whatsapp_data,
-        )
-
-        # Sin sesión WA viva no hay historial en el panel (vive en el celular).
-        if (
-            db.query(Conversation.id)
-            .filter(Conversation.tenant_id == tenant.id)
-            .limit(1)
-            .first()
-            is not None
-        ):
-            purge_ephemeral_whatsapp_data(
-                db, tenant=tenant, session=session, notify=True
-            )
-            db.commit()
         return []
 
     from app.application.chatwoot.chatwoot_inbox_sync import sync_chatwoot_inbox
@@ -165,8 +149,11 @@ def list_conversations(
     elif archived is False:
         query = query.filter(Conversation.is_archived.is_(False))
 
+    from app.domain.entities.enums import WhatsAppStatus
+
     conv_count_pre = query.count()
-    if archived is not False and not chatwoot_sync_mode():
+    wa_connected = tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value
+    if archived is not False and wa_connected and not chatwoot_sync_mode():
         from app.application.sync.sync_scheduler import schedule_whatsapp_sync
 
         if conv_count_pre == 0:
@@ -724,18 +711,6 @@ def trigger_conversation_ai(
 # Media
 # ──────────────────────────────────────────────────────────────
 
-_MEDIA_TYPES = {"image", "video", "audio", "sticker", "document", "ptt"}
-
-MEDIA_MIME = {
-    "image": "image/jpeg",
-    "sticker": "image/webp",
-    "video": "video/mp4",
-    "audio": "audio/ogg",
-    "ptt": "audio/ogg",
-    "document": "application/octet-stream",
-}
-
-
 @router.get("/{conversation_id}/messages/{message_id}/media")
 def get_message_media(
     conversation_id: uuid.UUID,
@@ -765,77 +740,12 @@ def get_message_media(
     if conversation is None or message is None:
         raise HTTPException(status_code=404, detail="Mensaje no encontrado")
 
-    if not message.evolution_message_id:
-        raise HTTPException(status_code=404, detail="Este mensaje no tiene media asociada")
-
-    session = (
-        db.query(WhatsAppSession)
-        .filter(WhatsAppSession.tenant_id == current.tenant_id)
-        .first()
-    )
-    if session is None:
-        raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
-
-    from app.shared.core.phone import phone_to_evolution_number
-    from app.infrastructure.evolution.evolution_store import fetch_evolution_message_by_id
-    from app.application.messaging.media_cache import get_media_from_cache
-
-    contact_jid = conversation.contact_jid or ""
-    if not contact_jid and conversation.contact_phone:
-        contact_jid = f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
-
-    # Detectar tipo desde el body del mensaje almacenado
-    body_lower = (message.body or "").strip().lower()
-    media_type = "document"
-    for mt in _MEDIA_TYPES:
-        if body_lower.startswith(f"[{mt}"):
-            media_type = mt
-            break
-
-    # 1. Buscar primero en caché local de disco (guardado en el webhook)
-    if message.evolution_message_id:
-        cached = get_media_from_cache(str(current.tenant_id), message.evolution_message_id)
-        if cached:
-            return JSONResponse({
-                "base64": cached["base64"],
-                "media_type": media_type,
-                "mimetype": cached["mimetype"],
-            })
-
-    evo_msg = fetch_evolution_message_by_id(
-        settings.evolution_database_url,
-        session.instance_name,
-        message.evolution_message_id,
-        contact_jid,
-    )
-
-    # Fallback: buscar via Evolution API si no está en DB
-    if (not evo_msg or not evo_msg.get("message")) and contact_jid:
-        found = evolution_client.find_message_by_key(
-            session.instance_name,
-            message_id=message.evolution_message_id,
-            remote_jid=contact_jid,
-        )
-        if found and isinstance(found, dict):
-            key = found.get("key") or {}
-            msg_body = found.get("message") or {}
-            if not isinstance(key, dict):
-                key = {}
-            if not isinstance(msg_body, dict):
-                msg_body = {}
-            evo_msg = {"key": key, "message": msg_body}
-
-    if not evo_msg or not evo_msg.get("message"):
-        raise HTTPException(status_code=404, detail="Media no encontrada en Evolution")
+    from app.application.messaging.media_fetch_service import MediaFetchError, fetch_message_media
 
     try:
-        result = evolution_client.get_media_base64(session.instance_name, evo_msg)
-    except EvolutionAPIError as exc:
-        raise HTTPException(status_code=502, detail=f"Evolution no pudo descargar el media: {exc}") from exc
-
-    b64 = result.get("base64") or result.get("data") or ""
-    mime = result.get("mimetype") or MEDIA_MIME.get(media_type, "application/octet-stream")
-    if not b64:
-        raise HTTPException(status_code=502, detail="Evolution no retornó datos de media")
-
-    return JSONResponse({"base64": b64, "media_type": media_type, "mimetype": mime})
+        media = fetch_message_media(
+            db, tenant_id=current.tenant_id, conversation=conversation, message=message
+        )
+    except MediaFetchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return JSONResponse(media)

@@ -54,15 +54,20 @@ def is_alert_phone(tenant: Tenant, phone: str) -> bool:
 def unanswered_interested_conversations(db: Session, tenant_id: uuid.UUID) -> list[Conversation]:
     """Interesados cuyo último mensaje del cliente no tiene respuesta de un humano después."""
 
-    def last_from(source: str):
+    def last_from(source: str, *extra):
         return (
             select(func.max(Message.created_at))
-            .where(Message.conversation_id == Conversation.id, Message.source == source)
+            .where(Message.conversation_id == Conversation.id, Message.source == source, *extra)
             .correlate(Conversation)
             .scalar_subquery()
         )
 
-    last_contact = last_from(MessageSource.CONTACT.value)
+    # Mismo criterio que is_reaction_only: un ❤️ o 👍 del cliente no lo deja esperando respuesta.
+    last_contact = last_from(
+        MessageSource.CONTACT.value,
+        Message.body.op("~")("[[:alnum:]]"),
+        ~Message.body.ilike("[reaction%"),
+    )
     last_agent = last_from(MessageSource.AGENT.value)
     return (
         db.query(Conversation)

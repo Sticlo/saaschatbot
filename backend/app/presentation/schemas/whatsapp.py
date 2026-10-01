@@ -104,6 +104,7 @@ class MessageResponse(BaseModel):
     direction: str
     source: str
     body: str
+    transcript: Optional[str] = None
     status: str
     evolution_message_id: Optional[str]
     created_at: datetime

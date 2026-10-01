@@ -1357,6 +1357,20 @@ textarea { resize: vertical; min-height: 44px; }
   border-radius: 6px;
   display: block;
 }
+
+.media-caption {
+  margin: 0.4rem 0 0;
+  max-width: 260px;
+  white-space: pre-wrap;
+}
+.media-transcript {
+  margin: 0.4rem 0 0;
+  max-width: 260px;
+  font-size: 0.86rem;
+  font-style: italic;
+  opacity: 0.9;
+  white-space: pre-wrap;
+}
 .media-download {
   display: inline-block;
   padding: 0.35rem 0.65rem;

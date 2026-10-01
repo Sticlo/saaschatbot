@@ -102,6 +102,34 @@ def _detect_media_type_from_body(body: str) -> Optional[str]:
     return None
 
 
+def media_caption(body: str) -> str:
+    """Texto que acompaña un media: "[image]\\n¿tienen esta?" → "¿tienen esta?"."""
+    if not _detect_media_type_from_body(body):
+        return ""
+    return (body or "").strip().partition("\n")[2].strip()
+
+
+def text_for_ai(message) -> str:
+    """Lo que la IA debe leer: transcripción del audio, descripción de la imagen + su texto, o el texto."""
+    body = message.body or ""
+    media_type = _detect_media_type_from_body(body)
+    if not media_type:
+        return body
+    transcript = (message.transcript or "").strip()
+    if media_type in ("audio", "ptt"):
+        return transcript or body
+    described = f"(imagen: {transcript})" if transcript else ""
+    return " ".join(p for p in (described, media_caption(body)) if p) or body
+
+
+def is_reaction_only(body: str) -> bool:
+    """Reacciones (❤️, 👍) y mensajes de solo emojis: el cliente no espera respuesta."""
+    text = (body or "").strip()
+    if text.lower().startswith("[reaction"):
+        return True
+    return not any(ch.isalnum() for ch in text)
+
+
 def _extract_message_body(message_obj: dict) -> str:
     if not isinstance(message_obj, dict):
         return ""
@@ -125,6 +153,11 @@ def _extract_message_body(message_obj: dict) -> str:
         value = message_obj.get(key)
         if isinstance(value, str):
             return value
+        if isinstance(value, dict) and key in ("imageMessage", "videoMessage"):
+            # Conservar el marcador de media aunque traiga texto, o la foto se pierde.
+            label = key.replace("Message", "")
+            caption = str(value.get("caption") or "").strip()
+            return f"[{label}]\n{caption}" if caption else f"[{label}]"
         if isinstance(value, dict):
             text = (
                 value.get("text")
@@ -1037,12 +1070,9 @@ def handle_connection_update(
 ) -> None:
     from app.application.conversations.whatsapp_conversation_service import (
         needs_new_whatsapp_binding,
-        notify_conversations_cleared,
-        purge_whatsapp_conversations,
         start_new_whatsapp_binding,
     )
 
-    previous_status = session.status
     state = data.get("state") or data.get("status") or data.get("connection")
     if isinstance(state, dict):
         state = state.get("state")
@@ -1051,7 +1081,6 @@ def handle_connection_update(
 
     if needs_new_whatsapp_binding(
         session,
-        previous_status=previous_status,
         mapped_status=mapped,
         owner_jid=str(owner) if owner else None,
     ):
@@ -1078,28 +1107,6 @@ def handle_connection_update(
         mapped,
         owner_jid=str(owner) if owner else None,
     )
-
-    if (
-        mapped in {
-            WhatsAppStatus.DISCONNECTED.value,
-            WhatsAppStatus.BANNED.value,
-            WhatsAppStatus.RESTRICTED.value,
-        }
-        and previous_status == WhatsAppStatus.CONNECTED.value
-    ):
-        from app.config import settings
-        from app.infrastructure.evolution.evolution_store import purge_instance_stored_data
-        from app.application.conversations.whatsapp_conversation_service import (
-            notify_conversations_cleared,
-            purge_all_tenant_whatsapp_conversations,
-        )
-
-        purge_all_tenant_whatsapp_conversations(db, tenant_id=tenant.id)
-        if settings.evolution_database_url:
-            purge_instance_stored_data(settings.evolution_database_url, session.instance_name)
-        session.active_connection_id = None
-        session.connection_started_at = None
-        notify_conversations_cleared(tenant.id)
 
     from app.application.realtime.realtime_service import publish_whatsapp_status
 

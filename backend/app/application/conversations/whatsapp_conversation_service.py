@@ -26,7 +26,7 @@ def begin_whatsapp_connection(session: WhatsAppSession, *, owner_jid: Optional[s
 
 
 def purge_all_tenant_whatsapp_conversations(db: Session, *, tenant_id: UUID) -> int:
-    """Elimina chats WA del tenant (efímeros: viven solo mientras el celular está vinculado)."""
+    """Elimina chats WA del tenant (al desvincular o al cambiar de celular)."""
     from app.domain.entities import WhatsAppContactLink
 
     conv_ids = [
@@ -58,7 +58,7 @@ def purge_ephemeral_whatsapp_data(
     session: WhatsAppSession,
     notify: bool = True,
 ) -> int:
-    """Borra historial del panel cuando la sesión WA muere (desvío, caída o refresh)."""
+    """Borra el historial del panel cuando el dueño desvincula el celular a propósito."""
     from app.application.sync.tenant_sync_state import clear_tenant_sync_state
     from app.config import settings
 
@@ -162,7 +162,7 @@ def ensure_whatsapp_binding_ready(
     owner_changed = bool(
         session.bound_owner_jid
         and owner
-        and session.bound_owner_jid != str(owner)
+        and _owner_user_part(session.bound_owner_jid) != _owner_user_part(str(owner))
     )
     phone_changed = bool(
         session.phone_number
@@ -212,11 +212,8 @@ def conversations_visible_for_tenant(
     tenant: Tenant,
     session: Optional[WhatsAppSession],
 ) -> bool:
-    if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
-        return False
-    if session is None or session.active_connection_id is None:
-        return False
-    return True
+    """El historial se ve aunque WhatsApp esté caído; solo se puede responder cuando vuelve."""
+    return session is not None and session.active_connection_id is not None
 
 
 def _owner_user_part(jid: str) -> str:
@@ -226,29 +223,16 @@ def _owner_user_part(jid: str) -> str:
 def needs_new_whatsapp_binding(
     session: WhatsAppSession,
     *,
-    previous_status: str,
     mapped_status: str,
     owner_jid: Optional[str],
 ) -> bool:
-    from app.shared.core.phone import jid_to_phone
-
+    """Solo un celular distinto empieza de cero; si vuelve el mismo tras una caída, se conservan los chats."""
     if mapped_status != WhatsAppStatus.CONNECTED.value:
         return False
-    if previous_status != WhatsAppStatus.CONNECTED.value:
-        return True
     if session.active_connection_id is None:
         return True
-    if owner_jid:
-        owner_str = str(owner_jid)
-        new_phone = jid_to_phone(owner_str)
-        if new_phone and session.phone_number and new_phone != session.phone_number:
-            return True
-        if session.bound_owner_jid:
-            old_phone = jid_to_phone(session.bound_owner_jid)
-            if new_phone and old_phone and new_phone != old_phone:
-                return True
-            if _owner_user_part(owner_str) != _owner_user_part(session.bound_owner_jid):
-                return True
+    if owner_jid and session.bound_owner_jid:
+        return _owner_user_part(str(owner_jid)) != _owner_user_part(session.bound_owner_jid)
     return False
 
 

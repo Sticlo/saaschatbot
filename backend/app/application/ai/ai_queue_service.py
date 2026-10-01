@@ -273,8 +273,10 @@ def start_ai_worker() -> None:
     )
     _worker_thread.start()
     from app.application.conversations.interest_alert_service import start_interest_alert_sweeper
+    from app.application.whatsapp.whatsapp_reconnect_service import start_whatsapp_reconnect_watchdog
 
     start_interest_alert_sweeper()
+    start_whatsapp_reconnect_watchdog()
     if is_configured():
         log.info(
             "AI worker started (model=%s, max_parallel=%s)",
@@ -287,8 +289,10 @@ def start_ai_worker() -> None:
 
 def stop_ai_worker() -> None:
     from app.application.conversations.interest_alert_service import stop_interest_alert_sweeper
+    from app.application.whatsapp.whatsapp_reconnect_service import stop_whatsapp_reconnect_watchdog
 
     stop_interest_alert_sweeper()
+    stop_whatsapp_reconnect_watchdog()
     _worker_stop.set()
     if _worker_thread and _worker_thread.is_alive():
         _worker_thread.join(timeout=1)

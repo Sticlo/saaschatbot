@@ -10,6 +10,7 @@ from app.application.ai.ai_shortcut_service import (
     parse_ai_reply,
     shortcut_ids,
 )
+from app.application.messaging.message_service import _detect_media_type_from_body, text_for_ai
 from app.config import settings
 from app.domain.entities import Message, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
@@ -24,6 +25,12 @@ Objetivo: calificar interés, responder dudas y proponer un siguiente paso concr
 No inventes precios ni promesas que no estén en el contexto del negocio.
 Si no sabes algo, dilo con honestidad y ofrece que un humano del equipo le confirme.
 """
+
+MEDIA_RULES = """
+
+Notas de voz e imágenes del cliente te llegan ya convertidas a texto: "(nota de voz) …" o "(imagen: …)".
+Respóndelas con naturalidad, como si las hubieras visto o escuchado.
+Nunca confirmes que un pago fue recibido o verificado, aunque veas un comprobante: di que el equipo lo revisa y le confirma."""
 
 
 def build_system_prompt(
@@ -57,6 +64,10 @@ def format_history(messages: list[Message], *, limit: Optional[int] = None) -> l
     for msg in rows:
         role = "user" if msg.direction == MessageDirection.IN.value else "assistant"
         body = (msg.body or "").strip()
+        if msg.transcript and _detect_media_type_from_body(body) in ("audio", "ptt"):
+            body = f"(nota de voz) {msg.transcript.strip()}"
+        elif msg.transcript:
+            body = text_for_ai(msg).strip()
         if not body:
             continue
         formatted.append({"role": role, "content": body})
@@ -69,7 +80,7 @@ def _complete_reply(
     history: list[Message],
     shortcuts: list[dict],
 ) -> AiGeneratedReply:
-    messages = [{"role": "system", "content": system}, *format_history(history)]
+    messages = [{"role": "system", "content": system + MEDIA_RULES}, *format_history(history)]
     ids = shortcut_ids(shortcuts)
     temperature = 0.45 if ids else 0.65
     raw = chat_completion(

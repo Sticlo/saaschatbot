@@ -46,6 +46,13 @@ def test_is_respondable_text_skips_media():
     assert is_respondable_text("Hola, me interesa") is True
 
 
+def test_reactions_and_emoji_only_get_no_reply():
+    for body in ("❤️", "👍", "👍🏽", "😂😂", "🙏 🙏", "!!", "[reaction]"):
+        assert is_respondable_text(body) is False, body
+    for body in ("2", "ok", "¿precio?", "Gracias ❤️"):
+        assert is_respondable_text(body) is True, body
+
+
 def test_heuristic_opt_out():
     result = _heuristic_classify("Por favor no me escribas más")
     assert result["category"] == "opt_out"

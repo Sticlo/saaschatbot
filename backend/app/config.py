@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 1440
+    jwt_access_token_expire_minutes: int = 43200
 
     trial_bait_limit: int = 10
     paid_daily_bait_limit: int = 100
@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     deepseek_api_base: str = "https://api.deepseek.com"
     deepseek_chat_model: str = ALLOWED_DEEPSEEK_MODEL
     deepseek_classifier_model: str = ALLOWED_DEEPSEEK_MODEL
+    # Gemini — entiende notas de voz e imágenes (DeepSeek solo recibe texto).
+    gemini_api_key: str = ""
+    gemini_api_base: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_audio_model: str = "gemini-3.5-flash-lite"
+    gemini_image_model: str = "gemini-3.5-flash-lite"
+    ai_audio_max_mb: float = 15.0
+    ai_image_max_mb: float = 10.0
     ai_reply_delay_min_seconds: float = 2.0
     ai_reply_delay_max_seconds: float = 6.0
     # Costo IA — deepseek-flash + heurísticas (sin clasificador LLM por defecto)

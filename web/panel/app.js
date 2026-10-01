@@ -699,7 +699,6 @@
       stopLivePoll();
       state.syncInProgress = false;
       state.autoSyncRequested = false;
-      clearConversations();
       renderConversationList();
     }
     renderOnboarding();
@@ -723,6 +722,14 @@
 
     $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect);
     $("wa-setup")?.classList.toggle("hidden", !needsConnect);
+    const dropped = needsConnect && state.conversations.length > 0;
+    const setupTitle = $("wa-setup-title");
+    if (setupTitle) {
+      setupTitle.textContent = dropped ? "WhatsApp se desconectó" : "Conecta tu WhatsApp";
+      $("wa-setup-text").innerHTML = dropped
+        ? "Estamos intentando reconectar solos y tus chats se conservan. Si en un par de minutos no vuelve, escanea el código QR otra vez."
+        : "Escanea el código QR con WhatsApp en tu celular. Cuando lleguen mensajes, la IA los clasifica y los verás en <strong>Interesados</strong>.";
+    }
     $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     const cwLink = $("wa-chatwoot-link");
@@ -847,7 +854,7 @@
   }
 
   function convSubtitle(c) {
-    if (c.last_message_preview) return c.last_message_preview;
+    if (c.last_message_preview) return mediaPreview(c.last_message_preview);
     return c.display_phone || "";
   }
 
@@ -1103,6 +1110,18 @@
     return null;
   }
 
+  function mediaCaption(body) {
+    if (!detectMediaType(body)) return "";
+    return (body || "").trim().split("\n").slice(1).join("\n").trim();
+  }
+
+  function mediaPreview(body) {
+    const type = detectMediaType(body);
+    if (!type) return body;
+    const name = { image: "Foto", sticker: "Sticker", video: "Video", audio: "Audio", ptt: "Nota de voz", document: "Archivo" }[type];
+    return `${mediaIcon(type)} ${mediaCaption(body).replace(/\s+/g, " ") || name}`;
+  }
+
   function mediaIcon(type) {
     return {
       image: "🖼️", sticker: "🎭", video: "🎬",
@@ -1153,6 +1172,16 @@
 
     const inner = document.createElement("div");
     inner.className = "media-wrap";
+    const caption = mediaCaption(m.body);
+    if (caption) {
+      timeHtml = `<p class="media-caption">${escapeHtml(caption)}</p>${timeHtml}`;
+    }
+    if (m.transcript) {
+      const isVoice = type === "audio" || type === "ptt";
+      const text = isVoice ? `🎤 “${escapeHtml(m.transcript)}”` : `👁️ ${escapeHtml(m.transcript)}`;
+      const title = isVoice ? "Transcripción de la nota de voz" : "Lo que la IA entendió de la imagen";
+      timeHtml = `<p class="media-transcript" title="${title}">${text}</p>${timeHtml}`;
+    }
 
     // Si ya tenemos resultado en caché, mostrar directamente sin spinner
     const cached = mediaCache.get(m.id);
@@ -2146,7 +2175,7 @@
 
       applyWaSession(wa);
       setChatListTab(state.chatListTab);
-      if (state.wa.status === "connected" && !state.syncInProgress) {
+      if (!state.syncInProgress) {
         try {
           const all = sortConversations(await api("/conversations?archived=false", {}, 30000));
           recalculateInterestedCount(all);
@@ -2167,6 +2196,7 @@
       messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
 
       renderConversationList();
+      renderWaUi();
       renderAiAlerts();
       renderOnboarding();
       if (
@@ -2273,6 +2303,15 @@
                 .join("\n");
               renderMessages();
             }
+          }
+        }
+        break;
+      case "message.updated":
+        if (event.message && event.conversation?.id === state.activeId) {
+          const idx = state.messages.findIndex((m) => m.id === event.message.id);
+          if (idx >= 0) {
+            state.messages[idx] = event.message;
+            renderMessages();
           }
         }
         break;
