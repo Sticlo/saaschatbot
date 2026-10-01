@@ -10,7 +10,6 @@ from app.presentation.api import (
     bait_templates,
     billing,
     conversations,
-    outbound,
     plans,
     quick_shortcuts,
     subscriptions,
@@ -27,7 +26,6 @@ api_router.include_router(tenants.router)
 api_router.include_router(subscriptions.router)
 api_router.include_router(whatsapp.router)
 api_router.include_router(conversations.router)
-api_router.include_router(outbound.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
 api_router.include_router(appointments.router)

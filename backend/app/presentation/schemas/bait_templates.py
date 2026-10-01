@@ -86,6 +86,7 @@ class AssetUploadResponse(BaseModel):
 
 
 class BusinessProfileUpdate(BaseModel):
+    business_name: Optional[str] = Field(default=None, max_length=255)
     industry: Optional[str] = Field(default=None, max_length=255)
     products_services: Optional[str] = Field(default=None, max_length=2000)
     target_customer: Optional[str] = Field(default=None, max_length=500)
@@ -101,6 +102,7 @@ class BusinessProfileUpdate(BaseModel):
 
 class BusinessProfileResponse(BaseModel):
     business_name: str
+    business_name_is_placeholder: bool = False
     industry: Optional[str] = None
     products_services: Optional[str] = None
     target_customer: Optional[str] = None

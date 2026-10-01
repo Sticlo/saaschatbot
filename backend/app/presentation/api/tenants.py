@@ -10,6 +10,8 @@ from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, TenantProfile
 from app.infrastructure.cache.redis_client import cache_delete, tenant_cache_key
 from app.presentation.schemas.auth import (
+    InterestAlertResponse,
+    InterestAlertSettings,
     TenantProfileResponse,
     TenantProfileUpdate,
     TenantResponse,
@@ -112,6 +114,83 @@ def update_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+def _interest_alert_response(db: Session, profile: TenantProfile) -> InterestAlertResponse:
+    from app.application.conversations.interest_alert_service import (
+        unanswered_interested_conversations,
+    )
+
+    return InterestAlertResponse(
+        alert_phone=profile.alert_phone or "",
+        alert_threshold=profile.alert_threshold,
+        pending_count=len(unanswered_interested_conversations(db, profile.tenant_id)),
+    )
+
+
+@router.get("/me/interest-alert", response_model=InterestAlertResponse)
+def get_interest_alert(current: RequireViewer, db: Session = Depends(get_db)):
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    db.commit()
+    return _interest_alert_response(db, profile)
+
+
+@router.put("/me/interest-alert", response_model=InterestAlertResponse)
+def update_interest_alert(
+    body: InterestAlertSettings,
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    from app.application.conversations.interest_alert_service import (
+        InterestAlertError,
+        normalize_alert_phone,
+    )
+
+    try:
+        phone = normalize_alert_phone(body.alert_phone)
+    except InterestAlertError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    profile.alert_phone = phone or None
+    profile.alert_threshold = body.alert_threshold
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="tenant.interest_alert_updated",
+        details={"alert_threshold": body.alert_threshold, "enabled": bool(phone)},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    db.refresh(profile)
+    return _interest_alert_response(db, profile)
+
+
+@router.post("/me/interest-alert/test", status_code=status.HTTP_204_NO_CONTENT)
+def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
+    from app.application.conversations.interest_alert_service import send_alert
+    from app.application.whatsapp.whatsapp_status import can_send_whatsapp
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    profile = get_or_create_tenant_profile(db, tenant.id)
+    if not profile.alert_phone:
+        raise HTTPException(status_code=400, detail="Primero guarda el número que recibirá las alertas")
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok or tenant.whatsapp_session is None:
+        raise HTTPException(status_code=400, detail=reason or "Conecta tu WhatsApp primero")
+    try:
+        send_alert(
+            tenant.whatsapp_session,
+            profile.alert_phone,
+            f"✅ Prueba de alertas de *{tenant.business_name}*: aquí te avisaremos cuando "
+            f"tengas {profile.alert_threshold} clientes interesados sin responder.",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo enviar la prueba: {exc}")
 
 
 @router.post("/me/accept-disclaimer", response_model=TenantResponse)

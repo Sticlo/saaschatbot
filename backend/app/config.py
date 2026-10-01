@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ALLOWED_DEEPSEEK_MODEL = "deepseek-chat"
+ALLOWED_DEEPSEEK_MODEL = "deepseek-flash"
 _INSECURE_SECRET_KEYS = frozenset(
     {"change-me-in-env", "change-me", "secret", "changeme", ""}
 )
@@ -39,23 +39,14 @@ class Settings(BaseSettings):
     paid_daily_bait_limit: int = 100
     default_plan_slug: str = "pro"
 
-    # Outbound / carnadas
-    bait_delay_min_seconds: int = 45
-    bait_delay_max_seconds: int = 120
-    outbound_worker_poll_seconds: float = 5.0
-    default_bait_template: str = (
-        "Hola{name_part}! Vi tu negocio y me gustaría contarte cómo podemos ayudarte. "
-        "¿Tienes un momentico para charlar?"
-    )
-
-    # DeepSeek IA — solo deepseek-chat (económico). No usar reasoner ni v4-pro.
+    # DeepSeek IA — solo deepseek-flash sin thinking (económico). No usar v4-pro.
     deepseek_api_key: str = ""
     deepseek_api_base: str = "https://api.deepseek.com"
     deepseek_chat_model: str = ALLOWED_DEEPSEEK_MODEL
     deepseek_classifier_model: str = ALLOWED_DEEPSEEK_MODEL
     ai_reply_delay_min_seconds: float = 2.0
     ai_reply_delay_max_seconds: float = 6.0
-    # Costo IA — deepseek-chat + heurísticas (sin clasificador LLM por defecto)
+    # Costo IA — deepseek-flash + heurísticas (sin clasificador LLM por defecto)
     ai_classifier_use_llm: bool = False
     ai_history_messages: int = 10
     ai_reply_max_tokens: int = 350

@@ -29,6 +29,19 @@ def _unique_slug(db: Session, business_name: str) -> str:
     return slug
 
 
+PLACEHOLDER_BUSINESS_PREFIX = "Negocio de "
+
+
+def placeholder_business_name(full_name: Optional[str]) -> str:
+    """Nombre provisional cuando el registro (Google/GitHub) no pregunta por el negocio."""
+    first = full_name.split()[0] if full_name and full_name.split() else "Omitel"
+    return f"{PLACEHOLDER_BUSINESS_PREFIX}{first}"
+
+
+def is_placeholder_business_name(name: Optional[str]) -> bool:
+    return not (name or "").strip() or (name or "").startswith(PLACEHOLDER_BUSINESS_PREFIX)
+
+
 def register_tenant_with_owner(
     db: Session,
     *,

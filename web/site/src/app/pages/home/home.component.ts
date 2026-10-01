@@ -152,8 +152,8 @@ export class HomeComponent implements OnInit, OnDestroy {
     },
     {
       icon: 'shortcuts',
-      title: 'Atajos y carnada',
-      line: 'Mensajes listos para prospectar y responder más rápido a clientes calientes.',
+      title: 'Atajos rápidos',
+      line: 'Menú, precios y fotos en un clic para responder al instante.',
     },
     {
       icon: 'appointments',
@@ -163,10 +163,10 @@ export class HomeComponent implements OnInit, OnDestroy {
   ];
 
   readonly industries: Industry[] = [
+    { name: 'Hoteles', example: 'Disponibilidad, tarifas y reservas' },
+    { name: 'Moteles', example: 'Precios, habitaciones y horarios' },
     { name: 'Restaurantes', example: 'Reservas, menú y domicilios' },
     { name: 'Clínicas', example: 'Citas, horarios y especialidades' },
-    { name: 'Inmobiliarias', example: 'Visitas, precios y disponibilidad' },
-    { name: 'Talleres', example: 'Cotizaciones y agendamiento' },
     { name: 'Tiendas', example: 'Stock, envíos y apartados' },
     { name: 'Servicios', example: 'Consultas, propuestas y seguimiento' },
   ];

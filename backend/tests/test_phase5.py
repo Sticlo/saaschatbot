@@ -78,9 +78,10 @@ def test_classifier_keeps_trivial_ok_as_ruido(mock_chat):
 def test_resolve_model_blocks_expensive():
     from app.infrastructure.ai.deepseek_client import resolve_model
 
-    assert resolve_model("deepseek-reasoner") == "deepseek-chat"
-    assert resolve_model("deepseek-v4-pro") == "deepseek-chat"
-    assert resolve_model("deepseek-chat") == "deepseek-chat"
+    assert resolve_model("deepseek-reasoner") == "deepseek-flash"
+    assert resolve_model("deepseek-v4-pro") == "deepseek-flash"
+    assert resolve_model("deepseek-chat") == "deepseek-flash"
+    assert resolve_model("deepseek-flash") == "deepseek-flash"
 
 
 @patch("app.application.ai.ai_classifier_service.chat_completion")
@@ -145,7 +146,7 @@ def test_classify_only_marks_interested_no_reply(_sleep, mock_classify, mock_sen
             conversation_id=conv.id,
             direction=MessageDirection.IN.value,
             source=MessageSource.CONTACT.value,
-            body="Me interesa saber más",
+            body="Quiero reservar para el sábado",
             status="received",
         )
         db.add(msg)
@@ -163,6 +164,8 @@ def test_classify_only_marks_interested_no_reply(_sleep, mock_classify, mock_sen
     assert ok is True
     mock_send.assert_not_called()
     assert conv.interest_status == "interested"
+    assert conv.ai_active is False
+    assert conv.mode == "manual"
 
 
 @requires_db

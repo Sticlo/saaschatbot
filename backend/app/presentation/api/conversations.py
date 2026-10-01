@@ -15,7 +15,7 @@ from app.shared.core.phone import is_owner_display_name, is_owner_jid, is_lid_pl
 from app.config import settings
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
-from app.domain.entities.enums import MessageSource
+from app.domain.entities.enums import ConversationMode, MessageSource
 from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 from app.presentation.schemas.whatsapp import (
     ConversationAiUpdate,
@@ -600,6 +600,9 @@ def update_conversation_mode(
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
     conversation.mode = body.mode
+    if body.mode == ConversationMode.MANUAL.value:
+        conversation.ai_active = False
+        conversation.ai_set_by_agent = True
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
@@ -625,6 +628,9 @@ def update_conversation_ai(
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
     conversation.ai_active = body.ai_active
+    conversation.ai_set_by_agent = True
+    if body.ai_active:
+        conversation.mode = ConversationMode.AUTO.value
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
@@ -664,6 +670,10 @@ def update_conversation_interest(
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
     conversation.interest_status = body.interest_status
+    if body.interest_status:
+        conversation.ai_active = False
+        conversation.mode = ConversationMode.MANUAL.value
+        conversation.ai_set_by_agent = True
     db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)

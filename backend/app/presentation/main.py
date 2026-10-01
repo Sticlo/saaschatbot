@@ -70,7 +70,6 @@ async def lifespan(app: FastAPI):
             start_ai_worker,
             stop_ai_worker,
         )
-        from app.application.outbound.bait_scheduler import start_outbound_worker, stop_outbound_worker
         from app.application.workers.queue_service import start_webhook_worker, stop_webhook_worker
         from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
         from app.application.sync.live_pull_scheduler import (
@@ -80,7 +79,6 @@ async def lifespan(app: FastAPI):
         from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
 
         start_webhook_worker()
-        start_outbound_worker()
         start_ai_worker()
         start_sync_worker()
         if not chatwoot_sync_mode():
@@ -91,7 +89,6 @@ async def lifespan(app: FastAPI):
         if not chatwoot_sync_mode():
             stop_live_pull_scheduler()
         stop_ai_worker()
-        stop_outbound_worker()
         stop_webhook_worker()
         stop_sync_worker()
     else:
@@ -186,7 +183,6 @@ def health():
     queue_depth = 0
     ai_queue_depth = 0
     workers_webhook = 0
-    workers_outbound = 0
     workers_ai = 0
     ai_slots_active = 0
     try:
@@ -199,7 +195,6 @@ def health():
         queue_depth = r.llen(INBOUND_WEBHOOK_QUEUE)
         ai_queue_depth = r.llen(AI_REPLY_QUEUE)
         workers_webhook = count_active_workers("webhook")
-        workers_outbound = count_active_workers("outbound")
         workers_ai = count_active_workers("ai")
         if workers_webhook == 0 and settings.embed_workers_in_api:
             from app.application.workers.queue_service import webhook_worker_is_alive
@@ -219,7 +214,6 @@ def health():
         "workers_embedded": settings.embed_workers_in_api,
         "workers": {
             "webhook": workers_webhook,
-            "outbound": workers_outbound,
             "ai": workers_ai,
         },
         "webhook_queue_depth": queue_depth,

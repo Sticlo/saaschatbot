@@ -38,7 +38,6 @@
     searchTimer: null,
     panelMode: "chats",
     aiProfile: null,
-    clients: { contacts: [], selected: new Set(), omittedAmbiguous: 0 },
     quickShortcuts: [],
     shortcutsDraft: [],
     appointmentsDate: null,
@@ -297,14 +296,11 @@
     state.canWrite = false;
     state.canManageGlobal = false;
     state.canConnectWa = false;
-    state.canEnqueueOutbound = false;
-    state.canImportLeads = false;
     state.chatListTab = "interested";
     state.interestedCount = 0;
     state.subscription = null;
     state.panelMode = "chats";
     state.aiProfile = null;
-    state.clients = { contacts: [], selected: new Set(), omittedAmbiguous: 0 };
     state.quickShortcuts = [];
     state.shortcutsDraft = [];
     state.wa = { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null };
@@ -315,14 +311,12 @@
     emptyChat.classList.remove("hidden");
     activeChat.classList.add("hidden");
     $("ai-setup-panel").classList.add("hidden");
-    $("clients-panel").classList.add("hidden");
     $("appointments-panel").classList.add("hidden");
     $("sidebar-chats").classList.remove("hidden");
     $("mode-chats").classList.add("active");
-    $("mode-clients").classList.remove("active");
     $("mode-appointments").classList.remove("active");
     $("mode-ai").classList.remove("active");
-    $("chat-area").classList.remove("ai-setup-mode", "clients-mode", "appointments-mode");
+    $("chat-area").classList.remove("ai-setup-mode", "appointments-mode");
     $("business-name").textContent = "—";
     $("user-label").textContent = "";
     setChatListTab("interested");
@@ -717,8 +711,6 @@
     state.canWrite = roleAtLeast(me.role, "agent");
     state.canManageGlobal = me.role === "owner";
     state.canConnectWa = !!me;
-    state.canEnqueueOutbound = me.role === "owner";
-    state.canImportLeads = roleAtLeast(me.role, "agent");
     const userLabel = $("user-label");
     if (userLabel) userLabel.textContent = `${me.full_name} (${me.role})`;
     const aiGlobal = $("toggle-ai-global");
@@ -935,7 +927,7 @@
     const sub = state.subscription;
     if (sub) {
       if (sub.is_trial) {
-        parts.push(`Prueba · ${sub.trial_bait_remaining} carnadas restantes`);
+        parts.push("Periodo de prueba");
         cta?.classList.remove("hidden");
       } else if (sub.is_paid && sub.plan?.name) {
         parts.push(`Plan ${sub.plan.name}`);
@@ -1227,20 +1219,16 @@
   function switchPanelMode(mode) {
     state.panelMode = mode;
     const isChats = mode === "chats";
-    const isClients = mode === "clients";
     const isAppointments = mode === "appointments";
     const isAi = mode === "ai";
 
     $("mode-chats").classList.toggle("active", isChats);
-    $("mode-clients").classList.toggle("active", isClients);
     $("mode-appointments").classList.toggle("active", isAppointments);
     $("mode-ai").classList.toggle("active", isAi);
     $("sidebar-chats").classList.toggle("hidden", !isChats);
     $("chat-area").classList.toggle("ai-setup-mode", isAi);
-    $("chat-area").classList.toggle("clients-mode", isClients);
     $("chat-area").classList.toggle("appointments-mode", isAppointments);
     $("ai-setup-panel").classList.toggle("hidden", !isAi);
-    $("clients-panel").classList.toggle("hidden", !isClients);
     $("appointments-panel").classList.toggle("hidden", !isAppointments);
 
     if (isChats) {
@@ -1255,7 +1243,6 @@
       emptyChat.classList.add("hidden");
       activeChat.classList.add("hidden");
       if (isAi) loadAiSetupPanel();
-      if (isClients) loadClientsPanel();
       if (isAppointments) loadAppointmentsPanel();
     }
     renderQuickShortcuts();
@@ -1530,326 +1517,8 @@
     await selectConversation(convId);
   }
 
-  const MAPS_MOCK_PLANS = {
-    lavander: {
-      summary: "Tu lavandería encaja con negocios que generan mucha ropa sucia y necesitan un proveedor constante.",
-      searches: [
-        { label: "Hoteles", query: "hoteles", why: "Camas, toallas y sábanas todos los días." },
-        { label: "Moteles", query: "moteles", why: "Alto volumen de ropa de cama y toallas." },
-        { label: "Hostels", query: "hostels", why: "Rotación de huéspedes y lavandería frecuente." },
-        { label: "Restaurantes", query: "restaurantes", why: "Manteles, delantales y paños de cocina." },
-        { label: "Gimnasios", query: "gimnasios", why: "Toallas y uniformes de entrenadores." },
-      ],
-    },
-    default: {
-      summary: "Buscamos empresas locales que suelen comprar servicios como el tuyo y tienen teléfono visible en Google Maps.",
-      searches: [
-        { label: "Comercios del sector", query: "empresas", why: "Negocios relacionados con tu rubro." },
-        { label: "Pymes locales", query: "pymes", why: "Empresas pequeñas con decisión rápida." },
-        { label: "Oficinas", query: "oficinas", why: "Posibles clientes corporativos." },
-        { label: "Restaurantes", query: "restaurantes", why: "Alto tráfico y necesidad de proveedores." },
-      ],
-    },
-  };
-
-  const MAPS_MOCK_NAMES = {
-    hoteles: ["Hotel Plaza Real", "Hotel Andino", "Hotel Central Park", "Hotel Montaña Verde", "Hotel Río Grande"],
-    moteles: ["Motel Aurora", "Motel Las Palmas", "Motel Express 24", "Motel El Descanso"],
-    hostels: ["Hostel Nomada", "Backpackers House", "Hostel Centro", "The Traveler's Inn"],
-    restaurantes: ["Restaurante La Fogata", "Asados del Norte", "Café & Brunch", "Sabor Criollo", "Mariscos del Puerto"],
-    gimnasios: ["Gym PowerFit", "CrossBox Elite", "Fitness Total", "Iron Gym"],
-    empresas: ["Comercializadora Andina", "Servicios Integrales SAS", "Grupo Empresarial Norte"],
-    pymes: ["Distribuidora El Éxito", "Importaciones La 80", "Soluciones Locales SAS"],
-    oficinas: ["Torre Empresarial 45", "Centro de Negocios Nova", "Oficinas Parque Central"],
-  };
-
-  function inferMapsMockPlan(businessText) {
-    const lower = normalizeForSearch(businessText);
-    if (lower.includes("lavander") || lower.includes("lavanderia") || lower.includes("tintorer")) {
-      return MAPS_MOCK_PLANS.lavander;
-    }
-    return MAPS_MOCK_PLANS.default;
-  }
-
-  function buildMapsMockLeads(plan, city, limit = 12) {
-    const cityLabel = city || "tu ciudad";
-    const leads = [];
-    const searches = plan.searches || [];
-    let i = 0;
-    while (leads.length < limit && i < limit * 3) {
-      const search = searches[i % searches.length];
-      const pool = MAPS_MOCK_NAMES[search.query] || MAPS_MOCK_NAMES.empresas;
-      const name = pool[Math.floor(i / searches.length) % pool.length];
-      const phoneBase = 3001000000 + (i * 1737) % 8999999;
-      leads.push({
-        name: `${name}${i >= searches.length ? ` ${Math.floor(i / searches.length) + 1}` : ""}`.trim(),
-        phone: `+57${phoneBase}`,
-        address: `Cra ${10 + (i % 40)} # ${20 + (i % 50)}-${30 + (i % 60)}, ${cityLabel}`,
-        category: search.label,
-      });
-      i += 1;
-    }
-    return leads.slice(0, limit);
-  }
-
-  function renderMapsPlan(plan, business, city) {
-    const card = $("maps-plan-card");
-    const list = $("maps-plan-list");
-    if (!card || !list) return;
-    $("maps-plan-title").textContent = `Para «${business.slice(0, 60)}${business.length > 60 ? "…" : ""}» en ${city || "tu zona"}`;
-    $("maps-plan-summary").textContent = plan.summary;
-    list.innerHTML = (plan.searches || []).map((s) => `
-      <li class="maps-plan-item">
-        <strong>${escapeHtml(s.label)}</strong>
-        <span class="muted small">${escapeHtml(s.why)}</span>
-      </li>
-    `).join("");
-    card.classList.remove("hidden");
-  }
-
-  function renderMapsResults(leads, city) {
-    const card = $("maps-results-card");
-    const body = $("maps-results-body");
-    if (!card || !body) return;
-    $("maps-results-title").textContent = `${leads.length} posibles clientes`;
-    $("maps-results-meta").textContent = `En ${city || "tu zona"} · con teléfono para contactar en frío`;
-    body.innerHTML = leads.map((l) => `
-      <tr>
-        <td>${escapeHtml(l.name)}</td>
-        <td>${escapeHtml(l.phone)}</td>
-        <td>${escapeHtml(l.address)}</td>
-        <td><span class="maps-type-pill">${escapeHtml(l.category)}</span></td>
-      </tr>
-    `).join("");
-    card.classList.remove("hidden");
-  }
-
-  function downloadMapsMockExcel(leads, business, city) {
-    const headers = ["Nombre", "Teléfono", "Dirección", "Tipo", "Negocio origen", "Ciudad"];
-    const rows = leads.map((l) => [
-      l.name,
-      l.phone,
-      l.address,
-      l.category,
-      business,
-      city,
-    ]);
-    const escapeCsv = (v) => {
-      const s = String(v ?? "");
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const slug = normalizeForSearch(city || "clientes").replace(/\s+/g, "-").slice(0, 24) || "clientes";
-    a.href = url;
-    a.download = `clientes-${slug}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function resetMapsProspectPanel() {
-    state.clients.plan = null;
-    state.clients.leads = [];
-    $("maps-plan-card")?.classList.add("hidden");
-    $("maps-results-card")?.classList.add("hidden");
-    $("maps-reset-btn")?.classList.add("hidden");
-    $("maps-search-btn")?.classList.remove("hidden");
-    $("maps-search-status").textContent = "";
-    $("maps-business-input")?.removeAttribute("disabled");
-    $("maps-city-input")?.removeAttribute("disabled");
-  }
-
-  function renderWhatsAppContacts() {
-    const list = $("wa-contacts-list");
-    if (!list) return;
-    const contacts = state.clients.contacts || [];
-    const selected = state.clients.selected || new Set();
-    $("wa-contacts-count").textContent = `${contacts.length} contactos seguros`;
-    $("wa-contacts-meta").textContent = state.clients.omittedAmbiguous
-      ? `${state.clients.omittedAmbiguous} contactos omitidos porque WhatsApp no entregó un número confiable`
-      : "Solo números verificados de la vinculación actual";
-    if (!contacts.length) {
-      list.innerHTML = '<p class="muted">No encontramos contactos con número verificable.</p>';
-      return;
-    }
-    list.innerHTML = contacts.map((contact) => `
-      <label class="wa-contact-row">
-        <input
-          type="checkbox"
-          data-wa-contact="${escapeHtml(contact.phone_e164)}"
-          ${selected.has(contact.phone_e164) ? "checked" : ""}
-        />
-        <span class="wa-contact-copy">
-          <strong>${escapeHtml(contact.name || contact.phone_e164)}</strong>
-          <span class="muted small">${escapeHtml(contact.phone_e164)}</span>
-        </span>
-        <span class="wa-contact-safe">Verificado</span>
-      </label>
-    `).join("");
-    list.querySelectorAll("[data-wa-contact]").forEach((input) => {
-      input.addEventListener("change", (event) => {
-        const phone = event.target.dataset.waContact;
-        if (event.target.checked && state.clients.selected.size >= 100) {
-          event.target.checked = false;
-          $("wa-campaign-status").textContent = "Máximo 100 contactos por campaña.";
-          return;
-        }
-        if (event.target.checked) state.clients.selected.add(phone);
-        else state.clients.selected.delete(phone);
-        $("wa-campaign-status").textContent =
-          `${state.clients.selected.size} seleccionados`;
-      });
-    });
-  }
-
-  async function loadClientsPanel() {
-    const list = $("wa-contacts-list");
-    if (list) list.innerHTML = '<p class="muted">Sincronizando contactos seguros…</p>';
-    try {
-      const result = await api("/outbound/whatsapp-contacts?limit=500", {}, 60000);
-      state.clients.contacts = result.contacts || [];
-      state.clients.omittedAmbiguous = result.omitted_ambiguous || 0;
-      const available = new Set(state.clients.contacts.map((item) => item.phone_e164));
-      state.clients.selected = new Set(
-        [...state.clients.selected].filter((phone) => available.has(phone))
-      );
-      renderWhatsAppContacts();
-    } catch (err) {
-      state.clients.contacts = [];
-      state.clients.selected = new Set();
-      if (list) {
-        list.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
-      }
-      $("wa-contacts-count").textContent = "0 contactos seguros";
-      $("wa-contacts-meta").textContent = "";
-    }
-  }
-
-  function toggleAllWhatsAppContacts() {
-    const contacts = state.clients.contacts || [];
-    const selectable = contacts.slice(0, 100);
-    const allSelected =
-      selectable.length > 0 && selectable.every((item) => state.clients.selected.has(item.phone_e164));
-    state.clients.selected = allSelected
-      ? new Set()
-      : new Set(selectable.map((item) => item.phone_e164));
-    renderWhatsAppContacts();
-    $("wa-campaign-status").textContent =
-      `${state.clients.selected.size} seleccionados`;
-  }
-
-  async function enqueueWhatsAppContactCampaign() {
-    const phones = [...state.clients.selected];
-    const message = $("wa-campaign-message")?.value.trim() || "";
-    const name = $("wa-campaign-name")?.value.trim() || "Difusión WhatsApp";
-    const status = $("wa-campaign-status");
-    const button = $("wa-campaign-send");
-    if (!phones.length) {
-      status.textContent = "Selecciona al menos un contacto.";
-      return;
-    }
-    if (message.length < 3) {
-      status.textContent = "Escribe el mensaje de la campaña.";
-      return;
-    }
-    if (!confirm(`¿Encolar ${phones.length} mensajes? Se enviarán uno a uno con pausas.`)) return;
-    button.disabled = true;
-    status.textContent = "Validando contactos…";
-    try {
-      await api("/outbound/whatsapp-contacts/import", {
-        method: "POST",
-        body: JSON.stringify({ phones }),
-      }, 60000);
-      const leads = await api("/outbound/leads?status=pending&limit=500", {}, 30000);
-      const selected = new Set(phones);
-      const leadIds = leads
-        .filter((lead) => selected.has(lead.phone_e164))
-        .map((lead) => lead.id);
-      if (!leadIds.length) {
-        throw new Error("Estos contactos ya fueron enviados o excluidos anteriormente.");
-      }
-      status.textContent = "Encolando campaña…";
-      const result = await api("/outbound/campaigns/enqueue", {
-        method: "POST",
-        body: JSON.stringify({
-          lead_ids: leadIds,
-          name,
-          message_template: message,
-          limit: Math.min(leadIds.length, 100),
-        }),
-      }, 30000);
-      state.clients.selected = new Set();
-      renderWhatsAppContacts();
-      status.textContent = `✓ ${result.queued || 0} mensajes en cola`;
-    } catch (err) {
-      status.textContent = err.message;
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  async function persistMapsProspectFields(business, city) {
-    try {
-      await api("/outbound/business-profile", {
-        method: "PUT",
-        body: JSON.stringify({
-          maps_prospect_business: business,
-          maps_prospect_city: city,
-        }),
-      });
-    } catch {
-      /* mockup — no bloquear si falla */
-    }
-  }
-
-  async function runMapsProspectMock() {
-    const businessInput = $("maps-business-input");
-    const cityInput = $("maps-city-input");
-    const status = $("maps-search-status");
-    const btn = $("maps-search-btn");
-    const business = businessInput?.value.trim() || "";
-    const city = cityInput?.value.trim() || "";
-
-    if (business.length < 4) {
-      status.textContent = "Cuéntanos un poco más sobre tu negocio (mínimo unas palabras).";
-      return;
-    }
-    if (city.length < 2) {
-      status.textContent = "Indica la ciudad o zona donde quieres buscar.";
-      return;
-    }
-
-    state.clients.business = business;
-    state.clients.city = city;
-    persistMapsProspectFields(business, city);
-    btn.disabled = true;
-    businessInput.disabled = true;
-    cityInput.disabled = true;
-    $("maps-plan-card")?.classList.add("hidden");
-    $("maps-results-card")?.classList.add("hidden");
-    status.textContent = "La IA está analizando tu negocio…";
-
-    await new Promise((r) => setTimeout(r, 900));
-    const plan = inferMapsMockPlan(business);
-    state.clients.plan = plan;
-    renderMapsPlan(plan, business, city);
-
-    status.textContent = "Buscando en Google Maps (vista previa)…";
-    await new Promise((r) => setTimeout(r, 1200));
-
-    const leads = buildMapsMockLeads(plan, city, 12);
-    state.clients.leads = leads;
-    renderMapsResults(leads, city);
-
-    status.textContent = `✓ Vista previa lista — en producción traeremos hasta 100 contactos reales por día.`;
-    btn.classList.add("hidden");
-    $("maps-reset-btn")?.classList.remove("hidden");
-    btn.disabled = false;
-  }
-
   const BIZ_FIELD_IDS = [
+    "biz-name",
     "biz-industry",
     "biz-products",
     "biz-target",
@@ -1861,6 +1530,7 @@
 
   function readBizForm() {
     return {
+      business_name: $("biz-name")?.value.trim() || undefined,
       industry: $("biz-industry")?.value.trim() || "",
       products_services: $("biz-products")?.value.trim() || "",
       target_customer: $("biz-target")?.value.trim() || "",
@@ -1871,7 +1541,20 @@
     };
   }
 
+  function setBusinessName(name, isPlaceholder) {
+    if (!name) return;
+    $("business-name").textContent = name;
+    if (state.tenant) state.tenant.business_name = name;
+    $("business-name-cta").classList.toggle("hidden", !isPlaceholder || !state.canManageGlobal);
+  }
+
+  function openBusinessNameSetup() {
+    switchPanelMode("ai");
+    $("biz-name")?.focus();
+  }
+
   function fillBizForm(profile) {
+    $("biz-name").value = profile && !profile.business_name_is_placeholder ? profile.business_name : "";
     $("biz-industry").value = profile?.industry || "";
     $("biz-products").value = profile?.products_services || "";
     $("biz-target").value = profile?.target_customer || "";
@@ -1901,6 +1584,75 @@
       if (el) el.disabled = ro;
     });
     if ($("biz-save-btn")) $("biz-save-btn").disabled = ro;
+    ["alert-phone", "alert-threshold", "alert-save-btn", "alert-test-btn"].forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = ro;
+    });
+  }
+
+  function setAlertStatus(text) {
+    const el = $("alert-save-status");
+    if (el) el.textContent = text || "";
+  }
+
+  function fillInterestAlert(cfg) {
+    $("alert-phone").value = cfg?.alert_phone || "";
+    $("alert-threshold").value = cfg?.alert_threshold || 10;
+    const pending = $("alert-pending");
+    if (pending) {
+      const n = cfg?.pending_count || 0;
+      pending.textContent = n
+        ? `Ahora mismo tienes ${n} interesado${n === 1 ? "" : "s"} sin responder.`
+        : "Ahora mismo no tienes interesados sin responder.";
+    }
+  }
+
+  async function loadInterestAlert() {
+    setAlertStatus("");
+    try {
+      fillInterestAlert(await api("/tenants/me/interest-alert"));
+    } catch (err) {
+      setAlertStatus(err.message);
+    }
+  }
+
+  async function saveInterestAlert() {
+    if (!state.canManageGlobal) return;
+    $("alert-save-btn").disabled = true;
+    setAlertStatus("Guardando…");
+    try {
+      const cfg = await api("/tenants/me/interest-alert", {
+        method: "PUT",
+        body: JSON.stringify({
+          alert_phone: $("alert-phone").value.trim(),
+          alert_threshold: Number($("alert-threshold").value) || 10,
+        }),
+      });
+      fillInterestAlert(cfg);
+      setAlertStatus(
+        cfg.alert_phone
+          ? `✓ Guardado — te avisaremos a ${cfg.alert_phone} al llegar a ${cfg.alert_threshold} interesados sin responder`
+          : "✓ Alertas desactivadas"
+      );
+    } catch (err) {
+      setAlertStatus(err.message);
+    } finally {
+      updateAiSetupControls();
+    }
+  }
+
+  async function testInterestAlert() {
+    if (!state.canManageGlobal) return;
+    $("alert-test-btn").disabled = true;
+    setAlertStatus("Enviando prueba…");
+    try {
+      await api("/tenants/me/interest-alert/test", { method: "POST" }, 20000);
+      setAlertStatus("✓ Prueba enviada — revisa ese WhatsApp");
+    } catch (err) {
+      setAlertStatus(err.message);
+    } finally {
+      updateAiSetupControls();
+    }
   }
 
   function setBizSaveStatus(text) {
@@ -1918,23 +1670,29 @@
       setBizSaveStatus(err.message);
       fillBizForm(null);
     }
-    await loadQuickShortcuts();
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert()]);
     renderAiShortcutsSummary();
   }
 
   async function saveAiSetup() {
     if (!state.canManageGlobal) return;
+    const payload = readBizForm();
+    if (!payload.business_name && state.aiProfile?.business_name_is_placeholder) {
+      setBizSaveStatus("Escribe el nombre de tu negocio (paso 1)");
+      $("biz-name").focus();
+      return;
+    }
     const btn = $("biz-save-btn");
     btn.disabled = true;
     setBizSaveStatus("Guardando…");
     try {
-      const payload = readBizForm();
       const profile = await api("/outbound/business-profile", {
         method: "PUT",
         body: JSON.stringify(payload),
       });
       state.aiProfile = profile;
       fillBizForm(profile);
+      setBusinessName(profile.business_name, profile.business_name_is_placeholder);
       setBizSaveStatus("✓ Guardado — tu IA ya conoce tu negocio");
       renderOnboarding();
     } catch (err) {
@@ -2382,7 +2140,7 @@
       }
 
       if (tenant) {
-        $("business-name").textContent = tenant.business_name;
+        setBusinessName(tenant.business_name, !!bizProfile?.business_name_is_placeholder);
         $("toggle-ai-global").checked = tenant.ai_global_enabled;
       }
 
@@ -2411,6 +2169,14 @@
       renderConversationList();
       renderAiAlerts();
       renderOnboarding();
+      if (
+        bizProfile?.business_name_is_placeholder &&
+        state.canManageGlobal &&
+        !sessionStorage.getItem("omitel_name_prompted")
+      ) {
+        sessionStorage.setItem("omitel_name_prompted", "1");
+        openBusinessNameSetup();
+      }
       connectWs();
       await syncDeepSeekFromHealth().catch(() => {});
       refreshAiStatus();
@@ -2534,6 +2300,7 @@
         break;
       case "tenant.settings":
         if (state.tenant) {
+          setBusinessName(event.business_name, event.business_name_is_placeholder);
           state.tenant.ai_global_enabled = event.ai_global_enabled;
           $("toggle-ai-global").checked = event.ai_global_enabled;
           renderAiAlerts();
@@ -2596,18 +2363,6 @@
             renderConversationList();
           })
           .catch(() => {});
-        break;
-      case "outbound.queued":
-      case "outbound.sent":
-        if (state.panelMode === "clients") loadClientsPanel();
-        if (event.type === "outbound.sent" && event.conversation_id) {
-          fetchConversations()
-            .then((rows) => {
-              setConversations(rows);
-              renderConversationList();
-            })
-            .catch(() => {});
-        }
         break;
       case "ai.error":
         if (event.error) {
@@ -3103,7 +2858,6 @@
   $("tab-chats-all").addEventListener("click", () => switchChatTab("all"));
 
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
-  $("mode-clients").addEventListener("click", () => switchPanelMode("clients"));
   $("mode-appointments").addEventListener("click", () => switchPanelMode("appointments"));
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
   $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
@@ -3123,17 +2877,10 @@
   $("appointment-modal-close")?.addEventListener("click", hideAppointmentModal);
   $("appointment-modal-backdrop")?.addEventListener("click", hideAppointmentModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
+  $("business-name-cta").addEventListener("click", openBusinessNameSetup);
+  $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
+  $("alert-test-btn").addEventListener("click", () => testInterestAlert());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
-  $("maps-search-btn")?.addEventListener("click", () => runMapsProspectMock());
-  $("maps-reset-btn")?.addEventListener("click", () => resetMapsProspectPanel());
-  $("maps-download-btn")?.addEventListener("click", () => {
-    if (!state.clients.leads?.length) return;
-    downloadMapsMockExcel(state.clients.leads, state.clients.business, state.clients.city);
-  });
-  $("wa-contacts-refresh")?.addEventListener("click", () => loadClientsPanel());
-  $("wa-contacts-select-all")?.addEventListener("click", toggleAllWhatsAppContacts);
-  $("wa-campaign-send")?.addEventListener("click", enqueueWhatsAppContactCampaign);
-
   $("shortcuts-add-btn").addEventListener("click", () => {
     if (state.shortcutsDraft.length >= 12) return;
     state.shortcutsDraft.push(newShortcutDraft());

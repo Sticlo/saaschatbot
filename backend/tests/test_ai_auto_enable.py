@@ -55,3 +55,41 @@ def test_new_number_casual_greeting_stays_off():
     conv = _conv(imported_legacy=False, bait_sent=False, ai_active=False)
     assert maybe_auto_enable_ai_for_inbound(tenant=tenant, conversation=conv, body="ok") is False
     assert conv.ai_active is False
+
+
+def test_agent_turned_ai_off_is_never_overridden():
+    tenant = _tenant(ai_global_enabled=True)
+    conv = _conv(imported_legacy=False, bait_sent=True, ai_active=False, ai_set_by_agent=True)
+    assert (
+        maybe_auto_enable_ai_for_inbound(
+            tenant=tenant,
+            conversation=conv,
+            body="Quiero saber el precio",
+        )
+        is False
+    )
+    assert conv.ai_active is False
+
+
+def test_owner_alert_number_never_gets_ai():
+    from app.domain.entities import TenantProfile
+
+    tenant = _tenant(ai_global_enabled=True)
+    tenant.profile = TenantProfile(alert_phone="+573001112233")
+    conv = _conv(imported_legacy=False, bait_sent=True, ai_active=False)
+    assert maybe_auto_enable_ai_for_inbound(tenant=tenant, conversation=conv, body="ok, ya les escribo") is False
+    assert conv.ai_active is False
+
+
+def test_manual_mode_is_never_overridden():
+    tenant = _tenant(ai_global_enabled=True)
+    conv = _conv(imported_legacy=False, bait_sent=False, ai_active=False, mode="manual")
+    assert (
+        maybe_auto_enable_ai_for_inbound(
+            tenant=tenant,
+            conversation=conv,
+            body="¿Cuánto cuesta el corte?",
+        )
+        is False
+    )
+    assert conv.ai_active is False

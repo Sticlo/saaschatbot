@@ -2,7 +2,7 @@
 #
 # Desde la raíz del repo:
 #   docker compose -f deploy/docker-compose.prod.yml up -d --build
-#   docker compose -f deploy/docker-compose.prod.yml up -d --scale worker-webhook=5 --scale worker-outbound=15 --scale worker-ai=3
+#   docker compose -f deploy/docker-compose.prod.yml up -d --scale worker-webhook=5 --scale worker-ai=3
 
 x-app-build: &app-build
   context: ../backend
@@ -94,10 +94,6 @@ services:
   worker-webhook:
     <<: *worker
     command: python -m app.worker webhook
-
-  worker-outbound:
-    <<: *worker
-    command: python -m app.worker outbound
 
   worker-ai:
     <<: *worker

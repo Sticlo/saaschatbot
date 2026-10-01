@@ -5,8 +5,16 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.application.outbound.outbound_service import render_bait_message
 from app.domain.entities import BaitTemplate, Tenant
+
+
+def render_bait_message(template: str, *, contact_name: str = "", business_name: str = "") -> str:
+    name_part = ""
+    if contact_name and not contact_name.startswith("+"):
+        name_part = f" {contact_name.split()[0]}"
+    text = template.replace("{name_part}", name_part).replace("{name}", contact_name or "")
+    text = text.replace("{business}", business_name or "")
+    return text.strip()
 
 
 def list_templates(db: Session, tenant_id: uuid.UUID) -> list[BaitTemplate]:

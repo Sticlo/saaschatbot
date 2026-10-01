@@ -85,6 +85,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <strong id="business-name">—</strong>
+          <button type="button" id="business-name-cta" class="business-name-cta hidden">Ponle nombre a tu negocio</button>
           <span id="ws-status" class="badge offline">Sin tiempo real</span>
           <span id="sync-status" class="sync-status" title="Estado de sincronización con el celular">Sync: —</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
@@ -117,7 +118,6 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-clients" class="sidebar-mode-tab">Difusión</button>
             <button type="button" id="mode-appointments" class="sidebar-mode-tab">Sistema de citas</button>
             <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA</button>
           </div>
@@ -204,6 +204,15 @@
                 <div class="ai-step">
                   <span class="ai-step-num">1</span>
                   <label class="ai-field">
+                    <span>¿Cómo se llama tu negocio?</span>
+                    <span class="ai-field-hint">Así se presentará la IA con tus clientes.</span>
+                    <input type="text" id="biz-name" maxlength="255" placeholder="Hotel Casa Andina" />
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">2</span>
+                  <label class="ai-field">
                     <span>¿A qué se dedica tu negocio?</span>
                     <span class="ai-field-hint">Ej: restaurante, peluquería, tienda online…</span>
                     <input type="text" id="biz-industry" maxlength="255" placeholder="Restaurante de comida rápida" />
@@ -211,7 +220,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">2</span>
+                  <span class="ai-step-num">3</span>
                   <label class="ai-field">
                     <span>¿Qué vendes u ofreces?</span>
                     <span class="ai-field-hint">Lo principal que tus clientes te piden.</span>
@@ -220,7 +229,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">3</span>
+                  <span class="ai-step-num">4</span>
                   <label class="ai-field">
                     <span>¿A quién le vendes?</span>
                     <span class="ai-field-hint">Tu cliente típico.</span>
@@ -229,7 +238,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">4</span>
+                  <span class="ai-step-num">5</span>
                   <label class="ai-field">
                     <span>¿Precios o rangos?</span>
                     <span class="ai-field-hint">Para que la IA no invente valores.</span>
@@ -238,7 +247,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">5</span>
+                  <span class="ai-step-num">6</span>
                   <label class="ai-field">
                     <span>¿Dónde estás y cuándo atiendes?</span>
                     <span class="ai-field-hint">Ciudad, barrio u horario.</span>
@@ -247,7 +256,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">6</span>
+                  <span class="ai-step-num">7</span>
                   <label class="ai-field">
                     <span>¿Cómo quieres que hable?</span>
                     <span class="ai-field-hint">Formal, cercano, divertido…</span>
@@ -256,7 +265,7 @@
                 </div>
 
                 <div class="ai-step ai-step-last">
-                  <span class="ai-step-num">7</span>
+                  <span class="ai-step-num">8</span>
                   <label class="ai-field">
                     <span>¿Algo que no debe decir?</span>
                     <span class="ai-field-hint">Opcional — descuentos, promesas, etc.</span>
@@ -289,6 +298,31 @@
                 <li class="muted">Cargando…</li>
               </ul>
               <button type="button" id="ai-shortcuts-config-btn" class="btn ghost small">Configurar atajos</button>
+            </section>
+
+            <section class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Alertas por WhatsApp</h3>
+                <p class="muted small">Te escribimos a tu celular cuando se acumulen clientes <strong>interesados sin responder</strong>, para que no se enfríe ninguna venta.</p>
+              </div>
+              <div class="alert-settings-row">
+                <label class="ai-field">
+                  <span>Número que recibe las alertas</span>
+                  <span class="ai-field-hint">Tu celular personal o el del encargado, con indicativo. Vacío = sin alertas.</span>
+                  <input type="tel" id="alert-phone" maxlength="32" placeholder="+57 300 123 4567" />
+                </label>
+                <label class="ai-field">
+                  <span>Avisar cuando haya</span>
+                  <span class="ai-field-hint">interesados sin responder</span>
+                  <input type="number" id="alert-threshold" min="1" max="500" value="10" />
+                </label>
+              </div>
+              <p id="alert-pending" class="muted small"></p>
+              <div class="alert-actions">
+                <button type="button" id="alert-save-btn" class="btn primary">Guardar alertas</button>
+                <button type="button" id="alert-test-btn" class="btn ghost small">Enviar prueba</button>
+              </div>
+              <p id="alert-save-status" class="ai-save-status muted small"></p>
             </section>
           </div>
 
@@ -340,43 +374,6 @@
             </section>
           </div>
 
-          <div id="clients-panel" class="clients-panel hidden">
-            <header class="clients-hero">
-              <div class="clients-hero-icon" aria-hidden="true">WA</div>
-              <h2>Difusión a tus contactos</h2>
-              <p>Selecciona contactos sincronizados por WhatsApp. Omitel excluye IDs ambiguos y solo envía a números verificados.</p>
-            </header>
-            <section class="wa-contacts-card">
-              <div class="wa-contacts-toolbar">
-                <div>
-                  <strong id="wa-contacts-count">0 contactos seguros</strong>
-                  <p id="wa-contacts-meta" class="muted small"></p>
-                </div>
-                <div class="wa-contacts-actions">
-                  <button type="button" id="wa-contacts-select-all" class="btn ghost small">Seleccionar todos</button>
-                  <button type="button" id="wa-contacts-refresh" class="btn ghost small">Actualizar</button>
-                </div>
-              </div>
-              <div id="wa-contacts-list" class="wa-contacts-list">
-                <p class="muted">Conecta WhatsApp para ver contactos.</p>
-              </div>
-            </section>
-            <section class="wa-campaign-card">
-              <label>
-                Nombre de campaña
-                <input id="wa-campaign-name" type="text" maxlength="80" value="Difusión WhatsApp" />
-              </label>
-              <label>
-                Mensaje
-                <textarea id="wa-campaign-message" rows="5" maxlength="1000" placeholder="Hola {name}, queremos contarte…"></textarea>
-              </label>
-              <p class="muted small">Se envía uno a uno con pausas. Usa <code>{name}</code> para personalizar. Envía solo a personas que esperan tus mensajes.</p>
-              <div class="wa-campaign-footer">
-                <span id="wa-campaign-status" class="muted small"></span>
-                <button type="button" id="wa-campaign-send" class="btn primary">Encolar difusión</button>
-              </div>
-            </section>
-          </div>
         </main>
       </div>
     </section>

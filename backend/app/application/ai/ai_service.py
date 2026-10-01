@@ -76,12 +76,61 @@ def is_respondable_text(body: str) -> bool:
     return True
 
 
-def _interest_from_category(category: str) -> Optional[str]:
-    if category in ("interesado", "duda"):
-        return ConversationInterest.INTERESTED.value
+def _detect_interest(category: str, body: str) -> Optional[str]:
+    """La categoría «interesado» del clasificador es el default de cualquier charla;
+    solo la intención de compra cuenta como interés real."""
     if category == "no_interesado":
         return ConversationInterest.NOT_INTERESTED.value
+    if detect_purchase_intent(body):
+        return ConversationInterest.INTERESTED.value
     return None
+
+
+def _close_on_interest(
+    db: Session,
+    *,
+    tenant: Tenant,
+    conversation: Conversation,
+    session: WhatsAppSession,
+    message: Message,
+    category: str,
+    send_farewell: bool = True,
+) -> bool:
+    """La primera vez que se detecta interés o desinterés la IA se apaga y el chat pasa a manual.
+    Si el agente reactivó la IA después, solo se actualiza la etiqueta. True = no seguir respondiendo."""
+    interest = _detect_interest(category, message.body)
+    if interest is None:
+        return False
+
+    if conversation.interest_status is not None:
+        conversation.interest_status = interest
+        publish_conversation_updated(tenant.id, conversation)
+        return False
+
+    conversation.interest_status = interest
+    conversation.ai_active = False
+    conversation.mode = ConversationMode.MANUAL.value
+    publish_conversation_updated(tenant.id, conversation)
+
+    if not send_farewell:
+        return True
+    text = (
+        handoff_reply(tenant.business_name)
+        if interest == ConversationInterest.INTERESTED.value
+        else NO_INTEREST_REPLY
+    )
+    try:
+        send_text_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            text=text,
+            source=MessageSource.BOT.value,
+        )
+    except Exception:
+        log.exception("Error enviando cierre %s conv=%s", interest, conversation.id)
+    return True
 
 
 def maybe_schedule_ai_for_conversation(
@@ -117,19 +166,8 @@ def maybe_schedule_ai_for_conversation(
     if latest_in is None or not is_respondable_text(latest_in.body):
         return False
 
-    if not classify_mode:
-        replied = (
-            db.query(Message.id)
-            .filter(
-                Message.conversation_id == conversation_id,
-                Message.direction == MessageDirection.OUT.value,
-                Message.source == MessageSource.BOT.value,
-                Message.created_at >= latest_in.created_at,
-            )
-            .first()
-        )
-        if replied is not None:
-            return False
+    if not classify_mode and _bot_already_replied(db, conversation_id, latest_in):
+        return False
 
     enqueue_ai_reply_ids(
         tenant_id=tenant_id,
@@ -186,6 +224,20 @@ def _is_latest_inbound(db: Session, conversation_id: uuid.UUID, message_id: uuid
         .first()
     )
     return latest is not None and latest.id == message_id
+
+
+def _bot_already_replied(db: Session, conversation_id: uuid.UUID, message: Message) -> bool:
+    return (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.source == MessageSource.BOT.value,
+            Message.created_at >= message.created_at,
+        )
+        .first()
+        is not None
+    )
 
 
 def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
@@ -312,48 +364,18 @@ def _process_classify_only(
         increment_daily_classify_count(tenant.id)
         return True
 
-    interest = _interest_from_category(category)
-    if interest:
-        conversation.interest_status = interest
-        if interest == ConversationInterest.NOT_INTERESTED.value:
-            conversation.ai_active = False
+    _close_on_interest(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        session=session,
+        message=message,
+        category=category,
+        send_farewell=False,
+    )
 
     increment_daily_classify_count(tenant.id)
     publish_conversation_updated(tenant.id, conversation)
-    return True
-
-
-def _handoff_to_human(
-    db: Session,
-    *,
-    tenant: Tenant,
-    conversation: Conversation,
-    session: WhatsAppSession,
-) -> bool:
-    """Clasifica como interesado y avisa que un humano cierra — sin agendar ni vender."""
-    conversation.interest_status = ConversationInterest.INTERESTED.value
-    conversation.mode = ConversationMode.MANUAL.value
-    publish_conversation_updated(tenant.id, conversation)
-
-    quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
-    if not quota_ok:
-        log.warning("IA quota tenant=%s handoff: %s", tenant.id, quota_err)
-        _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
-        return True
-
-    try:
-        send_text_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            text=handoff_reply(tenant.business_name),
-            source=MessageSource.BOT.value,
-        )
-        increment_daily_reply_count(tenant.id)
-    except Exception:
-        log.exception("Error enviando handoff conv=%s", conversation.id)
-        return False
     return True
 
 
@@ -399,27 +421,15 @@ def _process_qualify(
             log.exception("Error enviando opt_out conv=%s", conversation.id)
         return True
 
-    if category == "no_interesado":
-        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
-        conversation.ai_active = False
-        publish_conversation_updated(tenant.id, conversation)
-        try:
-            send_text_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                text=NO_INTEREST_REPLY,
-                source=MessageSource.BOT.value,
-            )
-        except Exception:
-            log.exception("Error enviando no_interesado conv=%s", conversation.id)
+    if _close_on_interest(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        session=session,
+        message=message,
+        category=category,
+    ):
         return True
-
-    if detect_purchase_intent(message.body):
-        return _handoff_to_human(
-            db, tenant=tenant, conversation=conversation, session=session
-        )
 
     quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
     if not quota_ok:
@@ -517,27 +527,15 @@ def _process_full_reply(
             log.exception("Error enviando opt_out conv=%s", conversation.id)
         return True
 
-    if category == "no_interesado":
-        conversation.interest_status = ConversationInterest.NOT_INTERESTED.value
-        conversation.ai_active = False
-        publish_conversation_updated(tenant.id, conversation)
-        try:
-            send_text_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                text=NO_INTEREST_REPLY,
-                source=MessageSource.BOT.value,
-            )
-        except Exception:
-            log.exception("Error enviando no_interesado conv=%s", conversation.id)
+    if _close_on_interest(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        session=session,
+        message=message,
+        category=category,
+    ):
         return True
-
-    interest = _interest_from_category(category)
-    if interest == ConversationInterest.INTERESTED.value:
-        conversation.interest_status = interest
-        publish_conversation_updated(tenant.id, conversation)
 
     quota_ok, _, _, quota_err = check_daily_reply_quota(db, tenant)
     if not quota_ok:
@@ -654,6 +652,10 @@ def process_ai_reply(
     profile = get_or_create_tenant_profile(db, tenant_id)
     classify_mode = is_classify_only(profile)
 
+    if not classify_mode and _bot_already_replied(db, conversation_id, message):
+        log.info("IA skip conv=%s: ya respondida msg=%s", conversation_id, message_id)
+        return True
+
     delay = (
         settings.ai_classify_delay_seconds
         if classify_mode
@@ -669,6 +671,8 @@ def process_ai_reply(
     if not should_ai_respond(tenant, conversation):
         return True
     if not _is_latest_inbound(db, conversation_id, message_id):
+        return True
+    if not classify_mode and _bot_already_replied(db, conversation_id, message):
         return True
 
     if classify_mode:

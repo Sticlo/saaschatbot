@@ -323,7 +323,6 @@ export class PricingComponent implements OnInit, OnDestroy {
       { text: 'Atajos: menú, precios, fotos' },
       { text: 'Clasificación de leads ilimitada' },
       { text: 'Hasta 400 respuestas IA al día' },
-      { text: '50 contactos fríos por día' },
       { text: '2 usuarios · 1 WhatsApp' },
       { text: 'Onboarding guiado incluido' },
     ];
@@ -339,11 +338,9 @@ export class PricingComponent implements OnInit, OnDestroy {
       { text: 'Atajos: menú, precios, fotos' },
       { text: 'Clasificación de leads ilimitada' },
       { text: 'Respuestas IA ilimitadas', highlight: true, tag: 'Nuevo' },
-      { text: '100 contactos fríos por día', highlight: true },
       { text: '5 usuarios en el panel', highlight: true },
       { text: 'Onboarding prioritario', highlight: true },
       { text: 'Soporte preferente', highlight: true },
-      { text: 'Prospectos Google Maps', highlight: true, tag: 'Pronto' },
     ];
   }
 

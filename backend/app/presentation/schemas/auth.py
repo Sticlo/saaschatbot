@@ -118,6 +118,15 @@ class TenantSettingsUpdate(BaseModel):
     business_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
 
 
+class InterestAlertSettings(BaseModel):
+    alert_phone: str = Field(default="", max_length=32)
+    alert_threshold: int = Field(default=10, ge=1, le=500)
+
+
+class InterestAlertResponse(InterestAlertSettings):
+    pending_count: int = 0
+
+
 class InviteUserRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=2, max_length=255)

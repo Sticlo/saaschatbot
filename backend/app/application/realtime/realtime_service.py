@@ -4,6 +4,7 @@ import json
 from typing import Any, Optional
 from uuid import UUID
 
+from app.application.billing.tenant_service import is_placeholder_business_name
 from app.domain.entities import Conversation, Message, Tenant
 from app.infrastructure.cache.redis_client import publish_event, tenant_cache_key
 from app.presentation.schemas.whatsapp import ConversationResponse, MessageResponse, serialize_conversation
@@ -67,6 +68,8 @@ def publish_tenant_settings(tenant: Tenant) -> None:
         tenant.id,
         {
             "type": "tenant.settings",
+            "business_name": tenant.business_name,
+            "business_name_is_placeholder": is_placeholder_business_name(tenant.business_name),
             "ai_global_enabled": tenant.ai_global_enabled,
             "whatsapp_status": tenant.whatsapp_status,
         },

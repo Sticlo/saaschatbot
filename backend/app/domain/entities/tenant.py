@@ -87,6 +87,8 @@ class TenantProfile(Base):
     schedule_open_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
     schedule_close_time: Mapped[str] = mapped_column(String(5), nullable=False, default="18:00")
     schedule_slot_minutes: Mapped[int] = mapped_column(nullable=False, default=60)
+    alert_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    alert_threshold: Mapped[int] = mapped_column(nullable=False, default=10)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

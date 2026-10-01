@@ -9,7 +9,11 @@ from urllib.parse import urlencode
 import httpx
 from sqlalchemy.orm import Session
 
-from app.application.billing.tenant_service import log_audit, register_tenant_with_owner
+from app.application.billing.tenant_service import (
+    log_audit,
+    placeholder_business_name,
+    register_tenant_with_owner,
+)
 from app.config import settings
 from app.domain.entities import Tenant, User
 from app.infrastructure.cache.redis_client import cache_delete, cache_get, cache_set, tenant_cache_key
@@ -233,7 +237,7 @@ def resolve_oauth_user(
         db.flush()
         return _finalize_login(db, by_email, profile.provider, ip_address)
 
-    business_name = f"Negocio de {profile.full_name.split()[0] if profile.full_name else 'Omitel'}"
+    business_name = placeholder_business_name(profile.full_name)
     tenant, owner = register_tenant_with_owner(
         db,
         business_name=business_name,

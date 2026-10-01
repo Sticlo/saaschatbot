@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from app.application.outbound.bait_template_service import _normalize_buttons
-from app.application.outbound.outbound_service import render_bait_message
+from app.application.outbound.bait_template_service import _normalize_buttons, render_bait_message
 
 
 def test_render_bait_message_variables():

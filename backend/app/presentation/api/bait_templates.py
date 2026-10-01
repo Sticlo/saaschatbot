@@ -11,7 +11,7 @@ from app.application.ai.ai_business_profile_service import (
     build_ai_system_prompt_from_answers,
     business_summary_lines,
 )
-from app.application.billing.tenant_service import log_audit
+from app.application.billing.tenant_service import is_placeholder_business_name, log_audit
 from app.application.outbound.bait_template_service import (
     create_template,
     delete_template,
@@ -21,6 +21,7 @@ from app.application.outbound.bait_template_service import (
     update_template,
 )
 from app.application.outbound.tenant_asset_service import save_tenant_image
+from app.application.realtime.realtime_service import publish_tenant_settings
 from app.application.billing.tenant_profile_service import (
     answers_from_profile,
     apply_business_answers,
@@ -82,6 +83,7 @@ def _profile_response(tenant: Tenant, profile) -> BusinessProfileResponse:
     answers = _answers_from_profile(profile)
     return BusinessProfileResponse(
         business_name=tenant.business_name,
+        business_name_is_placeholder=is_placeholder_business_name(tenant.business_name),
         industry=answers.get("industry"),
         products_services=answers.get("products_services"),
         target_customer=answers.get("target_customer"),
@@ -119,6 +121,12 @@ def update_business_profile(
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     profile = get_or_create_tenant_profile(db, tenant.id)
 
+    if body.business_name is not None:
+        name = body.business_name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=422, detail="Escribe el nombre de tu negocio")
+        tenant.business_name = name
+
     answers = _answers_from_profile(profile)
     for key in (
         "industry",
@@ -155,6 +163,8 @@ def update_business_profile(
     )
     db.commit()
     db.refresh(profile)
+    if body.business_name is not None:
+        publish_tenant_settings(tenant)
     return _profile_response(tenant, profile)
 
 

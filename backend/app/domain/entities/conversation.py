@@ -42,6 +42,7 @@ class Conversation(Base):
         String(20), nullable=False, default=ConversationMode.AUTO.value
     )
     ai_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ai_set_by_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     bait_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     imported_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(

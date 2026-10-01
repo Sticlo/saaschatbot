@@ -46,7 +46,6 @@ from app.application.whatsapp.whatsapp_gateway import (
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
     send_image as gateway_send_image,
-    send_buttons as gateway_send_buttons,
     uses_waha,
 )
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
@@ -757,96 +756,3 @@ def _record_outbound_message(
     db.flush()
     publish_message_event(tenant, conversation, message, event_type="message.out")
     return message
-
-
-def _buttons_to_provider(buttons: list[dict]) -> list[dict]:
-    out: list[dict] = []
-    for idx, btn in enumerate(buttons[:3]):
-        label = str(btn.get("label") or "").strip()
-        if not label:
-            continue
-        value = str(btn.get("value") or label).strip()
-        out.append(
-            {
-                "type": "reply",
-                "displayText": label[:25],
-                "id": value[:120],
-            }
-        )
-    return out
-
-
-def send_bait_message(
-    db: Session,
-    *,
-    tenant: Tenant,
-    session: WhatsAppSession,
-    conversation: Conversation,
-    text: str,
-    source: str,
-    extras: Optional[dict] = None,
-) -> Message:
-    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
-    if not ok:
-        raise EvolutionAPIError(reason)
-
-    conversation, recipient = _prepare_outbound_recipient(
-        db, tenant=tenant, session=session, conversation=conversation
-    )
-    extras = extras or {}
-    image_path = extras.get("image_path")
-    buttons = extras.get("buttons") or []
-    button_title = str(extras.get("button_title") or tenant.business_name or "Opciones")[:60]
-    button_footer = str(extras.get("button_footer") or "")[:60]
-    provider_buttons = _buttons_to_provider(buttons) if buttons else []
-    last_id: Optional[str] = None
-    display_body = text
-
-    if image_path:
-        from app.application.outbound.tenant_asset_service import read_asset_base64
-
-        b64, mime = read_asset_base64(image_path, tenant_id=tenant.id)
-        filename = image_path.rsplit("/", 1)[-1]
-        caption = "" if provider_buttons else text
-        result = gateway_send_image(
-            session.instance_name,
-            recipient,
-            data_b64=b64,
-            mimetype=mime,
-            filename=filename,
-            caption=caption[:1024],
-        )
-        last_id = _extract_evolution_id(result)
-        if provider_buttons:
-            display_body = f"[Imagen]\n{text}"
-
-    if provider_buttons:
-        try:
-            result = gateway_send_buttons(
-                session.instance_name,
-                recipient,
-                title=button_title,
-                description=text[:1024],
-                footer=button_footer,
-                buttons=provider_buttons,
-            )
-            last_id = _extract_evolution_id(result) or last_id
-            if image_path:
-                display_body = f"[Imagen + botones]\n{text}"
-        except WhatsAppGatewayError:
-            log.warning("Botones fallaron — enviando solo texto tenant=%s", tenant.id)
-            if not image_path or provider_buttons:
-                result = gateway_send_text(session.instance_name, recipient, text)
-                last_id = _extract_evolution_id(result) or last_id
-    elif not image_path:
-        result = gateway_send_text(session.instance_name, recipient, text)
-        last_id = _extract_evolution_id(result)
-
-    return _record_outbound_message(
-        db,
-        tenant=tenant,
-        conversation=conversation,
-        body=display_body[:4096],
-        source=source,
-        evolution_id=last_id,
-    )

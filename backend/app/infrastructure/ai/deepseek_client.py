@@ -67,7 +67,7 @@ def check_provider_health() -> tuple[bool, Optional[str]]:
 
 
 def resolve_model(model: Optional[str] = None) -> str:
-    """Siempre deepseek-chat — bloquea reasoner, v4-pro, etc."""
+    """Siempre deepseek-flash — bloquea v4-pro y modelos retirados."""
     requested = (model or settings.deepseek_chat_model or ALLOWED_DEEPSEEK_MODEL).strip().lower()
     if requested != ALLOWED_DEEPSEEK_MODEL:
         log.warning("Modelo DeepSeek %r ignorado — usando %s", requested, ALLOWED_DEEPSEEK_MODEL)
@@ -92,6 +92,8 @@ def chat_completion(
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        # Con thinking activo, el razonamiento consume max_tokens y content llega vacío.
+        "thinking": {"type": "disabled"},
     }
     headers = {
         "Authorization": f"Bearer {settings.deepseek_api_key.strip()}",

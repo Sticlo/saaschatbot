@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 AI_REPLY_QUEUE = "queue:ai_replies"
 AI_PROCESS_LOCK_PREFIX = "ai:lock:"
 AI_PROCESS_LOCK_TTL_SECONDS = 120
+AI_QUEUED_PREFIX = "ai:queued:"
+AI_QUEUED_TTL_SECONDS = 600
 MAX_AI_JOB_RETRIES = 8
 
 _worker_thread: Optional[threading.Thread] = None
@@ -52,6 +54,17 @@ def _release_ai_lock(conversation_id: uuid.UUID) -> None:
         pass
 
 
+def _queued_key(message_id: uuid.UUID) -> str:
+    return f"{AI_QUEUED_PREFIX}{message_id}"
+
+
+def _clear_queued_marker(message_id: uuid.UUID) -> None:
+    try:
+        get_redis().delete(_queued_key(message_id))
+    except Exception:
+        pass
+
+
 def _process_ai_job(
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
@@ -59,6 +72,7 @@ def _process_ai_job(
 ) -> None:
     if not _try_acquire_ai_lock(conversation_id):
         log.debug("IA job omitido: lock activo conv=%s", conversation_id)
+        _clear_queued_marker(message_id)
         return
 
     slot = acquire_ai_slot(wait_seconds=settings.ai_slot_wait_seconds)
@@ -99,6 +113,7 @@ def _process_ai_job(
         db.close()
         release_ai_slot(slot)
         _release_ai_lock(conversation_id)
+        _clear_queued_marker(message_id)
 
 
 def enqueue_ai_reply_ids(
@@ -133,6 +148,10 @@ def enqueue_ai_reply_ids(
     finally:
         if owns_session:
             db.close()
+
+    if not get_redis().set(_queued_key(message_id), "1", nx=True, ex=AI_QUEUED_TTL_SECONDS):
+        log.debug("IA ya encolada msg=%s", message_id)
+        return
 
     item = json.dumps(
         {
@@ -253,6 +272,9 @@ def start_ai_worker() -> None:
         daemon=True,
     )
     _worker_thread.start()
+    from app.application.conversations.interest_alert_service import start_interest_alert_sweeper
+
+    start_interest_alert_sweeper()
     if is_configured():
         log.info(
             "AI worker started (model=%s, max_parallel=%s)",
@@ -264,6 +286,9 @@ def start_ai_worker() -> None:
 
 
 def stop_ai_worker() -> None:
+    from app.application.conversations.interest_alert_service import stop_interest_alert_sweeper
+
+    stop_interest_alert_sweeper()
     _worker_stop.set()
     if _worker_thread and _worker_thread.is_alive():
         _worker_thread.join(timeout=1)
