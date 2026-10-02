@@ -1,5 +1,10 @@
 name = "omitel-site"
 compatibility_date = "2024-07-01"
+workers_dev = true
+
+routes = [
+  { pattern = "www.omitel.net", custom_domain = true },
+]
 
 # Build output de Angular (web/site): npm run build → dist/site
 [assets]

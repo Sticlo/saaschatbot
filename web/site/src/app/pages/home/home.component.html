@@ -1,267 +1,439 @@
 <app-shell>
-  <section class="home-page">
+  <section class="home-page" appScrollExperience>
+    <!-- Fondo WebGL: su atmósfera (colores, niebla, bloom, cámara) cambia con cada [data-atmosphere] -->
+    <app-data-fabric></app-data-fabric>
     <div class="home-bg" aria-hidden="true"></div>
 
-    <!-- Hero — split: copy left, WhatsApp mockup right -->
-    <div class="hero">
-      <div class="hero-bg" aria-hidden="true">
-        <div class="hero-aurora"></div>
-        <span class="hero-bloom hero-bloom--peach"></span>
-        <span class="hero-bloom hero-bloom--mist"></span>
-      </div>
-
-      <div class="container hero-grid">
-        <div class="hero-copy">
-          <div class="hero-reveal">
-            <p class="eyebrow-pill hero-reveal-item">
-              <span class="eyebrow-dot"></span>
-              WhatsApp automatizado
-            </p>
-
-            <h1 class="hero-reveal-item">
-              <span class="headline-hero">Responde a tus clientes.</span>
-              <span class="headline-sub">Sin vivir en el chat.</span>
-            </h1>
-
-            <div class="subhead-block hero-reveal-item">
-              <p class="subhead-lead">La IA contesta por ti en WhatsApp.</p>
-              <p class="subhead">
-                Solo entras cuando detectamos un
-                <strong class="highlight-word">Interesado</strong>
-                listo para comprar.
-              </p>
-            </div>
-
-            <div class="hero-action hero-reveal-item">
-              <div class="hero-cta">
-                <ng-container *ngIf="user$ | async; else guestHero">
-                  <a [href]="panelUrl" class="btn-hero btn-hero--primary">Abrir panel</a>
-                </ng-container>
-                <ng-template #guestHero>
-                  <a routerLink="/registro" class="btn-hero btn-hero--primary">Probar gratis</a>
-                  <a routerLink="/precios" class="link-hero">Desde $120.000/mes ›</a>
-                </ng-template>
-              </div>
-              <p class="trust-line">7 días gratis · Sin tarjeta · Colombia</p>
-            </div>
+    <!-- Hero: escenario 3D fijado durante el scroll; cada [data-layer] es una capa de profundidad -->
+    <div class="hero" appHeroDepth (heroInView)="onHeroInView($event)">
+      <div class="hero-stage">
+        <div class="hero-bg" aria-hidden="true">
+          <div class="hero-aurora"></div>
+          <span class="hero-bloom hero-bloom--peach"></span>
+          <span class="hero-bloom hero-bloom--mist"></span>
+          <div class="hero-ambient" data-layer="ambient">
+            <span class="hero-ambient-blob hero-ambient-blob--ember"></span>
+            <span class="hero-ambient-blob hero-ambient-blob--coral"></span>
+            <span class="hero-ambient-blob hero-ambient-blob--amber"></span>
           </div>
         </div>
 
-        <div class="hero-visual" [class.hero-visual--interested]="showAlert">
-          <div class="device-glow device-glow--warm" aria-hidden="true"></div>
-          <div class="device-glow device-glow--green" aria-hidden="true"></div>
+        <div class="hero-floaters" aria-hidden="true">
+          <div class="floater floater--ask" data-layer="float-ask">
+            <span class="floater-inner floater-bubble">¿Tienen domicilio?</span>
+          </div>
+          <div class="floater floater--reply" data-layer="float-reply">
+            <span class="floater-inner floater-bubble floater-bubble--out">¡Sí! Llega en 30 min <i>✓✓</i></span>
+          </div>
+          <div class="floater floater--speed" data-layer="float-speed">
+            <span class="floater-inner floater-badge"><b class="floater-dot"></b>IA respondió en 2 s</span>
+          </div>
+          <div class="floater floater--typing" data-layer="float-typing">
+            <span class="floater-inner floater-bubble floater-bubble--typing"><i></i><i></i><i></i></span>
+          </div>
+          <div class="floater floater--lead" data-layer="float-lead">
+            <span class="floater-inner floater-badge floater-badge--win">+1 cliente nuevo</span>
+          </div>
+          <div class="floater floater--booking" data-layer="float-booking">
+            <span class="floater-inner floater-badge">Reserva · 7:00 pm</span>
+          </div>
+        </div>
 
-          <div class="device-3d">
-            <div class="insight-cards" aria-hidden="true">
-              <article
-                class="insight-card insight-card--probability"
-                [class.insight-card--visible]="showInsightProbability"
-                [class.insight-card--pop]="insightPop === 'probability'"
-              >
-                <span class="insight-glow insight-glow--orange" aria-hidden="true"></span>
-                <span class="insight-ring" aria-hidden="true"></span>
-                <div class="insight-top">
-                  <span class="insight-icon insight-icon--probability"></span>
-                  <span class="insight-badge insight-badge--live">En vivo</span>
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <div class="hero-reveal">
+              <p class="eyebrow-pill hero-reveal-item" data-layer="copy">
+                <span class="eyebrow-dot"></span>
+                WhatsApp automatizado
+              </p>
+
+              <h1 class="hero-title hero-reveal-item">
+                <span class="headline-hero" data-layer="title">
+                  <span class="headline-line">Responde a</span>&ngsp;<span class="headline-line">tus clientes.</span>
+                </span>
+                <span class="headline-sub" data-layer="copy">Sin vivir en el chat.</span>
+              </h1>
+
+              <div class="subhead-block hero-reveal-item" data-layer="copy">
+                <p class="subhead-lead">La IA contesta por ti en WhatsApp.</p>
+                <p class="subhead">
+                  Solo entras cuando detectamos un
+                  <strong class="highlight-word">Interesado</strong>
+                  listo para comprar.
+                </p>
+              </div>
+
+              <div class="hero-action hero-reveal-item" data-layer="copy">
+                <div class="hero-cta">
+                  <ng-container *ngIf="user$ | async; else guestHero">
+                    <a [href]="panelUrl" class="btn-hero btn-hero--primary">Abrir panel</a>
+                  </ng-container>
+                  <ng-template #guestHero>
+                    <a routerLink="/registro" class="btn-hero btn-hero--primary">Probar gratis</a>
+                    <a routerLink="/precios" class="link-hero">Desde $120.000/mes ›</a>
+                  </ng-template>
                 </div>
-                <div class="insight-body">
-                  <span class="insight-label">Probabilidad de compra</span>
-                  <div class="insight-metric">
-                    <strong class="insight-value">{{ displayProbability }}%</strong>
-                    <span class="insight-trend" *ngIf="probabilityTrend">{{ probabilityTrend }}</span>
-                  </div>
-                  <div class="insight-bar insight-bar--orange">
-                    <span class="insight-bar-fill" [style.width.%]="displayProbability"></span>
-                  </div>
-                </div>
-              </article>
-
-              <article
-                class="insight-card insight-card--time"
-                [class.insight-card--visible]="showInsightTime"
-                [class.insight-card--pop]="insightPop === 'time'"
-              >
-                <span class="insight-glow insight-glow--blue" aria-hidden="true"></span>
-                <span class="insight-ring" aria-hidden="true"></span>
-                <div class="insight-top">
-                  <span class="insight-icon insight-icon--time"></span>
-                  <span class="insight-badge">Automático</span>
-                </div>
-                <div class="insight-body">
-                  <span class="insight-label">Tiempo ahorrado</span>
-                  <strong class="insight-value insight-value--hero">{{
-                    currentScenario.insights.timeSaved
-                  }}</strong>
-                  <span class="insight-caption">Sin responder manualmente</span>
-                </div>
-              </article>
-
-              <article
-                class="insight-card insight-card--sales"
-                [class.insight-card--visible]="showInsightSales"
-                [class.insight-card--pop]="insightPop === 'sales'"
-                [class.insight-card--celebrate]="showInsightSales && showAlert"
-              >
-                <span class="insight-glow insight-glow--green" aria-hidden="true"></span>
-                <span class="insight-ring insight-ring--green" aria-hidden="true"></span>
-                <div class="insight-top">
-                  <span class="insight-icon insight-icon--sales"></span>
-                  <span class="insight-badge insight-badge--win">Nueva venta</span>
-                </div>
-                <div class="insight-body">
-                  <span class="insight-label">Ventas</span>
-                  <strong class="insight-value insight-value--hero insight-value--sales">{{
-                    currentScenario.insights.sales
-                  }}</strong>
-                  <span class="insight-caption">Interesado confirmado</span>
-                </div>
-              </article>
-            </div>
-
-            <div class="device-shadow" aria-hidden="true"></div>
-            <div class="device">
-              <span class="device-button device-button--action" aria-hidden="true"></span>
-              <span class="device-button device-button--vol-up" aria-hidden="true"></span>
-              <span class="device-button device-button--vol-down" aria-hidden="true"></span>
-              <span class="device-button device-button--power" aria-hidden="true"></span>
-              <div class="device-frame">
-                <div class="device-screen">
-                  <div class="device-status">
-                    <span class="device-time">10:41</span>
-                    <div class="device-island"></div>
-                    <span class="device-icons">
-                      <i class="sig"></i>
-                      <i class="bat"></i>
-                    </span>
-                  </div>
-
-                  <div class="device-app">
-                    <header class="wa-nav">
-                      <span class="wa-back">‹</span>
-                      <div class="wa-user">
-                        <div class="wa-avatar">{{ currentScenario.contactInitial }}</div>
-                        <div class="wa-name">
-                          <strong>{{ currentScenario.contactName }}</strong>
-                          <span>{{ currentScenario.contactRole }}</span>
-                        </div>
-                      </div>
-                      <span class="wa-actions">
-                        <i class="wa-icon-call"></i>
-                        <i class="wa-icon-menu">⋮</i>
-                      </span>
-                    </header>
-
-                    <div
-                      class="wa-chat"
-                      [class.wa-chat--static]="chatStatic"
-                      [class.wa-chat--swap]="scenarioTransition"
-                    >
-                      <div class="wa-date">Hoy · {{ currentScenario.vertical }}</div>
-
-                      <div
-                        *ngFor="let msg of visibleMessages"
-                        class="wa-row wa-row--enter"
-                        [class.wa-row--in]="msg.direction === 'in'"
-                        [class.wa-row--out]="msg.direction === 'out'"
-                      >
-                        <div class="wa-bubble">
-                          <p>{{ msg.text }}</p>
-                          <time>
-                            {{ msg.time }}
-                            <span class="wa-ticks" *ngIf="msg.direction === 'out'">✓✓</span>
-                          </time>
-                        </div>
-                        <span class="wa-brand" *ngIf="msg.direction === 'out'">O</span>
-                      </div>
-
-                      <div
-                        class="wa-row wa-row--in wa-row--typing"
-                        *ngIf="showTyping && !chatStatic"
-                        [class.wa-row--typing-out]="typingDirection === 'out'"
-                      >
-                        <div class="wa-bubble wa-bubble--typing">
-                          <span></span><span></span><span></span>
-                        </div>
-                        <span class="wa-brand" *ngIf="typingDirection === 'out'">O</span>
-                      </div>
-                    </div>
-
-                    <div class="wa-alert" [class.wa-alert--visible]="showAlert">
-                      <span class="wa-alert-dot"></span>
-                      {{ currentScenario.alertText }}
-                    </div>
-                  </div>
-
-                  <div class="device-home"></div>
-                </div>
+                <p class="trust-line">7 días gratis · Sin tarjeta · Colombia</p>
               </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            class="chat-mode-toggle"
-            (click)="toggleChatMode()"
-            [attr.aria-pressed]="chatStatic"
-          >
-            {{ chatStatic ? 'Ver conversación viva' : 'Modo estático' }}
-          </button>
+          <div class="hero-visual" [class.hero-visual--interested]="showAlert">
+            <div class="device-glow device-glow--warm" aria-hidden="true"></div>
+            <div class="device-glow device-glow--green" aria-hidden="true"></div>
+
+            <div class="device-3d">
+              <div class="device-aura" aria-hidden="true">
+                <span class="device-aura-core"></span>
+              </div>
+              <div class="insight-cards" aria-hidden="true">
+                <div class="insight-slot insight-slot--probability" data-layer="card-probability">
+                  <article
+                    class="insight-card insight-card--probability"
+                    [class.insight-card--visible]="showInsightProbability"
+                    [class.insight-card--pop]="insightPop === 'probability'"
+                  >
+                    <span class="glint"><span class="glint-band"></span></span>
+                    <span class="insight-glow insight-glow--orange" aria-hidden="true"></span>
+                    <span class="insight-ring" aria-hidden="true"></span>
+                    <div class="insight-top">
+                      <span class="insight-icon insight-icon--probability"></span>
+                      <span class="insight-badge insight-badge--live">En vivo</span>
+                    </div>
+                    <div class="insight-body">
+                      <span class="insight-label">Probabilidad de compra</span>
+                      <div class="insight-metric">
+                        <strong class="insight-value">{{ displayProbability }}%</strong>
+                        <span class="insight-trend" *ngIf="probabilityTrend">{{ probabilityTrend }}</span>
+                      </div>
+                      <div class="insight-bar insight-bar--orange">
+                        <span class="insight-bar-fill" [style.--fill]="displayProbability / 100"></span>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="insight-slot insight-slot--time" data-layer="card-time">
+                  <article
+                    class="insight-card insight-card--time"
+                    [class.insight-card--visible]="showInsightTime"
+                    [class.insight-card--pop]="insightPop === 'time'"
+                  >
+                    <span class="glint"><span class="glint-band"></span></span>
+                    <span class="insight-glow insight-glow--blue" aria-hidden="true"></span>
+                    <span class="insight-ring" aria-hidden="true"></span>
+                    <div class="insight-top">
+                      <span class="insight-icon insight-icon--time"></span>
+                      <span class="insight-badge">Automático</span>
+                    </div>
+                    <div class="insight-body">
+                      <span class="insight-label">Tiempo ahorrado</span>
+                      <strong class="insight-value insight-value--hero">{{
+                        currentScenario.insights.timeSaved
+                      }}</strong>
+                      <span class="insight-caption">Sin responder manualmente</span>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="insight-slot insight-slot--sales" data-layer="card-sales">
+                  <article
+                    class="insight-card insight-card--sales"
+                    [class.insight-card--visible]="showInsightSales"
+                    [class.insight-card--pop]="insightPop === 'sales'"
+                    [class.insight-card--celebrate]="showInsightSales && showAlert"
+                  >
+                    <span class="glint"><span class="glint-band"></span></span>
+                    <span class="insight-glow insight-glow--green" aria-hidden="true"></span>
+                    <span class="insight-ring insight-ring--green" aria-hidden="true"></span>
+                    <div class="insight-top">
+                      <span class="insight-icon insight-icon--sales"></span>
+                      <span class="insight-badge insight-badge--win">Nueva venta</span>
+                    </div>
+                    <div class="insight-body">
+                      <span class="insight-label">Ventas</span>
+                      <strong class="insight-value insight-value--hero insight-value--sales">{{
+                        currentScenario.insights.sales
+                      }}</strong>
+                      <span class="insight-caption">Interesado confirmado</span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+
+              <div class="device-shadow" aria-hidden="true"></div>
+              <div class="device-tilt" data-layer="phone">
+                <div class="device">
+                  <span class="device-button device-button--action" aria-hidden="true"></span>
+                  <span class="device-button device-button--vol-up" aria-hidden="true"></span>
+                  <span class="device-button device-button--vol-down" aria-hidden="true"></span>
+                  <span class="device-button device-button--power" aria-hidden="true"></span>
+                  <div class="device-frame">
+                    <span class="device-edge" data-hero="edge" aria-hidden="true"></span>
+                    <div class="device-screen">
+                      <div class="device-status">
+                        <span class="device-time">10:41</span>
+                        <div class="device-island"></div>
+                        <span class="device-icons">
+                          <i class="sig"></i>
+                          <i class="bat"></i>
+                        </span>
+                      </div>
+
+                      <div class="device-app">
+                        <header class="wa-nav">
+                          <span class="wa-back">‹</span>
+                          <div class="wa-user">
+                            <div class="wa-avatar">{{ currentScenario.contactInitial }}</div>
+                            <div class="wa-name">
+                              <strong>{{ currentScenario.contactName }}</strong>
+                              <span>{{ currentScenario.contactRole }}</span>
+                            </div>
+                          </div>
+                          <span class="wa-actions">
+                            <i class="wa-icon-call"></i>
+                            <i class="wa-icon-menu">⋮</i>
+                          </span>
+                        </header>
+
+                        <div
+                          class="wa-chat"
+                          [class.wa-chat--static]="chatStatic"
+                          [class.wa-chat--swap]="scenarioTransition"
+                        >
+                          <div class="wa-date">Hoy · {{ currentScenario.vertical }}</div>
+
+                          <div
+                            *ngFor="let msg of visibleMessages; let i = index"
+                            class="wa-row wa-row--enter"
+                            [style.--i]="i"
+                            [class.wa-row--in]="msg.direction === 'in'"
+                            [class.wa-row--out]="msg.direction === 'out'"
+                          >
+                            <div class="wa-bubble">
+                              <p>{{ msg.text }}</p>
+                              <time>
+                                {{ msg.time }}
+                                <span class="wa-ticks" *ngIf="msg.direction === 'out'">✓✓</span>
+                              </time>
+                            </div>
+                            <span class="wa-brand" *ngIf="msg.direction === 'out'">O</span>
+                          </div>
+
+                          <div
+                            class="wa-row wa-row--in wa-row--typing"
+                            *ngIf="showTyping && !chatStatic"
+                            [class.wa-row--typing-out]="typingDirection === 'out'"
+                          >
+                            <div class="wa-bubble wa-bubble--typing">
+                              <span></span><span></span><span></span>
+                            </div>
+                            <span class="wa-brand" *ngIf="typingDirection === 'out'">O</span>
+                          </div>
+                        </div>
+
+                        <div class="wa-alert" [class.wa-alert--visible]="showAlert">
+                          <span class="wa-alert-dot"></span>
+                          {{ currentScenario.alertText }}
+                        </div>
+                      </div>
+
+                      <div class="device-home"></div>
+                      <span class="device-sheen" data-hero="sheen" aria-hidden="true"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              class="chat-mode-toggle"
+              (click)="toggleChatMode()"
+              [attr.aria-pressed]="chatStatic"
+            >
+              {{ chatStatic ? 'Ver conversación viva' : 'Modo estático' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="hero-scroll-cue" data-hero="cue" aria-hidden="true">
+          <span class="hero-scroll-cue-mouse"><span></span></span>
+          Desliza para explorar
         </div>
       </div>
     </div>
 
-    <!-- Stats -->
-    <section class="stats-strip" aria-label="Resultados">
-      <div class="stats-inner">
-        <article class="stat" *ngFor="let s of stats">
-          <strong class="stat-value">{{ s.value }}</strong>
-          <span class="stat-label">{{ s.label }}</span>
-        </article>
+    <!-- Continuación del escenario: luz ambiental, burbujas con parallax y bento interactivo -->
+    <div class="home-flow" appPageDepth>
+      <div class="flow-atmos" aria-hidden="true">
+        <span class="flow-orb flow-orb--ember" data-speed="-0.18" data-glow></span>
+        <span class="flow-orb flow-orb--coral" data-speed="-0.3" data-glow></span>
+        <span class="flow-orb flow-orb--mint" data-speed="-0.12" data-glow></span>
+        <span class="flow-orb flow-orb--amber" data-speed="-0.24" data-glow></span>
+        <span class="flow-orb flow-orb--deep-coral" data-speed="-0.2" data-glow></span>
+        <span class="flow-orb flow-orb--deep-mint" data-speed="-0.32" data-glow></span>
+        <span class="flow-orb flow-orb--deep-amber" data-speed="-0.15" data-glow></span>
+        <span class="flow-spine"></span>
       </div>
-    </section>
-
-    <!-- Problem -->
-    <section class="problem">
-      <div class="section-inner">
-        <p class="section-eyebrow">El problema</p>
-        <h2 class="section-title">
-          Tu WhatsApp no debería ser<br class="br-desktop" />
-          una segunda jornada laboral.
-        </h2>
-        <p class="section-lead">
-          Cada día llegan preguntas de precio, horario y disponibilidad. Si no respondes rápido,
-          el cliente se va con la competencia. Omitel automatiza lo repetitivo y te deja
-          entrar solo cuando hay una venta real.
-        </p>
+      <div class="flow-floaters" aria-hidden="true">
+        <span class="flow-floater flow-floater--panel floater-badge" data-speed="0.14" data-spin="-4">
+          <b class="floater-dot"></b>IA activa
+        </span>
+        <span class="flow-floater flow-floater--lead floater-badge floater-badge--win" data-speed="0.26" data-spin="5">
+          +1 interesado
+        </span>
+        <span class="flow-floater flow-floater--menu flow-chat" data-speed="0.22" data-spin="-5">
+          <b class="flow-avatar">M</b><span class="floater-bubble">¿Me envías el menú?</span>
+        </span>
+        <span class="flow-floater flow-floater--reply floater-bubble floater-bubble--out" data-speed="0.18" data-spin="-3">
+          Claro, te lo envío ahora <i>✓✓</i>
+        </span>
+        <span class="flow-floater flow-floater--book floater-badge" data-speed="0.3" data-spin="6">
+          Reserva confirmada
+        </span>
+        <span class="flow-floater flow-floater--quote floater-bubble floater-bubble--out" data-speed="0.24" data-spin="4">
+          Cotización enviada <i>✓✓</i>
+        </span>
+        <span class="flow-floater flow-floater--question flow-chat" data-speed="0.2" data-spin="-4">
+          <b class="flow-avatar flow-avatar--coral">L</b><span class="floater-bubble">¿Funciona con mi número?</span>
+        </span>
+        <span class="flow-floater flow-floater--close floater-badge" data-speed="0.16" data-spin="-5">
+          Venta lista para cerrar
+        </span>
       </div>
-    </section>
 
-    <!-- Features -->
-    <section class="features">
-      <div class="section-inner">
-        <p class="section-eyebrow">Qué incluye</p>
-        <h2 class="section-title">Todo lo que necesitas<br class="br-desktop" /> para vender por WhatsApp</h2>
-        <div class="features-grid">
-          <article class="feature-card" *ngFor="let f of features">
-            <span class="feature-icon feature-icon--{{ f.icon }}" aria-hidden="true"></span>
-            <h3>{{ f.title }}</h3>
-            <p>{{ f.line }}</p>
+      <!-- Stats -->
+      <section class="stats-strip" aria-label="Resultados">
+        <div class="stats-inner" data-reveal>
+          <article class="stat" *ngFor="let s of stats">
+            <strong class="stat-value">{{ s.value }}</strong>
+            <span class="stat-label">{{ s.label }}</span>
           </article>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <!-- Problem -->
+      <section class="problem" data-atmosphere="problem">
+        <div class="problem-drifts" aria-hidden="true">
+          <div class="drift drift--price" data-speed="0.28" data-spin="-6">
+            <span class="floater-inner floater-bubble">¿Cuánto cuesta?</span>
+          </div>
+          <div class="drift drift--hours" data-speed="0.12" data-spin="5">
+            <span class="floater-inner floater-bubble">¿A qué hora abren?</span>
+          </div>
+          <div class="drift drift--stock" data-speed="0.36" data-spin="7">
+            <span class="floater-inner floater-bubble">¿Hay disponibilidad?</span>
+          </div>
+          <div class="drift drift--unread" data-speed="0.18" data-spin="-4">
+            <span class="floater-inner floater-badge floater-badge--alert"><b class="floater-dot"></b>47 sin responder</span>
+          </div>
+          <div class="drift drift--late" data-speed="0.08" data-spin="3">
+            <span class="floater-inner floater-badge">Visto 11:48 pm</span>
+          </div>
+          <div class="drift drift--typing" data-speed="0.22" data-spin="-5">
+            <span class="floater-inner floater-bubble floater-bubble--typing"><i></i><i></i><i></i></span>
+          </div>
+        </div>
+
+        <div class="section-inner" data-scene>
+          <p class="section-eyebrow" data-reveal>El problema</p>
+          <h2 class="section-title problem-title" data-words>
+            <span class="reveal-line" *ngFor="let line of problemLines">
+              <ng-container *ngFor="let word of line"
+                ><span class="reveal-word">{{ word }}</span>{{ ' ' }}</ng-container
+              >
+            </span>
+          </h2>
+          <p class="section-lead" data-reveal>
+            Cada día llegan preguntas de precio, horario y disponibilidad. Si no respondes rápido,
+            el cliente se va con la competencia. Omitel automatiza lo repetitivo y te deja
+            entrar solo cuando hay una venta real.
+          </p>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="features" data-atmosphere="features">
+        <div class="section-inner" data-scene>
+          <header class="section-head" data-parallax="-20">
+            <p class="section-eyebrow" data-reveal>Qué incluye</p>
+            <h2 class="section-title" data-mask-reveal>Todo lo que necesitas<br class="br-desktop" /> para vender por WhatsApp</h2>
+          </header>
+
+          <!-- Índice editorial: filas numeradas con hairlines, sin tarjetas ni iconos en cajita -->
+          <ol class="feature-index" data-parallax="12">
+            <li
+              class="feature-row feature-row--{{ f.icon }}"
+              *ngFor="let f of features; let i = index"
+              [style.--i]="i"
+              data-tilt="0"
+              data-reveal
+            >
+              <span class="bento-light" aria-hidden="true"></span>
+
+              <span class="feature-row-num" aria-hidden="true">{{ (i + 1).toString().padStart(2, '0') }}</span>
+
+              <div class="feature-row-copy">
+                <h3>{{ f.title }}</h3>
+                <p>{{ f.line }}</p>
+              </div>
+
+              <div class="feature-row-visual" aria-hidden="true" [ngSwitch]="f.icon">
+                <div class="bv-chat" *ngSwitchCase="'ai'">
+                  <span class="bv-bubble">¿Hacen domicilios a Chapinero?</span>
+                  <span class="bv-bubble bv-bubble--out">¡Claro! Llega en 30 min. ¿Te lo envío ya?</span>
+                  <span class="bv-bubble">Sí, porfa. Pago con Nequi</span>
+                  <span class="bv-bubble bv-bubble--out bv-bubble--typing"><i></i><i></i><i></i></span>
+                  <span class="bv-tag">IA · respondió en 2 s</span>
+                </div>
+
+                <div class="bv-score" *ngSwitchCase="'filter'">
+                  <span class="bv-score-ring"><strong>94%</strong></span>
+                  <span class="bv-score-label">Interesado</span>
+                </div>
+
+                <div class="bv-live" *ngSwitchCase="'panel'">
+                  <span class="bv-live-status"><b></b>Conectado</span>
+                  <span class="bv-live-row"><i></i><em></em></span>
+                  <span class="bv-live-row bv-live-row--hot"><i></i><em></em></span>
+                  <span class="bv-live-row"><i></i><em></em></span>
+                </div>
+
+                <div class="bv-switch" *ngSwitchCase="'manual'">
+                  <span class="bv-switch-label">IA</span>
+                  <span class="bv-switch-track"><span class="bv-switch-knob"></span></span>
+                  <span class="bv-switch-label">Tú</span>
+                </div>
+
+                <div class="bv-chips" *ngSwitchCase="'shortcuts'">
+                  <span>Menú</span>
+                  <span>Precios</span>
+                  <span>Fotos</span>
+                  <span>Ubicación</span>
+                </div>
+
+                <div class="bv-slot" *ngSwitchCase="'appointments'">
+                  <span class="bv-slot-day"><small>Hoy</small><strong>14</strong></span>
+                  <span class="bv-slot-info"><strong>7:00 pm</strong><small>Mesa para 6 · Confirmada</small></span>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
 
     <!-- Panel spotlight -->
-    <section class="panel-spotlight">
-      <div class="section-inner panel-spotlight-grid">
-        <div class="panel-spotlight-copy">
-          <p class="section-eyebrow">El panel</p>
-          <h2 class="section-title">Un solo lugar para<br class="br-desktop" /> todos tus chats</h2>
-          <p class="section-lead">
+    <section class="panel-spotlight depth-chapter" data-chapter="03" data-atmosphere="panel">
+      <div class="section-inner panel-spotlight-grid" data-scene>
+        <div class="panel-spotlight-copy" data-parallax="-20">
+          <p class="section-eyebrow" data-reveal>El panel</p>
+          <h2 class="section-title" data-mask-reveal>Un solo lugar para<br class="br-desktop" /> todos tus chats</h2>
+          <p class="section-lead" data-reveal>
             Conectas WhatsApp, activas la IA y ves en vivo quién escribe, quién está interesado
             y qué respondió la automatización — sin instalar nada en el celular.
           </p>
-          <ul class="panel-checklist">
+          <ul class="panel-checklist" data-reveal>
             <li>Lista de chats con preview del último mensaje</li>
             <li>Toggle IA global y por conversación</li>
             <li>Marca Interesado / No interesado con un clic</li>
@@ -274,8 +446,9 @@
             <a routerLink="/registro" class="btn-hero btn-hero--primary btn-hero--compact">Probar el panel gratis</a>
           </ng-template>
         </div>
-        <div class="panel-mock" aria-hidden="true">
-          <div class="panel-mock-window">
+        <div class="panel-mock depth-card" aria-hidden="true" data-tilt data-reveal>
+          <span class="bento-light" aria-hidden="true"></span>
+          <div class="panel-mock-window" data-parallax="20">
             <div class="panel-mock-bar">
               <span></span><span></span><span></span>
               <em>panel.omitel.co</em>
@@ -328,12 +501,21 @@
     </section>
 
     <!-- Industries -->
-    <section class="industries">
-      <div class="section-inner">
-        <p class="section-eyebrow">Para tu rubro</p>
-        <h2 class="section-title">Negocios que ya usan<br class="br-desktop" /> WhatsApp para vender</h2>
-        <div class="industries-grid">
-          <article class="industry-card" *ngFor="let ind of industries">
+    <section class="industries depth-chapter" data-chapter="04" data-atmosphere="industries">
+      <div class="section-inner" data-scene>
+        <div data-parallax="-20">
+          <p class="section-eyebrow" data-reveal>Para tu rubro</p>
+          <h2 class="section-title" data-mask-reveal>Negocios que ya usan<br class="br-desktop" /> WhatsApp para vender</h2>
+        </div>
+        <div class="industries-grid" data-parallax="14">
+          <article
+            class="industry-card depth-card"
+            *ngFor="let ind of industries; let i = index"
+            [style.--i]="i"
+            data-tilt
+            data-reveal
+          >
+            <span class="bento-light" aria-hidden="true"></span>
             <h3>{{ ind.name }}</h3>
             <p>{{ ind.example }}</p>
           </article>
@@ -342,21 +524,21 @@
     </section>
 
     <!-- Web solutions -->
-    <section class="web-solutions">
-      <div class="section-inner">
-        <div class="web-solutions-head">
+    <section class="web-solutions depth-chapter" data-chapter="05" data-atmosphere="web">
+      <div class="section-inner" data-scene>
+        <div class="web-solutions-head" data-parallax="-20">
           <div>
-            <p class="section-eyebrow">También desarrollamos</p>
-            <h2 class="section-title">
+            <p class="section-eyebrow" data-reveal>También desarrollamos</p>
+            <h2 class="section-title" data-mask-reveal>
               Soluciones web<br class="br-desktop" />
               para tu negocio
             </h2>
-            <p class="section-lead">
+            <p class="section-lead" data-reveal>
               Además de automatizar WhatsApp, diseñamos y construimos páginas web,
               aplicaciones y sistemas a la medida — conectados con tu operación y listos para vender.
             </p>
           </div>
-          <div class="web-solutions-actions">
+          <div class="web-solutions-actions" data-reveal>
             <a routerLink="/extras" class="link-hero">Ver todos los servicios ›</a>
             <a
               [href]="webQuoteHref()"
@@ -369,8 +551,15 @@
           </div>
         </div>
 
-        <div class="web-grid">
-          <article class="web-card" *ngFor="let item of webOfferings">
+        <div class="web-grid" data-parallax="14">
+          <article
+            class="web-card depth-card"
+            *ngFor="let item of webOfferings; let i = index"
+            [style.--i]="i"
+            data-tilt
+            data-reveal
+          >
+            <span class="bento-light" aria-hidden="true"></span>
             <span class="web-card-icon web-card-icon--{{ item.icon }}" aria-hidden="true"></span>
             <div class="web-card-top">
               <h3>{{ item.title }}</h3>
@@ -394,12 +583,21 @@
     </section>
 
     <!-- How it works -->
-    <section class="how">
-      <div class="how-inner">
-        <p class="how-label">Cómo funciona</p>
-        <h2 class="section-title section-title--center">De conectar a cerrar<br class="br-desktop" /> en tres pasos</h2>
-        <div class="beats">
-          <article class="beat" *ngFor="let b of beats">
+    <section class="how depth-chapter" data-chapter="06" data-atmosphere="how">
+      <div class="how-inner" data-scene>
+        <div data-parallax="-20">
+          <p class="how-label" data-reveal>Cómo funciona</p>
+          <h2 class="section-title section-title--center" data-mask-reveal>De conectar a cerrar<br class="br-desktop" /> en tres pasos</h2>
+        </div>
+        <div class="beats" data-parallax="16">
+          <article
+            class="beat depth-card"
+            *ngFor="let b of beats; let i = index"
+            [style.--i]="i"
+            data-tilt
+            data-reveal
+          >
+            <span class="bento-light" aria-hidden="true"></span>
             <span class="beat-step">{{ b.step }}</span>
             <h3>{{ b.title }}</h3>
             <p class="beat-line">{{ b.line }}</p>
@@ -410,11 +608,14 @@
     </section>
 
     <!-- Compare -->
-    <section class="compare">
-      <div class="section-inner">
-        <p class="section-eyebrow">Antes y después</p>
-        <h2 class="section-title section-title--center">Sin Omitel vs con Omitel</h2>
-        <div class="compare-table">
+    <section class="compare depth-chapter" data-chapter="07" data-atmosphere="compare">
+      <div class="section-inner" data-scene>
+        <div data-parallax="-16">
+          <p class="section-eyebrow" data-reveal>Antes y después</p>
+          <h2 class="section-title section-title--center" data-mask-reveal>Sin Omitel vs con Omitel</h2>
+        </div>
+        <div class="compare-table depth-card" data-tilt data-reveal>
+          <span class="bento-light" aria-hidden="true"></span>
           <div class="compare-head">
             <span>Sin Omitel</span>
             <span>Con Omitel</span>
@@ -428,12 +629,19 @@
     </section>
 
     <!-- FAQ -->
-    <section class="faq">
-      <div class="section-inner faq-inner">
-        <p class="section-eyebrow">Preguntas frecuentes</p>
-        <h2 class="section-title">Lo que más nos preguntan</h2>
-        <div class="faq-list">
-          <details class="faq-item" *ngFor="let item of faqs">
+    <section class="faq depth-chapter" data-chapter="08">
+      <div class="section-inner faq-inner" data-scene>
+        <div data-parallax="-16">
+          <p class="section-eyebrow" data-reveal>Preguntas frecuentes</p>
+          <h2 class="section-title" data-mask-reveal>Lo que más nos preguntan</h2>
+        </div>
+        <div class="faq-list" data-parallax="10">
+          <details
+            class="faq-item"
+            *ngFor="let item of faqs; let i = index"
+            [style.--i]="i"
+            data-reveal
+          >
             <summary>{{ item.q }}</summary>
             <p>{{ item.a }}</p>
           </details>
@@ -442,9 +650,10 @@
     </section>
 
     <!-- Final CTA -->
-    <section class="close-block">
-      <div class="close-inner">
-        <h2>Tu próximo cliente<br />ya está en WhatsApp.</h2>
+    <section class="close-block depth-card" data-tilt data-reveal data-atmosphere="close">
+      <span class="bento-light" aria-hidden="true"></span>
+      <div class="close-inner" data-scene>
+        <h2 data-mask-reveal>Tu próximo cliente<br />ya está en WhatsApp.</h2>
         <p class="close-lead">Empieza hoy. Sin contratos. Sin complicaciones.</p>
         <ng-container *ngIf="user$ | async; else guestClose">
           <a [href]="panelUrl" class="btn-hero btn-hero--primary">Ir al panel</a>
@@ -455,5 +664,6 @@
         </ng-template>
       </div>
     </section>
+    </div>
   </section>
 </app-shell>

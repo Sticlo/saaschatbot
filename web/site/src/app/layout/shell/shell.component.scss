@@ -288,8 +288,9 @@
   }
 }
 
+/* El home pinta su propio fondo WebGL; aquí no puede haber color sólido encima. */
 :host.shell-home .site-main {
-  background: var(--home-bg);
+  background: transparent;
 }
 
 .site-footer {

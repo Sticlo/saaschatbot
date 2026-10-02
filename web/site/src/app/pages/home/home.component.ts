@@ -1,4 +1,4 @@
-import { AsyncPipe, NgFor, NgIf, isPlatformBrowser } from '@angular/common';
+import { AsyncPipe, NgFor, NgIf, NgSwitch, NgSwitchCase, isPlatformBrowser } from '@angular/common';
 import {
   Component,
   OnDestroy,
@@ -13,6 +13,11 @@ import { readStorage, writeStorage } from '../../core/safe-storage';
 import { environment } from '../../../environments/environment';
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { SessionService } from '../../core/services/session.service';
+import { AtmosphereService } from './atmosphere.service';
+import { DataFabricComponent } from './data-fabric.component';
+import { HeroDepthDirective } from './hero-depth.directive';
+import { PageDepthDirective } from './page-depth.directive';
+import { ScrollExperienceDirective } from './scroll-experience.directive';
 
 interface Beat {
   step: string;
@@ -79,7 +84,20 @@ interface DemoScenario {
 
 @Component({
   selector: 'app-home',
-  imports: [ShellComponent, RouterLink, NgIf, NgFor, AsyncPipe],
+  imports: [
+    ShellComponent,
+    RouterLink,
+    NgIf,
+    NgFor,
+    NgSwitch,
+    NgSwitchCase,
+    AsyncPipe,
+    HeroDepthDirective,
+    PageDepthDirective,
+    ScrollExperienceDirective,
+    DataFabricComponent,
+  ],
+  providers: [AtmosphereService],
   templateUrl: './home.component.html',
   styleUrl: './home.component.scss',
 })
@@ -128,6 +146,12 @@ export class HomeComponent implements OnInit, OnDestroy {
     { value: '1 panel', label: 'Todos tus chats en un solo lugar' },
     { value: '7 días', label: 'Prueba gratis, sin tarjeta' },
   ];
+
+  /** Titular del problema partido en líneas y palabras para la revelación ligada al scroll. */
+  readonly problemLines: string[][] = [
+    'Tu WhatsApp no debería ser',
+    'una segunda jornada laboral.',
+  ].map((line) => line.split(' '));
 
   readonly features: Feature[] = [
     {
@@ -401,6 +425,8 @@ export class HomeComponent implements OnInit, OnDestroy {
   insightPop: 'probability' | 'time' | 'sales' | null = null;
 
   private probabilityAnimToken = 0;
+  private liveChatPending = false;
+  private chatPaused = false;
 
   ngOnInit(): void {
     if (!isPlatformBrowser(this.platformId)) {
@@ -419,7 +445,27 @@ export class HomeComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.startLiveChat();
+    this.liveChatPending = true;
+  }
+
+  onHeroInView(visible: boolean): void {
+    if (!visible) {
+      /* Fuera de pantalla la demo se congela: sin timers, sin change detection, sin layout. */
+      if (!this.chatStatic && !this.liveChatPending && this.chatTimers.length > 0) {
+        this.clearChatTimers();
+        this.chatPaused = true;
+      }
+      return;
+    }
+    if (this.liveChatPending) {
+      this.liveChatPending = false;
+      this.startLiveChat();
+      return;
+    }
+    if (this.chatPaused && !this.chatStatic) {
+      this.chatPaused = false;
+      this.playScenario(this.scenarioIndex);
+    }
   }
 
   ngOnDestroy(): void {
@@ -427,6 +473,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   toggleChatMode(): void {
+    this.liveChatPending = false;
     if (this.chatStatic) {
       this.applyStaticMode(false);
       if (isPlatformBrowser(this.platformId)) {
@@ -444,6 +491,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   private applyStaticMode(staticMode: boolean): void {
     this.chatStatic = staticMode;
+    this.chatPaused = false;
     this.clearChatTimers();
     this.showTyping = false;
     this.scenarioTransition = false;
