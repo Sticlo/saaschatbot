@@ -16,6 +16,8 @@ export interface MagicLinkRequest {
   email: string;
   business_name?: string;
   owner_name?: string;
+  accept_legal?: boolean;
+  accept_marketing?: boolean;
 }
 
 export interface MagicLinkResponse {

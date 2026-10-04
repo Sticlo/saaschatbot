@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.config import ALLOWED_DEEPSEEK_MODEL, settings
@@ -15,8 +16,10 @@ from app.application.ai.ai_service import ai_block_reason, should_ai_respond
 from app.infrastructure.ai.deepseek_client import is_configured
 from app.application.workers.worker_runtime import (
     acquire_ai_slot,
+    acquire_tenant_ai_slot,
     refresh_ai_slot,
     release_ai_slot,
+    release_tenant_ai_slot,
 )
 
 log = logging.getLogger(__name__)
@@ -27,8 +30,9 @@ AI_PROCESS_LOCK_TTL_SECONDS = 120
 AI_QUEUED_PREFIX = "ai:queued:"
 AI_QUEUED_TTL_SECONDS = 600
 MAX_AI_JOB_RETRIES = 8
+TENANT_BUSY_REQUEUE_DELAY_SECONDS = 0.25
 
-_worker_thread: Optional[threading.Thread] = None
+_worker_threads: list[threading.Thread] = []
 _worker_stop = threading.Event()
 
 
@@ -75,6 +79,21 @@ def _process_ai_job(
         _clear_queued_marker(message_id)
         return
 
+    tenant_slot = acquire_tenant_ai_slot(tenant_id)
+    if tenant_slot is None:
+        log.debug("IA: negocio en su tope de respuestas simultáneas tenant=%s (reencolar)", tenant_id)
+        _release_ai_lock(conversation_id)
+        time.sleep(TENANT_BUSY_REQUEUE_DELAY_SECONDS)
+        _requeue_job(
+            {
+                "tenant_id": str(tenant_id),
+                "conversation_id": str(conversation_id),
+                "message_id": str(message_id),
+            },
+            retry=0,
+        )
+        return
+
     slot = acquire_ai_slot(wait_seconds=settings.ai_slot_wait_seconds)
     if slot is None:
         log.warning(
@@ -82,6 +101,7 @@ def _process_ai_job(
             conversation_id,
             message_id,
         )
+        release_tenant_ai_slot(tenant_slot)
         _release_ai_lock(conversation_id)
         _requeue_job(
             {
@@ -112,8 +132,19 @@ def _process_ai_job(
     finally:
         db.close()
         release_ai_slot(slot)
+        release_tenant_ai_slot(tenant_slot)
         _release_ai_lock(conversation_id)
         _clear_queued_marker(message_id)
+
+
+def is_fresh_for_ai(created_at: Optional[datetime]) -> bool:
+    """Tras una caída llegan mensajes de hace horas: contestarlos ahora confunde al cliente."""
+    if created_at is None:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - created_at
+    return age <= timedelta(minutes=settings.ai_max_reply_age_minutes)
 
 
 def enqueue_ai_reply_ids(
@@ -122,8 +153,11 @@ def enqueue_ai_reply_ids(
     message_id: uuid.UUID,
     *,
     db: Optional["Session"] = None,
-) -> None:
-    """Encola respuesta IA. Llamar solo después de commit del mensaje entrante."""
+    allow_stale: bool = False,
+) -> bool:
+    """Encola respuesta IA. Llamar solo después de commit del mensaje entrante.
+
+    `allow_stale` solo para cuando el dueño pide la respuesta a mano desde el panel."""
     from sqlalchemy.orm import Session
 
     owns_session = db is None
@@ -140,18 +174,33 @@ def enqueue_ai_reply_ids(
             .first()
         )
         if tenant is None or conversation is None:
-            return
+            return False
         if not should_ai_respond(tenant, conversation):
             reason = ai_block_reason(tenant, conversation) or "desconocido"
             log.info("IA no encolada conv=%s: %s", conversation_id, reason)
-            return
+            return False
+        if not allow_stale:
+            from app.domain.entities import Message
+
+            created_at = (
+                db.query(Message.created_at)
+                .filter(Message.id == message_id, Message.tenant_id == tenant_id)
+                .scalar()
+            )
+            if not is_fresh_for_ai(created_at):
+                log.info(
+                    "IA no encolada conv=%s: mensaje de hace más de %s min",
+                    conversation_id,
+                    settings.ai_max_reply_age_minutes,
+                )
+                return False
     finally:
         if owns_session:
             db.close()
 
     if not get_redis().set(_queued_key(message_id), "1", nx=True, ex=AI_QUEUED_TTL_SECONDS):
         log.debug("IA ya encolada msg=%s", message_id)
-        return
+        return True
 
     item = json.dumps(
         {
@@ -163,6 +212,7 @@ def enqueue_ai_reply_ids(
     )
     get_redis().lpush(AI_REPLY_QUEUE, item)
     log.info("IA encolada conv=%s msg=%s", conversation_id, message_id)
+    return True
 
 
 def flush_pending_ai_replies(
@@ -262,16 +312,18 @@ def recover_pending_ai_replies() -> None:
 
 
 def start_ai_worker() -> None:
-    global _worker_thread
-    if _worker_thread and _worker_thread.is_alive():
+    global _worker_threads
+    if any(t.is_alive() for t in _worker_threads):
         return
     _worker_stop.clear()
-    _worker_thread = threading.Thread(
-        target=_worker_loop,
-        name="ai-worker",
-        daemon=True,
-    )
-    _worker_thread.start()
+    # Cada respuesta pasa varios segundos esperando a DeepSeek: un solo hilo atendería a toda
+    # la plataforma de a una. Los slots globales y por negocio siguen limitando el total.
+    _worker_threads = [
+        threading.Thread(target=_worker_loop, name=f"ai-worker-{n}", daemon=True)
+        for n in range(max(1, settings.ai_worker_threads))
+    ]
+    for thread in _worker_threads:
+        thread.start()
     from app.application.conversations.interest_alert_service import start_interest_alert_sweeper
     from app.application.whatsapp.whatsapp_reconnect_service import start_whatsapp_reconnect_watchdog
 
@@ -279,9 +331,11 @@ def start_ai_worker() -> None:
     start_whatsapp_reconnect_watchdog()
     if is_configured():
         log.info(
-            "AI worker started (model=%s, max_parallel=%s)",
+            "AI worker started (model=%s, threads=%s, max_parallel=%s, per_tenant=%s)",
             ALLOWED_DEEPSEEK_MODEL,
+            len(_worker_threads),
             settings.ai_max_parallel_jobs,
+            settings.ai_max_parallel_per_tenant,
         )
     else:
         log.warning("AI worker started sin DEEPSEEK_API_KEY — solo respuestas fallback")
@@ -294,9 +348,10 @@ def stop_ai_worker() -> None:
     stop_interest_alert_sweeper()
     stop_whatsapp_reconnect_watchdog()
     _worker_stop.set()
-    if _worker_thread and _worker_thread.is_alive():
-        _worker_thread.join(timeout=1)
+    for thread in _worker_threads:
+        if thread.is_alive():
+            thread.join(timeout=1)
 
 
 def ai_worker_is_alive() -> bool:
-    return bool(_worker_thread and _worker_thread.is_alive())
+    return any(t.is_alive() for t in _worker_threads)

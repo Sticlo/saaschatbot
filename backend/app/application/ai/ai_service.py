@@ -143,6 +143,7 @@ def maybe_schedule_ai_for_conversation(
     *,
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
+    allow_stale: bool = False,
 ) -> bool:
     """Encola IA si el último mensaje es entrante y aplica procesamiento."""
     from app.application.ai.ai_queue_service import enqueue_ai_reply_ids
@@ -168,13 +169,13 @@ def maybe_schedule_ai_for_conversation(
     if not classify_mode and _bot_already_replied(db, conversation_id, latest_in):
         return False
 
-    enqueue_ai_reply_ids(
+    return enqueue_ai_reply_ids(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         message_id=latest_in.id,
         db=db,
+        allow_stale=allow_stale,
     )
-    return True
 
 
 def register_opt_out(

@@ -180,4 +180,10 @@
     </div>
     <p class="muted">© {{ year }} {{ appName }}</p>
   </div>
+  <div class="container footer-legal">
+    <a routerLink="/terminos">Términos y Condiciones</a>
+    <a routerLink="/privacidad">Política de Datos Personales</a>
+    <a routerLink="/cookies">Política de Cookies</a>
+    <button type="button" class="footer-logout" (click)="openCookieSettings()">Preferencias de cookies</button>
+  </div>
 </footer>

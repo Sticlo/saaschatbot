@@ -1,0 +1,64 @@
+@if (cookies.showSettings()) {
+  <div class="cookie-backdrop" (click)="cookies.closeSettings()"></div>
+  <section class="cookie-panel cookie-panel--settings" role="dialog" aria-modal="true" aria-labelledby="cookie-settings-title">
+    <h2 id="cookie-settings-title">Preferencias de cookies</h2>
+    <p>
+      Elige qué permites. Las necesarias mantienen tu sesión y tus preferencias, por eso no se pueden apagar.
+      Más detalle en la <a routerLink="/cookies" (click)="cookies.closeSettings()">Política de Cookies</a>.
+    </p>
+
+    <ul class="cookie-options">
+      <li>
+        <div>
+          <strong>Necesarias</strong>
+          <span>Inicio de sesión, seguridad y esta misma elección.</span>
+        </div>
+        <span class="cookie-always">Siempre activas</span>
+      </li>
+      <li>
+        <label for="cookie-analytics">
+          <strong>Analítica</strong>
+          <span>Medir visitas para mejorar el sitio. Hoy no usamos ninguna.</span>
+        </label>
+        <input
+          id="cookie-analytics"
+          type="checkbox"
+          role="switch"
+          [checked]="analytics()"
+          (change)="analytics.set($any($event.target).checked)"
+        />
+      </li>
+      <li>
+        <label for="cookie-marketing">
+          <strong>Publicidad</strong>
+          <span>Mostrar anuncios de Omitel en otras plataformas. Hoy no usamos ninguna.</span>
+        </label>
+        <input
+          id="cookie-marketing"
+          type="checkbox"
+          role="switch"
+          [checked]="marketing()"
+          (change)="marketing.set($any($event.target).checked)"
+        />
+      </li>
+    </ul>
+
+    <div class="cookie-actions">
+      <button type="button" class="btn btn-ghost" (click)="cookies.rejectOptional()">Solo necesarias</button>
+      <button type="button" class="btn btn-primary" (click)="saveSelection()">Guardar elección</button>
+    </div>
+  </section>
+} @else if (cookies.needsDecision()) {
+  <section class="cookie-panel" role="region" aria-label="Aviso de cookies">
+    <p>
+      Usamos cookies necesarias para que el sitio funcione y mantener tu sesión. Las de analítica o publicidad
+      solo se activan si las aceptas. Lee la <a routerLink="/cookies">Política de Cookies</a> y la
+      <a routerLink="/privacidad">Política de Datos</a>.
+    </p>
+    <div class="cookie-actions">
+      <button type="button" class="btn btn-ghost" (click)="cookies.openSettings()">Configurar</button>
+      <button type="button" class="btn btn-ghost" (click)="cookies.rejectOptional()">Solo necesarias</button>
+      <button type="button" class="btn btn-primary" (click)="cookies.acceptAll()">Aceptar todas</button>
+    </div>
+  </section>
+}

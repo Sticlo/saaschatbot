@@ -282,6 +282,26 @@
   min-height: calc(100vh - 8rem);
 }
 
+.footer-legal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  padding: 0 0 1.5rem;
+
+  a,
+  .footer-logout {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  a:hover,
+  .footer-logout:hover {
+    color: var(--primary);
+  }
+}
+
 @media (max-width: 720px) {
   .site-main {
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));

@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.application.auth.legal_consent_service import record_legal_consent
 from app.application.billing.tenant_service import log_audit, register_tenant_with_owner
 from app.config import settings
 from app.domain.entities import Tenant, User
@@ -30,6 +31,7 @@ def create_magic_link(
     kind: str,
     business_name: str = "",
     owner_name: str = "",
+    consent: Optional[dict[str, Any]] = None,
 ) -> Tuple[str, Optional[str]]:
     token = secrets.token_urlsafe(32)
     payload = {
@@ -37,6 +39,8 @@ def create_magic_link(
         "kind": kind,
         "business_name": business_name.strip(),
         "owner_name": owner_name.strip(),
+        # Se acepta al pedir el enlace; la cuenta (y la evidencia) se crean al abrirlo.
+        "consent": consent,
     }
     cache_set(_cache_key(token), json.dumps(payload), _ttl_seconds())
     url = f"{settings.site_public_url.rstrip('/')}/auth/entrar?token={token}"
@@ -71,6 +75,10 @@ def consume_magic_link(db: Session, token: str, *, ip_address: Optional[str]) ->
         if len(business_name) < 2 or len(owner_name) < 2:
             raise ValueError("Datos de registro incompletos en el enlace")
 
+        consent = payload.get("consent")
+        if not isinstance(consent, dict):
+            raise ValueError("Enlace sin aceptación de términos; vuelve a crear la cuenta")
+
         temp_password = secrets.token_urlsafe(18)
         tenant, owner = register_tenant_with_owner(
             db,
@@ -78,6 +86,16 @@ def consume_magic_link(db: Session, token: str, *, ip_address: Optional[str]) ->
             owner_name=owner_name,
             email=email,
             hashed_password=hash_password(temp_password),
+        )
+        record_legal_consent(
+            db,
+            tenant_id=tenant.id,
+            user_id=owner.id,
+            email=email,
+            method="registro_enlace_correo",
+            ip_address=str(consent.get("ip") or "") or ip_address,
+            user_agent=str(consent.get("user_agent") or ""),
+            marketing_opt_in=bool(consent.get("marketing")),
         )
         log_audit(
             db,

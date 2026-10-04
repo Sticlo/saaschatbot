@@ -48,6 +48,7 @@ from app.application.auth.oauth_service import (
 )
 from app.presentation.schemas.plans import ChangePasswordRequest
 from app.application.billing.tenant_service import log_audit, register_tenant_with_owner
+from app.application.auth.legal_consent_service import LEGAL_REQUIRED_MESSAGE, record_legal_consent
 from app.application.auth.magic_link_service import consume_magic_link, create_magic_link
 from app.application.billing.subscription_service import get_tenant_subscription
 from app.config import settings
@@ -94,6 +95,8 @@ def register(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    if not body.accept_legal:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LEGAL_REQUIRED_MESSAGE)
     try:
         pwd_hash = hash_password(body.password)
         tenant, owner = register_tenant_with_owner(
@@ -102,6 +105,16 @@ def register(
             owner_name=body.owner_name.strip(),
             email=body.email.lower().strip(),
             hashed_password=pwd_hash,
+        )
+        record_legal_consent(
+            db,
+            tenant_id=tenant.id,
+            user_id=owner.id,
+            email=owner.email,
+            method="registro_contrasena",
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            marketing_opt_in=body.accept_marketing,
         )
         log_audit(
             db,
@@ -240,14 +253,15 @@ def _is_safe_next_path(path: str) -> bool:
 def _site_url(path: str) -> str:
     site = settings.site_public_url.rstrip("/")
     api = settings.app_public_url.rstrip("/")
+    panel = settings.panel_base_url()
     if path.startswith("http://") or path.startswith("https://"):
-        if path.startswith(site) or path.startswith(api):
+        if path.startswith(site) or path.startswith(api) or path.startswith(panel):
             return path
         return site
     if path.startswith("/api/"):
         return f"{api}{path}"
     if path.startswith("/panel"):
-        return f"{site}{path}"
+        return f"{panel}{path}"
     return f"{site}{path}"
 
 
@@ -275,10 +289,10 @@ def _with_oauth_flag(url: str) -> str:
 
 
 def _to_site_relative(url: str) -> str:
-    base = settings.site_public_url.rstrip("/")
-    if url.startswith(base):
-        suffix = url[len(base):]
-        return suffix or "/"
+    for base in (settings.panel_base_url(), settings.site_public_url.rstrip("/")):
+        if url.startswith(base):
+            suffix = url[len(base):]
+            return suffix or "/"
     if _is_safe_next_path(url):
         return url
     return "/precios"
@@ -288,9 +302,10 @@ def _oauth_finish_url(access_token: str, destination: str) -> str:
     from urllib.parse import urlencode
 
     finish_token = create_oauth_finish_token(access_token)
-    site = settings.site_public_url.rstrip("/")
+    # La cookie debe quedar en el dominio del panel/API, que es quien la lee.
+    panel = settings.panel_base_url()
     params = urlencode({"token": finish_token, "next": _to_site_relative(destination)})
-    return f"{site}/api/v1/auth/oauth/finish?{params}"
+    return f"{panel}/api/v1/auth/oauth/finish?{params}"
 
 
 def _oauth_success_redirect(user: User, db: Session, next_url: Optional[str] = None) -> RedirectResponse:
@@ -411,7 +426,7 @@ def github_oauth_callback(
 
 
 @router.post("/magic-link", response_model=MagicLinkResponse)
-def request_magic_link(body: MagicLinkRequest, db: Session = Depends(get_db)):
+def request_magic_link(body: MagicLinkRequest, request: Request, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
     user = (
         db.query(User.id)
@@ -428,11 +443,18 @@ def request_magic_link(body: MagicLinkRequest, db: Session = Depends(get_db)):
                 needs_signup=True,
                 message="Completa los datos de tu negocio para crear la cuenta.",
             )
+        if not body.accept_legal:
+            return MagicLinkResponse(sent=False, needs_signup=True, message=LEGAL_REQUIRED_MESSAGE)
         _, dev_link = create_magic_link(
             email=email,
             kind="register",
             business_name=business_name,
             owner_name=owner_name,
+            consent={
+                "marketing": body.accept_marketing,
+                "ip": _client_ip(request),
+                "user_agent": request.headers.get("user-agent") or "",
+            },
         )
         return MagicLinkResponse(
             sent=True,

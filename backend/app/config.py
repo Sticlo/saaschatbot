@@ -31,6 +31,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://saaschatbot:password@localhost:5432/saaschatbot"
     redis_url: str = "redis://localhost:6379/0"
+    # Conexiones por proceso. Presupuesto: (procesos API + workers) × (pool + overflow)
+    # debe quedar bajo max_connections de Postgres (100 por defecto).
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
 
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 43200
@@ -69,6 +73,12 @@ class Settings(BaseSettings):
     embed_workers_in_api: bool = False
     ai_max_parallel_jobs: int = 20
     ai_slot_wait_seconds: float = 120.0
+    # Respuestas IA simultáneas por proceso worker (cada una espera a DeepSeek varios segundos).
+    ai_worker_threads: int = 8
+    # Un negocio con mucho tráfico no puede ocupar todos los slots globales.
+    ai_max_parallel_per_tenant: int = 3
+    # Tras una caída, la IA no contesta mensajes más viejos que esto (el dueño los ve en el panel).
+    ai_max_reply_age_minutes: int = 120
 
     # Réplicas sugeridas en docker-compose.prod (documentación operativa).
     worker_webhook_replicas: int = 5
@@ -114,6 +124,15 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     email_from: str = "Omitel <onboarding@resend.dev>"
     site_public_url: str = "http://localhost:4200"
+    # Dominio donde viven el panel y la API (p. ej. https://app.omitel.net). Vacío = mismo
+    # origen que el sitio (dev con proxy de Angular). Ahí queda la cookie de sesión.
+    panel_public_url: str = ""
+    # Orígenes extra para CORS separados por coma (el de site_public_url ya se incluye).
+    cors_origins: str = ""
+    # URL por la que Evolution llega a la API dentro de la red interna (p. ej. http://api:8000).
+    evolution_webhook_internal_url: str = ""
+    # Días de gracia tras vencer el periodo pagado antes de pasar a «pago pendiente».
+    subscription_grace_days: int = 3
     magic_link_expire_minutes: int = 15
     password_reset_expire_minutes: int = 30
     auth_login_max_attempts: int = 10
@@ -145,8 +164,25 @@ class Settings(BaseSettings):
     def chatwoot_webhook_url(self) -> str:
         return f"{self.evolution_webhook_base_url()}/webhooks/chatwoot"
 
+    def panel_base_url(self) -> str:
+        return (self.panel_public_url or self.site_public_url).rstrip("/")
+
+    def cors_allowed_origins(self) -> list[str]:
+        origins = [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+        origins.append(self.site_public_url.rstrip("/"))
+        if self.debug:
+            origins += [
+                "http://localhost:4200",
+                "http://127.0.0.1:4200",
+                "http://localhost:4000",
+                "http://127.0.0.1:4000",
+            ]
+        return sorted(set(origins))
+
     def evolution_webhook_base_url(self) -> str:
         """URL que Evolution usa para POST de webhooks."""
+        if self.evolution_webhook_internal_url:
+            return self.evolution_webhook_internal_url.rstrip("/")
         base = self.app_public_url.rstrip("/")
         if not self.evolution_in_docker:
             # Evolution nativo (npm) resuelve 127.0.0.1 de forma fiable; host.docker.internal falla.

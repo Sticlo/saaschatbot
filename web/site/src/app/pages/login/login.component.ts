@@ -1,19 +1,22 @@
-import { isPlatformBrowser, NgIf } from '@angular/common';
+import { isPlatformBrowser, NgIf, NgTemplateOutlet } from '@angular/common';
 import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ShellComponent } from '../../layout/shell/shell.component';
-import { oauthStartUrl } from '../../core/oauth-url';
+import { appUrl, oauthStartUrl } from '../../core/oauth-url';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
 import { SessionService } from '../../core/services/session.service';
+
+const LEGAL_REQUIRED_MESSAGE =
+  'Para crear la cuenta debes aceptar los Términos y Condiciones y la Política de Tratamiento de Datos Personales.';
 
 type AuthStep = 'start' | 'signup-details' | 'sent';
 
 @Component({
   selector: 'app-login',
-  imports: [ShellComponent, ReactiveFormsModule, RouterLink, NgIf],
+  imports: [ShellComponent, ReactiveFormsModule, RouterLink, NgIf, NgTemplateOutlet],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })
@@ -42,6 +45,8 @@ export class LoginComponent implements OnInit {
     email: ['', [Validators.required, Validators.email]],
     business_name: [''],
     owner_name: [''],
+    accept_legal: [false],
+    accept_marketing: [false],
   });
 
   private resolveNextPath(): string {
@@ -76,14 +81,14 @@ export class LoginComponent implements OnInit {
 
     // Si ya hay sesión válida en el servidor, ir directo al destino (no volver a pedir login).
     if (this.session.snapshot()) {
-      window.location.replace(`${window.location.origin}${this.nextPath}`);
+      window.location.replace(appUrl(this.nextPath));
       return;
     }
     this.auth.getMe().subscribe({
       next: (user) => {
         if (user) {
           this.session.markLoggedIn();
-          window.location.replace(`${window.location.origin}${this.nextPath}`);
+          window.location.replace(appUrl(this.nextPath));
         }
       },
       error: () => {
@@ -108,7 +113,12 @@ export class LoginComponent implements OnInit {
   }
 
   canUseOAuth(provider: 'google' | 'github'): boolean {
-    return this.backendOnline && this.providers[provider] && !this.oauthLoading;
+    return (
+      this.backendOnline &&
+      this.providers[provider] &&
+      !this.oauthLoading &&
+      (!this.signupMode || this.authForm.controls.accept_legal.value)
+    );
   }
 
   startOAuth(provider: 'google' | 'github', event: Event): void {
@@ -119,6 +129,11 @@ export class LoginComponent implements OnInit {
     if (!this.backendOnline) {
       this.error =
         'No pudimos contactar el servidor. Inicia el backend (puerto 8000) e intenta de nuevo.';
+      return;
+    }
+    if (this.signupMode && !this.authForm.controls.accept_legal.value) {
+      this.authForm.controls.accept_legal.markAsTouched();
+      this.error = LEGAL_REQUIRED_MESSAGE;
       return;
     }
     if (!this.providers[provider]) {
@@ -182,6 +197,8 @@ export class LoginComponent implements OnInit {
     this.authForm.controls.owner_name.setValidators(validators);
     this.authForm.controls.business_name.updateValueAndValidity();
     this.authForm.controls.owner_name.updateValueAndValidity();
+    this.authForm.controls.accept_legal.setValidators(Validators.requiredTrue);
+    this.authForm.controls.accept_legal.updateValueAndValidity();
   }
 
   private sendMagicLink(withSignup: boolean): void {
@@ -195,6 +212,8 @@ export class LoginComponent implements OnInit {
         ? {
             business_name: this.authForm.controls.business_name.value.trim(),
             owner_name: this.authForm.controls.owner_name.value.trim(),
+            accept_legal: this.authForm.controls.accept_legal.value,
+            accept_marketing: this.authForm.controls.accept_marketing.value,
           }
         : {}),
     };
@@ -203,6 +222,9 @@ export class LoginComponent implements OnInit {
       next: (res) => {
         this.submitting = false;
         if (res.needs_signup) {
+          if (this.step === 'signup-details' && res.message) {
+            this.error = res.message;
+          }
           this.applySignupValidators();
           this.step = 'signup-details';
           return;
@@ -232,6 +254,8 @@ export class LoginComponent implements OnInit {
     if (!this.signupMode) {
       this.authForm.controls.business_name.clearValidators();
       this.authForm.controls.owner_name.clearValidators();
+      this.authForm.controls.accept_legal.clearValidators();
+      this.authForm.controls.accept_legal.updateValueAndValidity();
       this.authForm.controls.business_name.updateValueAndValidity();
       this.authForm.controls.owner_name.updateValueAndValidity();
     }

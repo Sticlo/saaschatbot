@@ -11,6 +11,7 @@ import { RouterLink } from '@angular/router';
 import { whatsappUrl } from '../../core/contact';
 import { readStorage, writeStorage } from '../../core/safe-storage';
 import { environment } from '../../../environments/environment';
+import { appUrl } from '../../core/oauth-url';
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { SessionService } from '../../core/services/session.service';
 import { AtmosphereService } from './atmosphere.service';
@@ -112,10 +113,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   private scenarioIndex = 0;
 
   get panelUrl(): string {
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}${environment.panelUrl}`;
-    }
-    return environment.panelUrl;
+    return appUrl(environment.panelUrl);
   }
   readonly user$ = this.session.user$;
 

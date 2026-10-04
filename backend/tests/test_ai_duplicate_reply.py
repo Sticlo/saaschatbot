@@ -35,10 +35,13 @@ class _FakeQuery:
     def first(self):
         return self.row
 
+    def scalar(self):
+        return self.row
+
 
 class _FakeDb:
-    def __init__(self, tenant, conversation):
-        self.rows = [tenant, conversation]
+    def __init__(self, tenant, conversation, message_created_at=None):
+        self.rows = [tenant, conversation, message_created_at]
 
     def query(self, _model):
         return _FakeQuery(self.rows.pop(0))

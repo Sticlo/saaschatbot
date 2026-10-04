@@ -15,6 +15,7 @@ def _register(client: TestClient, suffix=None) -> dict:
         "owner_name": "Owner Test",
         "email": f"owner-{tag}@test.com",
         "password": "password123",
+        "accept_legal": True,
     }
     response = client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 201, response.text

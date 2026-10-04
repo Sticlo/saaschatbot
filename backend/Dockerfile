@@ -1,3 +1,4 @@
+# Se construye desde la raíz del repo (contexto ".."): la imagen necesita también web/panel.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -6,12 +7,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY alembic.ini .
-COPY alembic ./alembic
-COPY app ./app
+COPY backend/alembic.ini .
+COPY backend/alembic ./alembic
+COPY backend/app ./app
+COPY web/panel ./web/panel
+
+RUN useradd --create-home --uid 1000 omitel \
+    && mkdir -p /app/app/static/assets \
+    && chown -R omitel:omitel /app
+USER omitel
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

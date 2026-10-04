@@ -57,6 +57,14 @@
               Tu nombre
               <input type="text" id="register-owner" autocomplete="name" />
             </label>
+            <label class="login-consent">
+              <input type="checkbox" id="register-accept-legal" />
+              <span>Acepto los <a href="/terminos" data-site-path="/terminos" target="_blank" rel="noopener">Términos y Condiciones</a> y autorizo el tratamiento de mis datos personales según la <a href="/privacidad" data-site-path="/privacidad" target="_blank" rel="noopener">Política de Tratamiento de Datos</a>. *</span>
+            </label>
+            <label class="login-consent">
+              <input type="checkbox" id="register-accept-marketing" />
+              <span>Quiero recibir novedades y ofertas de Omitel por correo o WhatsApp (opcional).</span>
+            </label>
             <p id="login-error-register" class="error hidden"></p>
             <button type="button" id="register-submit-btn" class="btn primary">Enviar enlace para crear cuenta</button>
           </div>
@@ -73,9 +81,14 @@
           </div>
         </form>
         <p class="login-back muted">
-          <a href="/">← Volver al inicio</a>
+          <a href="/" data-site-path="/">← Volver al inicio</a>
           ·
-          <a href="/registro">Crear cuenta</a>
+          <a href="/registro" data-site-path="/registro">Crear cuenta</a>
+        </p>
+        <p class="login-legal muted">
+          Si es tu primera vez y continúas con Google o GitHub, aceptas los
+          <a href="/terminos" data-site-path="/terminos" target="_blank" rel="noopener">Términos</a> y la
+          <a href="/privacidad" data-site-path="/privacidad" target="_blank" rel="noopener">Política de Datos</a>.
         </p>
       </div>
     </section>
@@ -97,7 +110,7 @@
         <div class="topbar-right">
           <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
             <span id="plan-status-label" class="plan-status-label"></span>
-            <a href="/precios" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
+            <a href="/precios" data-site-path="/precios" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
           </div>
           <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
             <span>Tema claro</span>
@@ -490,6 +503,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=94"></script>
+  <script src="/static/panel/app.js?v=96"></script>
 </body>
 </html>

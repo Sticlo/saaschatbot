@@ -1,0 +1,228 @@
+<app-shell>
+  <article class="container legal">
+    <header class="legal-header">
+      <h1>Política de Tratamiento de Datos Personales</h1>
+      <p>Versión {{ legal.version }} · Última actualización: {{ legal.updatedLabel }}</p>
+    </header>
+
+    <nav class="legal-toc" aria-label="Contenido">
+      <strong>Contenido</strong>
+      <ol>
+        <li><a [routerLink]="[]" fragment="responsable">Responsable del tratamiento</a></li>
+        <li><a [routerLink]="[]" fragment="marco">Marco legal</a></li>
+        <li><a [routerLink]="[]" fragment="datos">Qué datos tratamos</a></li>
+        <li><a [routerLink]="[]" fragment="finalidades">Para qué los usamos</a></li>
+        <li><a [routerLink]="[]" fragment="contactos">Datos de los clientes de tu negocio</a></li>
+        <li><a [routerLink]="[]" fragment="proveedores">Proveedores y transferencias internacionales</a></li>
+        <li><a [routerLink]="[]" fragment="derechos">Tus derechos</a></li>
+        <li><a [routerLink]="[]" fragment="procedimiento">Cómo ejercerlos</a></li>
+        <li><a [routerLink]="[]" fragment="seguridad">Seguridad</a></li>
+        <li><a [routerLink]="[]" fragment="conservacion">Conservación</a></li>
+        <li><a [routerLink]="[]" fragment="sensibles">Datos sensibles y menores</a></li>
+        <li><a [routerLink]="[]" fragment="vigencia">Vigencia y cambios</a></li>
+      </ol>
+    </nav>
+
+    <section id="responsable">
+      <h2>1. Responsable del tratamiento</h2>
+      <ul>
+        <li><strong>Razón social:</strong> {{ legal.companyName }} («{{ legal.brand }}»)</li>
+        <li><strong>NIT:</strong> {{ legal.taxId }}</li>
+        <li><strong>Domicilio:</strong> {{ legal.address }}, {{ legal.city }}, Colombia</li>
+        <li>
+          <strong>Correo para temas de datos personales:</strong>
+          <a [href]="'mailto:' + legal.privacyEmail">{{ legal.privacyEmail }}</a>
+        </li>
+        <li><strong>Teléfono:</strong> {{ legal.phoneDisplay }} · WhatsApp {{ legal.whatsappDisplay }}</li>
+        <li><strong>Sitio web:</strong> {{ legal.siteUrl }}</li>
+      </ul>
+    </section>
+
+    <section id="marco">
+      <h2>2. Marco legal</h2>
+      <p>
+        Esta política cumple el artículo 15 de la Constitución Política, la Ley Estatutaria 1581 de 2012,
+        el Decreto 1377 de 2013 (compilado en el Decreto Único 1074 de 2015) y las instrucciones de la
+        Superintendencia de Industria y Comercio (SIC), autoridad de protección de datos en Colombia.
+      </p>
+    </section>
+
+    <section id="datos">
+      <h2>3. Qué datos tratamos</h2>
+      <h3>Si tienes una cuenta en {{ legal.brand }}</h3>
+      <ul>
+        <li><strong>Identificación y contacto:</strong> nombre, correo electrónico, nombre del negocio y, si
+          inicias sesión con Google o GitHub, el identificador y nombre que ese proveedor nos comparte.</li>
+        <li><strong>WhatsApp vinculado:</strong> número del negocio y nombre del perfil.</li>
+        <li><strong>Configuración del negocio:</strong> la información que cargas para que el asistente responda
+          (productos, precios, horarios, mensajes rápidos, preferencias).</li>
+        <li><strong>Pagos:</strong> plan, fechas, valor y referencia de la transacción. Los datos de tu tarjeta
+          o cuenta bancaria los recibe y procesa directamente Wompi; {{ legal.brand }} no los almacena.</li>
+        <li><strong>Datos técnicos:</strong> dirección IP, navegador, fechas de acceso y registros de actividad
+          para seguridad y auditoría, y las cookies descritas en la
+          <a routerLink="/cookies">Política de Cookies</a>.</li>
+      </ul>
+      <h3>Si escribes al WhatsApp de un negocio que usa {{ legal.brand }}</h3>
+      <p>
+        Tratamos tu número, el nombre de tu perfil y el contenido de los mensajes, notas de voz e imágenes que
+        envíes a ese negocio. En ese caso el negocio es el responsable de tus datos y {{ legal.brand }} actúa como
+        encargado (ver la sección 5).
+      </p>
+    </section>
+
+    <section id="finalidades">
+      <h2>4. Para qué los usamos</h2>
+      <ul>
+        <li>Crear y administrar tu cuenta, verificar tu identidad y permitirte iniciar sesión.</li>
+        <li>Prestar el servicio: conectar el WhatsApp de tu negocio, mostrar las conversaciones, generar
+          respuestas automáticas con inteligencia artificial, transcribir notas de voz, describir imágenes,
+          clasificar el interés de los clientes y enviar los mensajes que programes.</li>
+        <li>Cobrar los planes, emitir facturas y atender reclamaciones sobre pagos.</li>
+        <li>Darte soporte y enviarte avisos operativos (seguridad, cambios del servicio, vencimiento del plan).</li>
+        <li>Proteger la plataforma: prevenir fraude, abuso y accesos no autorizados, y conservar registros de auditoría.</li>
+        <li>Cumplir obligaciones legales, contables y tributarias, y atender requerimientos de autoridades.</li>
+        <li>Mejorar el servicio con estadísticas agregadas que no te identifican.</li>
+        <li>Solo si lo autorizas aparte: enviarte novedades, ofertas y contenido comercial de {{ legal.brand }}.
+          Puedes retirar esa autorización en cualquier momento.</li>
+      </ul>
+      <p class="legal-note">
+        No vendemos datos personales. No usamos el contenido de las conversaciones de tu negocio para entrenar
+        modelos de inteligencia artificial propios ni para publicidad.
+      </p>
+    </section>
+
+    <section id="contactos">
+      <h2>5. Datos de los clientes de tu negocio</h2>
+      <p>
+        Cuando conectas tu WhatsApp, {{ legal.brand }} procesa los datos de las personas que te escriben por cuenta
+        tuya. Frente a esos datos, <strong>tu negocio es el responsable del tratamiento</strong> y
+        {{ legal.brand }} es el <strong>encargado</strong>. Esto implica que:
+      </p>
+      <ul>
+        <li>Solo tratamos esos datos para prestarte el servicio y según tus instrucciones (por ejemplo, encender o
+          apagar la IA, enviar mensajes, borrar chats).</li>
+        <li>Tú debes contar con la autorización o la base legal para tratarlos, informar a tus clientes que pueden
+          ser atendidos por un asistente automatizado y tener tu propia política de tratamiento de datos.</li>
+        <li>Si una persona nos pide directamente acceder, corregir o borrar sus datos de un chat de tu negocio,
+          te trasladaremos la solicitud y te apoyaremos para atenderla.</li>
+        <li>Al terminar el servicio, borramos esos datos en los plazos de la sección 10.</li>
+      </ul>
+      <p>Las obligaciones de ambas partes están en los <a routerLink="/terminos">Términos y Condiciones</a>.</p>
+    </section>
+
+    <section id="proveedores">
+      <h2>6. Proveedores y transferencias internacionales</h2>
+      <p>
+        Para prestar el servicio compartimos datos con proveedores que actúan como encargados, bajo deber de
+        confidencialidad y solo para la finalidad indicada:
+      </p>
+      <div class="legal-table-wrap">
+        <table class="legal-table">
+          <thead>
+            <tr><th>Proveedor</th><th>Para qué</th><th>País</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Proveedor de servidores en la nube</td><td>Alojar la plataforma y la base de datos</td><td>[POR COMPLETAR]</td></tr>
+            <tr><td>Cloudflare</td><td>Publicar el sitio web y protegerlo de ataques</td><td>Estados Unidos</td></tr>
+            <tr><td>DeepSeek</td><td>Generar las respuestas de texto del asistente de IA</td><td>República Popular China</td></tr>
+            <tr><td>Google (Gemini)</td><td>Transcribir notas de voz y describir imágenes</td><td>Estados Unidos</td></tr>
+            <tr><td>Resend</td><td>Enviar correos de acceso y avisos</td><td>Estados Unidos</td></tr>
+            <tr><td>Wompi (Bancolombia)</td><td>Procesar pagos</td><td>Colombia</td></tr>
+            <tr><td>Google / GitHub</td><td>Inicio de sesión, solo si lo eliges</td><td>Estados Unidos</td></tr>
+            <tr><td>WhatsApp (Meta)</td><td>Enviar y recibir los mensajes de tu negocio</td><td>Estados Unidos</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Algunos de estos países pueden no estar en la lista de países con nivel adecuado de protección publicada
+        por la SIC. Al aceptar esta política autorizas de forma expresa la transmisión de tus datos a estos
+        proveedores y países para las finalidades descritas, conforme al artículo 26 de la Ley 1581 de 2012.
+        A los proveedores que procesan el contenido de las conversaciones solo les enviamos lo necesario para
+        generar cada respuesta.
+      </p>
+    </section>
+
+    <section id="derechos">
+      <h2>7. Tus derechos</h2>
+      <p>Como titular de los datos tienes derecho a:</p>
+      <ul>
+        <li>Conocer, actualizar y rectificar tus datos.</li>
+        <li>Pedir prueba de la autorización que nos diste.</li>
+        <li>Ser informado, previa solicitud, sobre el uso que les damos.</li>
+        <li>Revocar la autorización y pedir que borremos tus datos cuando no exista un deber legal o contractual
+          de conservarlos.</li>
+        <li>Acceder gratuitamente a tus datos.</li>
+        <li>Presentar quejas ante la Superintendencia de Industria y Comercio, una vez hayas agotado el trámite
+          de consulta o reclamo con nosotros.</li>
+      </ul>
+    </section>
+
+    <section id="procedimiento">
+      <h2>8. Cómo ejercer tus derechos</h2>
+      <p>
+        Escríbenos a <a [href]="'mailto:' + legal.privacyEmail">{{ legal.privacyEmail }}</a> desde el correo de tu
+        cuenta o indicando cómo verificar tu identidad. Puedes actuar tú, tus causahabientes o un representante
+        acreditado.
+      </p>
+      <h3>Consultas</h3>
+      <p>
+        Para conocer qué datos tenemos y cómo los usamos. Respondemos en máximo 10 días hábiles; si no es posible,
+        te explicamos el motivo y respondemos dentro de los 5 días hábiles siguientes.
+      </p>
+      <h3>Reclamos</h3>
+      <p>Para corregir, actualizar o borrar datos, revocar la autorización o señalar un incumplimiento. Incluye:</p>
+      <ul>
+        <li>Tu nombre e identificación.</li>
+        <li>La descripción de los hechos y lo que pides.</li>
+        <li>Un correo o dirección de respuesta.</li>
+        <li>Los documentos que quieras hacer valer.</li>
+      </ul>
+      <p>
+        Si falta información te la pedimos dentro de los 5 días siguientes; si no la recibimos en 2 meses,
+        entendemos que desististe. Respondemos en máximo 15 días hábiles, prorrogables 8 días hábiles más
+        avisándote el motivo. Mientras tanto marcamos el dato como «reclamo en trámite».
+      </p>
+    </section>
+
+    <section id="seguridad">
+      <h2>9. Seguridad</h2>
+      <p>
+        Aplicamos medidas técnicas y administrativas razonables: conexiones cifradas (HTTPS), aislamiento de los
+        datos de cada negocio, contraseñas almacenadas con hash, control de acceso por roles, registros de
+        auditoría y acceso restringido del personal a lo estrictamente necesario. Ningún sistema es infalible;
+        si ocurre un incidente que afecte tus datos, te avisaremos y lo informaremos a la SIC según la ley.
+      </p>
+    </section>
+
+    <section id="conservacion">
+      <h2>10. Conservación</h2>
+      <ul>
+        <li>Mientras tu cuenta esté activa conservamos los datos necesarios para prestar el servicio.</li>
+        <li>Si cancelas tu cuenta, borramos o anonimizamos las conversaciones y la configuración del negocio en
+          máximo {{ legal.deletionDays }} días.</li>
+        <li>Conservamos la información de pagos y facturación durante el tiempo que exige la ley comercial y
+          tributaria (hasta 10 años), y la prueba de tu autorización mientras pueda ser requerida.</li>
+      </ul>
+    </section>
+
+    <section id="sensibles">
+      <h2>11. Datos sensibles y menores de edad</h2>
+      <p>
+        No pedimos datos sensibles (salud, origen racial, orientación política o religiosa, biométricos, entre
+        otros) y no estás obligado a entregarlos. Si llegan dentro de una conversación, se tratan con reserva y solo
+        para prestar el servicio. {{ legal.brand }} está dirigido a negocios y a personas mayores de edad; si un
+        negocio atiende a menores, debe respetar sus derechos prevalentes y contar con la autorización de sus
+        representantes.
+      </p>
+    </section>
+
+    <section id="vigencia">
+      <h2>12. Vigencia y cambios</h2>
+      <p>
+        Esta política rige desde la fecha indicada arriba. Las bases de datos estarán vigentes mientras se
+        mantengan las finalidades descritas. Si hacemos cambios sustanciales te avisaremos por correo o en la
+        plataforma antes de aplicarlos y, cuando la ley lo exija, te pediremos una nueva autorización.
+      </p>
+    </section>
+  </article>
+</app-shell>

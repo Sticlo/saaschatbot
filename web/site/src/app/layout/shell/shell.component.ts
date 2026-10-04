@@ -5,8 +5,10 @@ import { filter } from 'rxjs/operators';
 
 import { CONTACT, phoneUrl, whatsappUrl } from '../../core/contact';
 import { environment } from '../../../environments/environment';
+import { appUrl } from '../../core/oauth-url';
 import { UserMe } from '../../core/models/auth.model';
 import { SubscriptionSummary } from '../../core/models/billing.model';
+import { CookieConsentService } from '../../core/services/cookie-consent.service';
 import { SessionService } from '../../core/services/session.service';
 
 @Component({
@@ -18,6 +20,7 @@ import { SessionService } from '../../core/services/session.service';
 export class ShellComponent implements OnInit {
   private readonly session = inject(SessionService);
   private readonly router = inject(Router);
+  private readonly cookieConsent = inject(CookieConsentService);
 
   @HostBinding('class.shell-home')
   isHome = false;
@@ -31,10 +34,7 @@ export class ShellComponent implements OnInit {
 
   /** Mismo origen que la landing (evita perder la cookie entre localhost y 127.0.0.1). */
   get panelUrl(): string {
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}${environment.panelUrl}`;
-    }
-    return environment.panelUrl;
+    return appUrl(environment.panelUrl);
   }
   readonly user$ = this.session.user$;
   readonly subscription$ = this.session.subscription$;
@@ -117,6 +117,10 @@ export class ShellComponent implements OnInit {
       return 'Mi plan';
     }
     return 'Activar plan';
+  }
+
+  openCookieSettings(): void {
+    this.cookieConsent.openSettings();
   }
 
   logout(): void {

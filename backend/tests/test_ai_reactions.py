@@ -68,7 +68,7 @@ def test_reaction_after_question_does_not_hide_the_question(monkeypatch):
 
     enqueued: list[uuid.UUID] = []
     monkeypatch.setattr(
-        ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"])
+        ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"]) or True
     )
 
     with SessionLocal() as db:
@@ -91,7 +91,7 @@ def test_reaction_to_bot_reply_schedules_nothing(monkeypatch):
 
     enqueued: list[uuid.UUID] = []
     monkeypatch.setattr(
-        ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"])
+        ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"]) or True
     )
 
     with SessionLocal() as db:

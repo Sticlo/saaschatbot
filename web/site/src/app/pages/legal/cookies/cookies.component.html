@@ -1,0 +1,93 @@
+<app-shell>
+  <article class="container legal">
+    <header class="legal-header">
+      <h1>Política de Cookies</h1>
+      <p>Versión {{ legal.version }} · Última actualización: {{ legal.updatedLabel }}</p>
+    </header>
+
+    <section>
+      <h2>1. Qué son</h2>
+      <p>
+        Las cookies son pequeños archivos que un sitio guarda en tu navegador. Tecnologías parecidas, como el
+        almacenamiento local (<em>localStorage</em>), cumplen funciones similares. Aquí explicamos cuáles usa
+        {{ legal.brand }} en {{ legal.siteUrl }} y en el panel ({{ legal.appDomain }}).
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Cookies necesarias</h2>
+      <p>Son indispensables para que el servicio funcione y no requieren tu consentimiento. No se usan para publicidad.</p>
+      <div class="legal-table-wrap">
+        <table class="legal-table">
+          <thead>
+            <tr><th>Nombre</th><th>Tipo</th><th>Para qué</th><th>Duración</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>saaschatbot_session</code></td>
+              <td>Cookie propia (HttpOnly, segura)</td>
+              <td>Mantener tu sesión iniciada en el panel de forma segura.</td>
+              <td>30 días o hasta cerrar sesión</td>
+            </tr>
+            <tr>
+              <td><code>omitel_cookie_consent</code></td>
+              <td>Almacenamiento local</td>
+              <td>Recordar tu elección sobre cookies.</td>
+              <td>Hasta que la borres o cambiemos esta política</td>
+            </tr>
+            <tr>
+              <td><code>omitel_session_revoked</code>, <code>omitel_name_prompted</code></td>
+              <td>Almacenamiento de sesión</td>
+              <td>Avisos de sesión cerrada y recordatorios del panel.</td>
+              <td>Hasta cerrar la pestaña</td>
+            </tr>
+            <tr>
+              <td><code>omitel_panel_theme</code>, <code>omitel.heroChatStatic</code></td>
+              <td>Almacenamiento local</td>
+              <td>Recordar el tema claro u oscuro del panel y si pausaste la animación de la página de inicio.</td>
+              <td>Hasta que lo borres</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. Cookies de terceros</h2>
+      <ul>
+        <li><strong>Wompi</strong> (checkout.wompi.co): solo cuando abres el pago de un plan. Wompi puede usar
+          cookies propias para procesar el pago y prevenir fraude, según su propia política.</li>
+        <li><strong>Google o GitHub</strong>: solo si eliges iniciar sesión con ellos, en sus propios dominios.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Analítica y publicidad</h2>
+      <p>
+        Hoy no usamos cookies de analítica ni de publicidad. Si en el futuro las agregamos, solo se activarán si las
+        aceptas en el aviso de cookies, y actualizaremos esta política indicando el proveedor y la finalidad.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Cómo gestionarlas</h2>
+      <p>
+        Puedes cambiar tu elección cuando quieras:
+        <button type="button" class="btn btn-ghost" (click)="cookies.openSettings()">Abrir preferencias de cookies</button>
+      </p>
+      <p>
+        También puedes borrar o bloquear cookies desde la configuración de tu navegador. Si bloqueas las necesarias
+        no podrás iniciar sesión en el panel.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Más información</h2>
+      <p>
+        El tratamiento de los datos asociados a cookies se rige por nuestra
+        <a routerLink="/privacidad">Política de Tratamiento de Datos Personales</a>. Si tienes preguntas escríbenos a
+        <a [href]="'mailto:' + legal.privacyEmail">{{ legal.privacyEmail }}</a>.
+      </p>
+    </section>
+  </article>
+</app-shell>

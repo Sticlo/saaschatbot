@@ -21,6 +21,8 @@ class RegisterRequest(BaseModel):
     owner_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    accept_legal: bool = False
+    accept_marketing: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -41,6 +43,8 @@ class MagicLinkRequest(BaseModel):
     email: EmailStr
     business_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
     owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    accept_legal: bool = False
+    accept_marketing: bool = False
 
 
 class MagicLinkResponse(BaseModel):

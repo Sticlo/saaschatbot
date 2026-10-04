@@ -163,7 +163,7 @@ def test_voice_note_gets_scheduled_only_with_gemini(monkeypatch):
     from app.infrastructure.persistence.database import SessionLocal
 
     enqueued: list[uuid.UUID] = []
-    monkeypatch.setattr(ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"]))
+    monkeypatch.setattr(ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"]) or True)
 
     with SessionLocal() as db:
         tenant, conversation, voice = _setup(db)

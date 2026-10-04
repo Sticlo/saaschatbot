@@ -7,6 +7,7 @@ import { ShellComponent } from '../../layout/shell/shell.component';
 import { Plan } from '../../core/models/plan.model';
 import { SubscriptionSummary } from '../../core/models/billing.model';
 import { PlansService } from '../../core/services/plans.service';
+import { appUrl } from '../../core/oauth-url';
 import { BillingService } from '../../core/services/billing.service';
 import { SessionService } from '../../core/services/session.service';
 
@@ -37,6 +38,10 @@ export class PricingComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly platformId = inject(PLATFORM_ID);
+
+  get panelUrl(): string {
+    return appUrl('/panel');
+  }
 
   private sessionSub?: Subscription;
 

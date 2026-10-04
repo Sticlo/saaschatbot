@@ -699,6 +699,7 @@ def trigger_conversation_ai(
         db,
         tenant_id=current.tenant_id,
         conversation_id=conversation.id,
+        allow_stale=True,
     ):
         raise HTTPException(
             status_code=409,

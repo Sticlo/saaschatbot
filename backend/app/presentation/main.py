@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -77,10 +78,15 @@ async def lifespan(app: FastAPI):
             stop_live_pull_scheduler,
         )
         from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode
+        from app.application.billing.subscription_sweeper import (
+            start_subscription_sweeper,
+            stop_subscription_sweeper,
+        )
 
         start_webhook_worker()
         start_ai_worker()
         start_sync_worker()
+        start_subscription_sweeper()
         if not chatwoot_sync_mode():
             start_live_pull_scheduler()
         recover_pending_ai_replies()
@@ -88,6 +94,7 @@ async def lifespan(app: FastAPI):
         yield
         if not chatwoot_sync_mode():
             stop_live_pull_scheduler()
+        stop_subscription_sweeper()
         stop_ai_worker()
         stop_webhook_worker()
         stop_sync_worker()
@@ -125,16 +132,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(
-        [
-            "http://localhost:4200",
-            "http://127.0.0.1:4200",
-            "http://localhost:4000",
-            "http://127.0.0.1:4000",
-        ]
-        if settings.debug
-        else []
-    ),
+    allow_origins=settings.cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,7 +164,12 @@ def panel():
     index = PANEL_DIR / "index.html"
     if not index.is_file():
         return {"detail": "Panel no disponible"}
-    return FileResponse(index)
+    # El panel puede vivir en otro dominio que la landing: le decimos dónde están login y precios.
+    site = json.dumps(settings.site_public_url.rstrip("/"))
+    html = index.read_text(encoding="utf-8").replace(
+        "</head>", f"<script>window.OMITEL_SITE_URL = {site};</script>\n</head>", 1
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/health")

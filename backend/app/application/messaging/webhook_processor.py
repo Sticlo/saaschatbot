@@ -14,7 +14,11 @@ from app.application.messaging.message_service import (
     save_outbound_from_phone,
     update_message_status,
 )
-from app.application.workers.queue_service import build_dedup_id, is_duplicate_webhook
+from app.application.workers.queue_service import (
+    build_dedup_id,
+    is_duplicate_webhook,
+    release_webhook_dedup,
+)
 
 log = logging.getLogger(__name__)
 
@@ -391,6 +395,29 @@ def _apply_names_from_message_history(
     return fixed
 
 
+_CONNECT_EVENTS = {"connection.update", "qrcode.updated"}
+# Eventos de estado: se repiten legítimamente (cada corte de internet es otro close/open)
+# y aplicarlos dos veces no hace daño. `messages.upsert` se deduplica mensaje por mensaje.
+_NOT_DEDUPLICATED = _CONNECT_EVENTS | {"messages.upsert"}
+_MESSAGE_EVENTS = {"messages.upsert", "messages.update"}
+
+
+def _link_survives_outage(tenant: Tenant, session: WhatsAppSession) -> bool:
+    """Caída transitoria (internet, Evolution reiniciando): la vinculación sigue intacta.
+
+    Los mensajes llegan por HTTP al instante y `connection.update` por la cola, así que tras
+    un corte un mensaje puede adelantarse al "open". Desvincular desde el panel borra
+    `active_connection_id` y `bound_owner_jid`, y eso sí corta todo."""
+    from app.domain.entities.enums import WhatsAppStatus
+
+    return (
+        tenant.whatsapp_status
+        in {WhatsAppStatus.DISCONNECTED.value, WhatsAppStatus.CONNECTING.value}
+        and session.active_connection_id is not None
+        and bool(session.bound_owner_jid)
+    )
+
+
 def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
     db = SessionLocal()
     try:
@@ -404,8 +431,10 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
             log.warning("Webhook sin tenant/session tenant=%s", tenant_id)
             return
 
+        # El secreto del webhook es global: la instancia es lo único que ata el payload
+        # a este negocio, así que un payload sin instancia no se acepta.
         instance_name = _payload_instance(payload)
-        if instance_name and instance_name != session.instance_name:
+        if instance_name != session.instance_name:
             log.warning(
                 "Instancia no coincide tenant=%s expected=%s got=%s",
                 tenant_id,
@@ -420,16 +449,16 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
 
         from app.domain.entities.enums import WhatsAppStatus
 
-        _CONNECT_EVENTS = {"connection.update", "qrcode.updated"}
         if (
             event not in _CONNECT_EVENTS
             and tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value
+            and not (event in _MESSAGE_EVENTS and _link_survives_outage(tenant, session))
         ):
             # Incluye messages.upsert: si el panel desvinculó, nada de mensajes ni IA.
             log.debug("Webhook ignorado — WhatsApp desconectado tenant=%s event=%s", tenant_id, event)
             return
 
-        if event != "messages.upsert":
+        if event not in _NOT_DEDUPLICATED:
             dedup_id = build_dedup_id(payload)
             if is_duplicate_webhook(tenant_id, dedup_id):
                 log.debug("Webhook duplicado ignorado tenant=%s id=%s", tenant_id, dedup_id)
@@ -468,6 +497,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 owner_names = _owner_names(session)
                 for item in parse_messages_upsert(data):
                     msg_id = item.get("message_id") or ""
+                    msg_dedup = f"messages.upsert:{msg_id}" if msg_id else ""
                     push_name = str(item.get("push_name") or "").strip()
                     name_jid = item.get("lid_jid") or item.get("remote_jid") or ""
                     if push_name and name_jid and not item.get("from_me"):
@@ -477,8 +507,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                             push_name,
                             owner_names=owner_names,
                         )
-                    if msg_id:
-                        msg_dedup = f"messages.upsert:{msg_id}"
+                    if msg_dedup:
                         if is_duplicate_webhook(tenant_id, msg_dedup):
                             log.debug(
                                 "Mensaje duplicado ignorado tenant=%s id=%s",
@@ -514,6 +543,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 whatsapp_connection_id=connection_id,
                                 instance_name=session.instance_name,
                                 publish=False,
+                                created_at=item.get("timestamp"),
                             )
                             event_type = "message.out"
                         else:
@@ -529,6 +559,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 whatsapp_connection_id=connection_id,
                                 instance_name=session.instance_name,
                                 publish=False,
+                                created_at=item.get("timestamp"),
                             )
                             event_type = "message.in"
 
@@ -548,6 +579,9 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                             msg_id,
                         )
                         db.rollback()
+                        # Marcado como visto pero no guardado: sin esto el reintento de
+                        # Evolution o el live pull lo descartarían y el mensaje se perdería.
+                        release_webhook_dedup(tenant_id, msg_dedup)
             if pending_ai_jobs:
                 from app.application.ai.ai_queue_service import flush_pending_ai_replies
 

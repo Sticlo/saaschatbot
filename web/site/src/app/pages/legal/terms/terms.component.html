@@ -1,0 +1,216 @@
+<app-shell>
+  <article class="container legal">
+    <header class="legal-header">
+      <h1>Términos y Condiciones</h1>
+      <p>Versión {{ legal.version }} · Última actualización: {{ legal.updatedLabel }}</p>
+    </header>
+
+    <nav class="legal-toc" aria-label="Contenido">
+      <strong>Contenido</strong>
+      <ol>
+        <li><a [routerLink]="[]" fragment="aceptacion">Aceptación</a></li>
+        <li><a [routerLink]="[]" fragment="servicio">El servicio</a></li>
+        <li><a [routerLink]="[]" fragment="whatsapp">WhatsApp y Meta</a></li>
+        <li><a [routerLink]="[]" fragment="cuenta">Tu cuenta</a></li>
+        <li><a [routerLink]="[]" fragment="planes">Prueba, planes y pagos</a></li>
+        <li><a [routerLink]="[]" fragment="retracto">Retracto y reembolsos</a></li>
+        <li><a [routerLink]="[]" fragment="uso">Uso aceptable</a></li>
+        <li><a [routerLink]="[]" fragment="datos">Datos de tus clientes</a></li>
+        <li><a [routerLink]="[]" fragment="ia">Inteligencia artificial</a></li>
+        <li><a [routerLink]="[]" fragment="propiedad">Propiedad intelectual</a></li>
+        <li><a [routerLink]="[]" fragment="disponibilidad">Disponibilidad</a></li>
+        <li><a [routerLink]="[]" fragment="responsabilidad">Responsabilidad</a></li>
+        <li><a [routerLink]="[]" fragment="terminacion">Suspensión y terminación</a></li>
+        <li><a [routerLink]="[]" fragment="cambios">Cambios a estos términos</a></li>
+        <li><a [routerLink]="[]" fragment="ley">Ley aplicable</a></li>
+      </ol>
+    </nav>
+
+    <section id="aceptacion">
+      <h2>1. Aceptación</h2>
+      <p>
+        Estos términos regulan el uso de {{ legal.brand }}, servicio prestado por {{ legal.companyName }},
+        NIT {{ legal.taxId }}, con domicilio en {{ legal.city }}, Colombia. Al crear una cuenta o usar el servicio
+        declaras que eres mayor de edad, que tienes facultad para obligar al negocio que registras y que aceptas
+        estos términos y la <a routerLink="/privacidad">Política de Tratamiento de Datos Personales</a>.
+      </p>
+    </section>
+
+    <section id="servicio">
+      <h2>2. El servicio</h2>
+      <p>
+        {{ legal.brand }} es un software en la nube que conecta el WhatsApp de tu negocio a un panel donde puedes ver
+        y responder las conversaciones, y activar un asistente de inteligencia artificial que responde, clasifica el
+        interés de los clientes y te avisa de oportunidades de venta. Las funciones y límites de cada plan se
+        describen en la página de <a routerLink="/precios">precios</a>.
+      </p>
+    </section>
+
+    <section id="whatsapp">
+      <h2>3. WhatsApp y Meta</h2>
+      <ul>
+        <li>{{ legal.brand }} no está afiliado, patrocinado ni respaldado por WhatsApp ni por Meta Platforms. Las
+          marcas pertenecen a sus titulares.</li>
+        <li>La conexión funciona vinculando {{ legal.brand }} como dispositivo de tu cuenta de WhatsApp, igual que
+          WhatsApp Web. Debes cumplir los términos y políticas de WhatsApp.</li>
+        <li>WhatsApp puede limitar, suspender o bloquear números según sus propias reglas, en especial ante envíos
+          masivos, mensajes no solicitados o reportes de spam. {{ legal.brand }} no controla esas decisiones y no
+          responde por bloqueos de tu número.</li>
+        <li>Tu celular debe mantenerse con conexión a internet para que la vinculación siga activa.</li>
+      </ul>
+    </section>
+
+    <section id="cuenta">
+      <h2>4. Tu cuenta</h2>
+      <p>
+        Debes registrar información veraz y mantenerla actualizada. Eres responsable de la confidencialidad del
+        acceso a tu cuenta y de lo que hagan los usuarios que invites. Avísanos de inmediato a
+        <a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a> si sospechas un acceso no autorizado.
+      </p>
+    </section>
+
+    <section id="planes">
+      <h2>5. Prueba gratuita, planes y pagos</h2>
+      <ul>
+        <li>La prueba gratuita tiene los límites de uso que se indican en la plataforma y puede cambiar o terminar
+          con aviso previo.</li>
+        <li>Los precios están en pesos colombianos e incluyen los impuestos que apliquen, salvo que se indique lo
+          contrario. Los pagos se procesan a través de Wompi.</li>
+        <li>Cada pago activa el plan por 30 días. <strong>No hay renovación ni cobro automático:</strong> para
+          continuar debes pagar el siguiente periodo. Si renuevas antes de que venza, los días se suman al periodo
+          vigente.</li>
+        <li>Al vencer el plan tienes {{ legal.graceDays }} días de gracia; después, las funciones de pago se
+          suspenden hasta que renueves. Tus datos se conservan mientras la cuenta exista.</li>
+        <li>Emitimos factura electrónica con los datos que nos suministres.</li>
+      </ul>
+    </section>
+
+    <section id="retracto">
+      <h2>6. Retracto y reembolsos</h2>
+      <p>
+        Cuando actúes como consumidor, puedes ejercer el derecho de retracto dentro de los 5 días hábiles siguientes
+        al pago (artículo 47 de la Ley 1480 de 2011) escribiendo a
+        <a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a>; te devolvemos el dinero en máximo
+        30 días calendario. También puedes solicitar la reversión del pago en los casos del artículo 51 de la misma
+        ley. Fuera de esos casos no hacemos reembolsos por periodos usados parcialmente.
+      </p>
+    </section>
+
+    <section id="uso">
+      <h2>7. Uso aceptable</h2>
+      <p>No puedes usar {{ legal.brand }} para:</p>
+      <ul>
+        <li>Enviar mensajes masivos no solicitados (spam) o contactar a personas que no te han dado autorización.</li>
+        <li>Contactar consumidores por canales, en horarios o con una frecuencia no permitidos por la Ley 2300 de
+          2023 y demás normas de protección al consumidor.</li>
+        <li>Ofrecer productos o servicios ilegales, engañosos o que requieran autorizaciones que no tienes.</li>
+        <li>Suplantar a otras personas o marcas, cometer fraude o acosar.</li>
+        <li>Difundir contenido que explote a menores de edad, incite a la violencia o discrimine.</li>
+        <li>Vulnerar derechos de terceros, incluidos los de propiedad intelectual y protección de datos.</li>
+        <li>Intentar acceder a cuentas o datos ajenos, hacer ingeniería inversa, revender el servicio sin
+          autorización o afectar su funcionamiento.</li>
+      </ul>
+      <p>Podemos suspender cuentas que incumplan estas reglas, según la sección 13.</p>
+    </section>
+
+    <section id="datos">
+      <h2>8. Datos de tus clientes</h2>
+      <p>
+        Frente a los datos de las personas que escriben al WhatsApp de tu negocio, tú eres el
+        <strong>responsable del tratamiento</strong> y {{ legal.brand }} el <strong>encargado</strong>. Esta
+        sección es el contrato de transmisión de datos previsto en el artículo 25 del Decreto 1377 de 2013.
+      </p>
+      <h3>Tus obligaciones</h3>
+      <ul>
+        <li>Tener la autorización o la base legal para tratar los datos de tus clientes y para escribirles.</li>
+        <li>Informarles que pueden ser atendidos por un asistente automatizado y tener tu propia política de
+          tratamiento de datos.</li>
+        <li>Atender las consultas y reclamos de tus clientes sobre sus datos.</li>
+      </ul>
+      <h3>Obligaciones de {{ legal.brand }}</h3>
+      <ul>
+        <li>Tratar esos datos solo para prestarte el servicio y según tus instrucciones.</li>
+        <li>Mantenerlos confidenciales, con las medidas de seguridad de nuestra política de datos, y aislados de
+          los de otros negocios.</li>
+        <li>Usar solo los proveedores (subencargados) listados en la
+          <a routerLink="/privacidad" fragment="proveedores">Política de Tratamiento de Datos</a>, que autorizas
+          con estos términos, y avisarte antes de agregar otros.</li>
+        <li>Avisarte sin demora de cualquier incidente de seguridad que afecte esos datos.</li>
+        <li>Apoyarte para atender solicitudes de los titulares y borrar los datos al terminar el servicio.</li>
+      </ul>
+    </section>
+
+    <section id="ia">
+      <h2>9. Inteligencia artificial</h2>
+      <ul>
+        <li>Las respuestas del asistente se generan automáticamente con base en la información que configuras y
+          pueden contener errores. Eres responsable de revisar esa información y la atención que se presta en
+          nombre de tu negocio.</li>
+        <li>Puedes apagar la IA en cualquier chat o para todo el negocio y responder tú mismo.</li>
+        <li>No uses el asistente como única fuente para decisiones médicas, legales o financieras de tus clientes.</li>
+        <li>{{ legal.brand }} no garantiza un número de ventas ni resultados comerciales específicos.</li>
+      </ul>
+    </section>
+
+    <section id="propiedad">
+      <h2>10. Propiedad intelectual</h2>
+      <p>
+        El software, la marca y los contenidos de {{ legal.brand }} pertenecen a {{ legal.companyName }}. Te damos
+        una licencia de uso personal, no exclusiva e intransferible mientras tu cuenta esté vigente. La información
+        de tu negocio y tus conversaciones son tuyas; nos das permiso de usarlas solo para prestarte el servicio.
+      </p>
+    </section>
+
+    <section id="disponibilidad">
+      <h2>11. Disponibilidad</h2>
+      <p>
+        Hacemos esfuerzos razonables para que el servicio esté disponible de forma continua, pero puede haber
+        interrupciones por mantenimiento, fallas o por servicios de terceros de los que dependemos (WhatsApp,
+        proveedores de IA, nube e internet). Avisaremos los mantenimientos programados cuando sea posible.
+      </p>
+    </section>
+
+    <section id="responsabilidad">
+      <h2>12. Responsabilidad</h2>
+      <p>
+        En la medida que lo permita la ley, la responsabilidad total de {{ legal.brand }} por cualquier reclamación
+        relacionada con el servicio se limita al valor que hayas pagado en los 3 meses anteriores al hecho, y no
+        responde por lucro cesante ni daños indirectos. Esta limitación no aplica en casos de dolo o culpa grave, ni
+        restringe los derechos que la ley te reconoce como consumidor.
+      </p>
+    </section>
+
+    <section id="terminacion">
+      <h2>13. Suspensión y terminación</h2>
+      <ul>
+        <li>Puedes cancelar tu cuenta cuando quieras escribiendo a
+          <a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a>.</li>
+        <li>Podemos suspender o terminar una cuenta por incumplimiento de estos términos, por orden de autoridad o
+          para proteger a otros usuarios, avisándote cuando sea posible.</li>
+        <li>Al terminar, puedes pedir una copia de tus conversaciones dentro de los {{ legal.deletionDays }} días
+          siguientes; después las borramos según la política de datos.</li>
+      </ul>
+    </section>
+
+    <section id="cambios">
+      <h2>14. Cambios a estos términos</h2>
+      <p>
+        Si hacemos cambios sustanciales te avisaremos por correo o en la plataforma con al menos 15 días de
+        anticipación. Si no estás de acuerdo puedes cancelar tu cuenta antes de que entren en vigor.
+      </p>
+    </section>
+
+    <section id="ley">
+      <h2>15. Ley aplicable y contacto</h2>
+      <p>
+        Estos términos se rigen por las leyes de la República de Colombia. Ante cualquier diferencia buscaremos
+        primero un arreglo directo durante 30 días; si no se logra, la resolverán los jueces competentes de
+        {{ legal.city }}, sin perjuicio de tu derecho a acudir a la Superintendencia de Industria y Comercio.
+      </p>
+      <p>
+        Contacto: <a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a> · Teléfono
+        {{ legal.phoneDisplay }} · WhatsApp {{ legal.whatsappDisplay }}.
+      </p>
+    </section>
+  </article>
+</app-shell>

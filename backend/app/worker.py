@@ -52,13 +52,19 @@ def _run_ai(worker_id: str, *, recover: bool) -> None:
 
 
 def _run_sync(worker_id: str) -> None:
+    from app.application.billing.subscription_sweeper import (
+        start_subscription_sweeper,
+        stop_subscription_sweeper,
+    )
     from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
     from app.application.workers.worker_runtime import start_heartbeat_loop
 
     start_heartbeat_loop("sync", worker_id, _stop)
     start_sync_worker()
+    start_subscription_sweeper()
     log.info("WhatsApp sync worker activo id=%s", worker_id)
     _stop.wait()
+    stop_subscription_sweeper()
     stop_sync_worker()
 
 
@@ -68,6 +74,10 @@ def _run_all(worker_id: str, *, recover_ai: bool) -> None:
         start_ai_worker,
         stop_ai_worker,
     )
+    from app.application.billing.subscription_sweeper import (
+        start_subscription_sweeper,
+        stop_subscription_sweeper,
+    )
     from app.application.sync.sync_queue_service import start_sync_worker, stop_sync_worker
     from app.application.workers.queue_service import start_webhook_worker, stop_webhook_worker
     from app.application.workers.worker_runtime import start_heartbeat_loop
@@ -76,10 +86,12 @@ def _run_all(worker_id: str, *, recover_ai: bool) -> None:
     start_webhook_worker()
     start_ai_worker()
     start_sync_worker()
+    start_subscription_sweeper()
     if recover_ai:
         recover_pending_ai_replies()
     log.info("Todos los workers activos id=%s", worker_id)
     _stop.wait()
+    stop_subscription_sweeper()
     stop_ai_worker()
     stop_webhook_worker()
     stop_sync_worker()

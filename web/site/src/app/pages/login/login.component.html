@@ -5,6 +5,12 @@
       <p class="muted">{{ subtitle }}</p>
 
       @if (step === 'start') {
+        @if (signupMode) {
+          <div [formGroup]="authForm">
+            <ng-container *ngTemplateOutlet="legalConsent" />
+          </div>
+        }
+
         <div class="oauth-stack">
           <a
             class="btn btn-oauth google full"
@@ -74,6 +80,15 @@
           </button>
         </form>
 
+        @if (!signupMode) {
+          <p class="auth-legal-note muted">
+            Si es tu primera vez y continúas con Google o GitHub, aceptas los
+            <a routerLink="/terminos" target="_blank" rel="noopener">Términos y Condiciones</a> y autorizas el
+            tratamiento de tus datos según la
+            <a routerLink="/privacidad" target="_blank" rel="noopener">Política de Tratamiento de Datos</a>.
+          </p>
+        }
+
         <p class="muted center">
           @if (signupMode) {
             ¿Ya tienes cuenta?
@@ -106,6 +121,8 @@
             <input type="text" formControlName="owner_name" autocomplete="name" />
           </label>
 
+          <ng-container *ngTemplateOutlet="legalConsent" />
+
           <p class="error" *ngIf="error">{{ error }}</p>
 
           <button class="btn btn-primary full" type="submit" [disabled]="submitting">
@@ -135,3 +152,24 @@
     </div>
   </section>
 </app-shell>
+
+<ng-template #legalConsent>
+  <div class="auth-consent" [formGroup]="authForm">
+    <label class="auth-check">
+      <input type="checkbox" formControlName="accept_legal" />
+      <span>
+        Acepto los <a routerLink="/terminos" target="_blank" rel="noopener">Términos y Condiciones</a> y autorizo el
+        tratamiento de mis datos personales según la
+        <a routerLink="/privacidad" target="_blank" rel="noopener">Política de Tratamiento de Datos</a>.
+        <strong class="auth-required" aria-hidden="true">*</strong>
+      </span>
+    </label>
+    @if (authForm.controls.accept_legal.touched && authForm.controls.accept_legal.invalid) {
+      <p class="error">Debes aceptar para crear la cuenta.</p>
+    }
+    <label class="auth-check">
+      <input type="checkbox" formControlName="accept_marketing" />
+      <span>Quiero recibir novedades y ofertas de Omitel por correo o WhatsApp (opcional).</span>
+    </label>
+  </div>
+</ng-template>

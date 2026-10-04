@@ -1,0 +1,10 @@
+# La imagen del backend solo necesita el código Python y el panel estático.
+*
+!backend/requirements.txt
+!backend/alembic.ini
+!backend/alembic
+!backend/app
+!web/panel
+**/__pycache__
+**/*.pyc
+backend/app/static/assets

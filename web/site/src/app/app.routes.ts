@@ -44,5 +44,20 @@ export const routes: Routes = [
       import('./pages/password-reset/password-reset.component').then((m) => m.PasswordResetComponent),
     title: 'Nueva contraseña — Omitel',
   },
+  {
+    path: 'privacidad',
+    loadComponent: () => import('./pages/legal/privacy/privacy.component').then((m) => m.PrivacyComponent),
+    title: 'Política de Tratamiento de Datos — Omitel',
+  },
+  {
+    path: 'terminos',
+    loadComponent: () => import('./pages/legal/terms/terms.component').then((m) => m.TermsComponent),
+    title: 'Términos y Condiciones — Omitel',
+  },
+  {
+    path: 'cookies',
+    loadComponent: () => import('./pages/legal/cookies/cookies.component').then((m) => m.CookiesComponent),
+    title: 'Política de Cookies — Omitel',
+  },
   { path: '**', redirectTo: '' },
 ];

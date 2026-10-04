@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, map, of, tap, timeout } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
+import { appUrl } from '../oauth-url';
 import { API_BASE_URL } from '../tokens';
 import { clearSessionRevoked } from '../session-revocation';
 import {
@@ -97,20 +98,20 @@ export class AuthService {
   goAfterAuth(): void {
     clearSessionRevoked();
     if (typeof window !== 'undefined') {
-      window.location.href = `${environment.panelUrl}?welcome=1`;
+      window.location.href = appUrl(`${environment.panelUrl}?welcome=1`);
     }
   }
 
   goToPanelWelcome(): void {
     clearSessionRevoked();
     if (typeof window !== 'undefined') {
-      window.location.href = `${environment.panelUrl}?welcome=1`;
+      window.location.href = appUrl(`${environment.panelUrl}?welcome=1`);
     }
   }
 
   goToPanel(): void {
     if (typeof window !== 'undefined') {
-      window.location.href = environment.panelUrl;
+      window.location.href = appUrl(environment.panelUrl);
     }
   }
 }

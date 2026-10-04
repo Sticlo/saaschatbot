@@ -11,6 +11,8 @@ from app.application.billing.plan_service import get_plan_by_slug
 from app.application.billing.subscription_service import (
     activate_paid_subscription,
     get_tenant_subscription,
+    renewal_period,
+    subscription_is_paid,
 )
 from app.application.billing.tenant_service import log_audit
 from app.application.billing.wompi_service import (
@@ -21,10 +23,12 @@ from app.application.billing.wompi_service import (
 )
 from app.config import settings
 from app.domain.entities.payment_checkout import PaymentCheckout, PaymentCheckoutStatus
-from app.domain.entities import Plan, SubscriptionStatus, Tenant, User
+from app.domain.entities import Plan, Tenant, User
 from app.domain.entities.enums import TenantPlan
 
 log = logging.getLogger(__name__)
+
+RENEWAL_WINDOW_DAYS = 7
 
 
 class CheckoutError(ValueError):
@@ -51,9 +55,16 @@ def create_checkout(
     if subscription is None:
         raise CheckoutError("Suscripción no encontrada")
 
+    period_end = subscription.current_period_end
+    renewal_window_open = period_end is None or (
+        (period_end if period_end.tzinfo else period_end.replace(tzinfo=timezone.utc))
+        - datetime.now(timezone.utc)
+        <= timedelta(days=RENEWAL_WINDOW_DAYS)
+    )
     if (
-        subscription.status == SubscriptionStatus.ACTIVE.value
+        subscription_is_paid(subscription)
         and subscription.plan_id == plan.id
+        and not renewal_window_open
     ):
         raise CheckoutError("Ya tienes este plan activo")
 
@@ -143,14 +154,15 @@ def fulfill_checkout(
     checkout.wompi_transaction_id = wompi_transaction_id
     checkout.paid_at = now
 
+    period_start, period_end = renewal_period(subscription, now)
     activate_paid_subscription(
         db,
         tenant=tenant,
         subscription=subscription,
         plan=plan,
         wompi_transaction_id=wompi_transaction_id,
-        period_start=now,
-        period_end=now + timedelta(days=30),
+        period_start=period_start,
+        period_end=period_end,
     )
 
     log_audit(

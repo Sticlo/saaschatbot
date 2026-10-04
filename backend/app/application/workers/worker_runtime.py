@@ -94,6 +94,32 @@ def release_ai_slot(slot: Optional[int]) -> None:
         pass
 
 
+AI_TENANT_SLOT_PREFIX = "ai:tslot:"
+
+
+def acquire_tenant_ai_slot(tenant_id: uuid.UUID | str) -> Optional[str]:
+    """Reserva uno de los `ai_max_parallel_per_tenant` slots del negocio, sin esperar.
+
+    None = el negocio ya tiene todas sus respuestas en curso: el job vuelve a la cola y
+    los slots globales quedan para los demás negocios."""
+    client = get_redis()
+    owner = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
+    for slot in range(max(1, settings.ai_max_parallel_per_tenant)):
+        key = f"{AI_TENANT_SLOT_PREFIX}{tenant_id}:{slot}"
+        if client.set(key, owner, nx=True, ex=AI_SLOT_LEASE_SECONDS):
+            return key
+    return None
+
+
+def release_tenant_ai_slot(key: Optional[str]) -> None:
+    if not key:
+        return
+    try:
+        get_redis().delete(key)
+    except Exception:
+        pass
+
+
 def count_active_ai_slots() -> int:
     client = get_redis()
     count = 0

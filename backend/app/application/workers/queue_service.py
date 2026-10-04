@@ -40,9 +40,20 @@ def is_duplicate_webhook(tenant_id: uuid.UUID, dedup_id: str) -> bool:
     return True
 
 
+def release_webhook_dedup(tenant_id: uuid.UUID, dedup_id: str) -> None:
+    """Olvida un evento marcado como visto que no se pudo procesar, para que el reintento entre."""
+    if not dedup_id:
+        return
+    try:
+        get_redis().delete(webhook_dedup_key(tenant_id, dedup_id))
+    except Exception:
+        log.warning("No se pudo liberar dedup tenant=%s id=%s", tenant_id, dedup_id, exc_info=True)
+
+
 def build_dedup_id(payload: dict) -> str:
     event = (payload.get("event") or "unknown").lower()
     data = payload.get("data") or payload
+    is_status_update = event.replace("_", ".") == "messages.update"
 
     candidates: list[dict] = []
     if isinstance(data, list):
@@ -56,9 +67,12 @@ def build_dedup_id(payload: dict) -> str:
 
     for item in candidates:
         key = item.get("key") if isinstance(item.get("key"), dict) else {}
-        msg_id = key.get("id")
+        # Evolution v2 manda `messages.update` sin objeto `key`: el id de WhatsApp va en `keyId`.
+        msg_id = key.get("id") or item.get("keyId")
         if msg_id:
-            return f"{event}:{msg_id}"
+            # Un mismo mensaje pasa por enviado → entregado → leído: cada estado es otro evento.
+            status = item.get("status") if is_status_update else None
+            return f"{event}:{msg_id}:{status}" if status else f"{event}:{msg_id}"
         state = item.get("state") or item.get("status")
         if state is not None:
             return f"{event}:{state}"

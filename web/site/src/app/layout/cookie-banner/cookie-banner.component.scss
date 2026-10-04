@@ -1,0 +1,139 @@
+.cookie-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 1300;
+  width: min(720px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16);
+  font-size: 0.93rem;
+  line-height: 1.55;
+  animation: cookie-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  p {
+    margin: 0 0 14px;
+  }
+
+  a {
+    color: var(--primary);
+  }
+}
+
+.cookie-panel--settings {
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  animation-name: cookie-pop;
+
+  h2 {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+  }
+}
+
+.cookie-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1299;
+  background: rgba(10, 10, 12, 0.45);
+}
+
+.cookie-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+
+  .btn {
+    min-height: 40px;
+  }
+}
+
+.cookie-options {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  strong {
+    display: block;
+  }
+
+  span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.86rem;
+  }
+
+  label {
+    cursor: pointer;
+  }
+
+  input[type='checkbox'] {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+}
+
+.cookie-always {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+@keyframes cookie-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+@keyframes cookie-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+}
+
+@media (max-width: 560px) {
+  .cookie-panel:not(.cookie-panel--settings) {
+    bottom: 12px;
+  }
+
+  .cookie-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cookie-panel {
+    animation: none;
+  }
+}
+
+/* Deja libres los botones flotantes de llamada y WhatsApp. */
+@media (max-width: 960px) {
+  .cookie-panel:not(.cookie-panel--settings) {
+    bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+  }
+}

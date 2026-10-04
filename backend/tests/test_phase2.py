@@ -105,6 +105,7 @@ def test_webhook_processor_connection_update(client: TestClient):
             "owner_name": "Owner",
             "email": f"wa-{uuid.uuid4().hex[:8]}@test.com",
             "password": "password123",
+            "accept_legal": True,
         },
     )
     if auth.status_code == 503:
@@ -149,6 +150,7 @@ def test_webhook_rejects_wrong_instance(client: TestClient):
             "owner_name": "Owner",
             "email": f"wi-{uuid.uuid4().hex[:8]}@test.com",
             "password": "password123",
+            "accept_legal": True,
         },
     )
     if auth.status_code == 503:
@@ -226,6 +228,7 @@ def test_connect_whatsapp_returns_qr(
             "owner_name": "Owner",
             "email": f"conn-{uuid.uuid4().hex[:8]}@test.com",
             "password": "password123",
+            "accept_legal": True,
         },
     )
     if auth.status_code == 503:

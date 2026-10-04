@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import httpx
 from sqlalchemy.orm import Session
 
+from app.application.auth.legal_consent_service import record_legal_consent
 from app.application.billing.tenant_service import (
     log_audit,
     placeholder_business_name,
@@ -247,6 +248,16 @@ def resolve_oauth_user(
     )
     owner.oauth_provider = profile.provider
     owner.oauth_subject = profile.subject
+    # Autorización por conducta inequívoca (Decreto 1377 de 2013, art. 7): el botón
+    # «Continuar con…» muestra el aviso de términos y política justo debajo.
+    record_legal_consent(
+        db,
+        tenant_id=tenant.id,
+        user_id=owner.id,
+        email=profile.email,
+        method=f"registro_{profile.provider}",
+        ip_address=ip_address,
+    )
     log_audit(
         db,
         tenant_id=tenant.id,

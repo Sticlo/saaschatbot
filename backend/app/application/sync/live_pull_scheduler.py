@@ -58,7 +58,7 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
         save_outbound_from_phone,
     )
     from app.application.messaging.webhook_processor import _commit_and_publish_message
-    from app.application.workers.queue_service import is_duplicate_webhook
+    from app.application.workers.queue_service import is_duplicate_webhook, release_webhook_dedup
 
     if not settings.evolution_database_url:
         return 0
@@ -131,6 +131,7 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
                         whatsapp_connection_id=connection_id,
                         instance_name=session.instance_name,
                         publish=False,
+                        created_at=item.get("timestamp"),
                     )
                     event_type = "message.out"
                 else:
@@ -146,6 +147,7 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
                         whatsapp_connection_id=connection_id,
                         instance_name=session.instance_name,
                         publish=False,
+                        created_at=item.get("timestamp"),
                     )
                     event_type = "message.in"
 
@@ -162,6 +164,8 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
             except Exception:
                 log.exception("live_pull msg=%s tenant=%s", msg_id, tenant_id)
                 db.rollback()
+                if msg_id:
+                    release_webhook_dedup(tenant_id, f"messages.upsert:{msg_id}")
 
         if pending_ai:
             from app.application.ai.ai_queue_service import flush_pending_ai_replies

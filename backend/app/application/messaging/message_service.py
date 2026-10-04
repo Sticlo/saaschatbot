@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from sqlalchemy import func, inspect, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.shared.core.phone import (
@@ -78,6 +81,10 @@ def _find_existing_message(
         Message.conversation_id == conversation_id,
         Message.body == normalized,
     )
+    if evolution_message_id:
+        # Con id, el texto igual solo delata el eco de un mensaje del panel guardado aún sin
+        # id. Dos mensajes con ids distintos ("hola" y "hola") son dos mensajes reales.
+        query = query.filter(Message.evolution_message_id.is_(None))
     if created_at is not None:
         from datetime import timedelta
 
@@ -310,13 +317,32 @@ def find_conversation_for_contact(
             tail_phone = phone
             break
 
-    if tail_phone or jids_to_try:
+    # Cada contacto nuevo pasa por aquí: el filtro va en SQL para no cargar en memoria
+    # todos los chats del negocio (O(n) por mensaje en cuentas grandes).
+    tail_digits = re.sub(r"\D", "", tail_phone)[-10:] if tail_phone else ""
+    lid_placeholders: list[str] = []
+    for jid in jids_to_try:
+        lid_placeholders.append(f"lid:{jid}")
+        if jid.endswith("@lid"):
+            lid_placeholders.append(f"lid:{jid[:-4]}")
+    candidate_filters = []
+    if len(tail_digits) >= 10:
+        candidate_filters.append(
+            func.regexp_replace(Conversation.contact_phone, r"\D", "", "g").like(f"%{tail_digits}")
+        )
+    if jids_to_try:
+        candidate_filters.append(Conversation.contact_jid.in_(jids_to_try))
+        candidate_filters.append(Conversation.contact_phone.in_(lid_placeholders))
+
+    if candidate_filters:
         app_rows = (
             db.query(Conversation)
             .filter(
                 Conversation.tenant_id == tenant_id,
                 Conversation.whatsapp_connection_id == whatsapp_connection_id,
+                or_(*candidate_filters),
             )
+            .limit(50)
             .all()
         )
         for conversation in app_rows:
@@ -383,8 +409,33 @@ def get_or_create_conversation(
         whatsapp_connection_id=whatsapp_connection_id,
         imported_legacy=imported_legacy,
     )
-    db.add(conversation)
-    db.flush()
+    # El webhook y el sync en vivo pueden crear el mismo chat a la vez desde otro proceso:
+    # el savepoint evita que el choque con la restricción única tumbe la transacción
+    # (y con ella el mensaje del cliente).
+    try:
+        with db.begin_nested():
+            db.add(conversation)
+    except IntegrityError:
+        winner = find_conversation_for_contact(
+            db,
+            tenant_id=tenant_id,
+            whatsapp_connection_id=whatsapp_connection_id,
+            contact_phone=contact_phone,
+            contact_jid=contact_jid,
+            instance_name=instance_name,
+        ) or (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant_id,
+                Conversation.whatsapp_connection_id == whatsapp_connection_id,
+                Conversation.contact_phone == contact_phone,
+            )
+            .first()
+        )
+        if winner is None:
+            raise
+        log.info("Chat creado en paralelo; se reutiliza conv=%s", winner.id)
+        return winner
     return conversation
 
 
@@ -412,6 +463,9 @@ def _save_message(
         created_at=ts,
     )
     if existing:
+        if evolution_message_id and not existing.evolution_message_id:
+            # Sin el id, los checks de entregado/leído de este mensaje nunca lo encontrarían.
+            existing.evolution_message_id = evolution_message_id
         bump_conversation_last_message_at(conversation, ts)
         return existing
 
@@ -427,7 +481,11 @@ def _save_message(
     message.created_at = ts
     bump_conversation_last_message_at(conversation, ts)
     if increment_unread:
-        conversation.unread_count = (conversation.unread_count or 0) + 1
+        if conversation in db and conversation.id is not None and not inspect(conversation).pending:
+            # Atómico en SQL: dos mensajes simultáneos del mismo chat no se pisan el contador.
+            conversation.unread_count = func.coalesce(Conversation.unread_count, 0) + 1
+        else:
+            conversation.unread_count = (conversation.unread_count or 0) + 1
 
     db.add(message)
     db.flush()
@@ -451,6 +509,7 @@ def save_inbound_message(
     whatsapp_connection_id: Optional[UUID] = None,
     instance_name: str = "",
     publish: bool = True,
+    created_at: Optional[datetime] = None,
 ) -> Optional[Message]:
     if not body.strip() or whatsapp_connection_id is None:
         return None
@@ -574,6 +633,7 @@ def save_inbound_message(
         status=MessageStatus.RECEIVED.value,
         evolution_message_id=evolution_message_id,
         increment_unread=True,
+        created_at=created_at,
         publish=publish,
     )
 
@@ -666,6 +726,7 @@ def save_outbound_from_phone(
     whatsapp_connection_id: Optional[UUID] = None,
     instance_name: str = "",
     publish: bool = True,
+    created_at: Optional[datetime] = None,
 ) -> Optional[Message]:
     """Sincroniza mensajes enviados desde el celular (fromMe=true)."""
     if not body.strip() or whatsapp_connection_id is None:
@@ -787,6 +848,7 @@ def save_outbound_from_phone(
         status=MessageStatus.SENT.value,
         evolution_message_id=evolution_message_id,
         increment_unread=False,
+        created_at=created_at,
         publish=False,
     )
 
@@ -981,6 +1043,7 @@ def import_messages_batch(
                 message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
                 lid_jid=item.get("lid_jid") or "",
                 whatsapp_connection_id=whatsapp_connection_id,
+                created_at=item.get("timestamp"),
             )
         else:
             msg = save_inbound_message(
@@ -993,10 +1056,27 @@ def import_messages_batch(
                 message_key=item.get("key") if isinstance(item.get("key"), dict) else None,
                 lid_jid=item.get("lid_jid") or "",
                 whatsapp_connection_id=whatsapp_connection_id,
+                created_at=item.get("timestamp"),
             )
         if msg:
             imported += 1
     return imported
+
+
+def parse_whatsapp_timestamp(raw: Any) -> Optional[datetime]:
+    """`messageTimestamp` de WhatsApp (segundos; a veces string o Long protobuf `{low, high}`).
+
+    Nunca en el futuro: un celular con la hora mal no puede dejar su chat fijo arriba."""
+    if isinstance(raw, dict):
+        raw = raw.get("low")
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    now = datetime.now(timezone.utc)
+    return min(datetime.fromtimestamp(seconds, tz=timezone.utc), now)
 
 
 def parse_messages_upsert(data: Any) -> list[dict]:
@@ -1056,6 +1136,7 @@ def parse_messages_upsert(data: Any) -> list[dict]:
                     "key": key,
                     "base64": b64_data,
                     "mimetype": mimetype,
+                    "timestamp": parse_whatsapp_timestamp(item.get("messageTimestamp")),
                 }
             )
     return parsed
@@ -1160,11 +1241,22 @@ def handle_qrcode_update(db: Session, session: WhatsAppSession, tenant: Tenant, 
         db.flush()
 
 
+_STATUS_RANK = {
+    MessageStatus.PENDING.value: 0,
+    MessageStatus.FAILED.value: 0,
+    MessageStatus.SENT.value: 1,
+    MessageStatus.RECEIVED.value: 1,
+    MessageStatus.DELIVERED.value: 2,
+    MessageStatus.READ.value: 3,
+}
+
+
 def update_message_status(db: Session, tenant_id: UUID, data: dict) -> None:
-    key = data.get("key") if isinstance(data, dict) else {}
-    if not isinstance(key, dict):
+    if not isinstance(data, dict):
         return
-    msg_id = key.get("id")
+    key = data.get("key") if isinstance(data.get("key"), dict) else {}
+    # Evolution v2 manda el id de WhatsApp en `keyId` y no incluye `key`.
+    msg_id = key.get("id") or data.get("keyId")
     status = data.get("status") or data.get("update") or data.get("ack")
     if not msg_id:
         return
@@ -1182,9 +1274,12 @@ def update_message_status(db: Session, tenant_id: UUID, data: dict) -> None:
         "DELIVERY_ACK": MessageStatus.DELIVERED.value,
         "READ": MessageStatus.READ.value,
         "READ_ACK": MessageStatus.READ.value,
+        "PLAYED": MessageStatus.READ.value,
         "2": MessageStatus.DELIVERED.value,
         "3": MessageStatus.READ.value,
     }
-    mapped = status_map.get(str(status).upper(), message.status)
-    message.status = mapped
-    db.flush()
+    mapped = status_map.get(str(status).upper())
+    # Tras reconectar los acuses llegan desordenados: un "entregado" tardío no deshace un "leído".
+    if mapped and _STATUS_RANK.get(mapped, 0) > _STATUS_RANK.get(message.status, 0):
+        message.status = mapped
+        db.flush()

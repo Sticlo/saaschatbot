@@ -57,6 +57,17 @@
     return host === "localhost" || host === "127.0.0.1";
   }
 
+  // El backend inyecta la URL del sitio: en producción el panel vive en otro dominio.
+  const SITE_URL = String(window.OMITEL_SITE_URL || "").replace(/\/$/, "");
+
+  function siteUrl(path) {
+    return SITE_URL && !isLocalDev() ? `${SITE_URL}${path}` : path;
+  }
+
+  document.querySelectorAll("a[data-site-path]").forEach((a) => {
+    a.setAttribute("href", siteUrl(a.getAttribute("data-site-path")));
+  });
+
   function isDevToolsEnabled() {
     return isLocalDev() || new URLSearchParams(location.search).has("debug");
   }
@@ -265,7 +276,7 @@
     if (isLocalDev() && location.port === "8000") {
       return `${location.protocol}//${location.hostname}:4200/login?next=${next}`;
     }
-    return `/login?next=${next}`;
+    return siteUrl(`/login?next=${next}`);
   }
 
   function redirectToSiteLogin() {
@@ -935,6 +946,11 @@
     if (sub) {
       if (sub.is_trial) {
         parts.push("Periodo de prueba");
+        if (cta) cta.textContent = "Activar plan";
+        cta?.classList.remove("hidden");
+      } else if (sub.needs_payment) {
+        parts.push("Pago pendiente: tu plan venció");
+        if (cta) cta.textContent = "Renovar plan";
         cta?.classList.remove("hidden");
       } else if (sub.is_paid && sub.plan?.name) {
         parts.push(`Plan ${sub.plan.name}`);
@@ -2464,10 +2480,12 @@
     showLoginStep("sent");
   }
 
-  async function requestMagicLink({ email, business_name, owner_name }) {
+  async function requestMagicLink({ email, business_name, owner_name, accept_legal, accept_marketing }) {
     const body = { email };
     if (business_name) body.business_name = business_name;
     if (owner_name) body.owner_name = owner_name;
+    if (accept_legal) body.accept_legal = true;
+    if (accept_marketing) body.accept_marketing = true;
     const res = await fetch(`${API}/auth/magic-link`, {
       method: "POST",
       credentials: "include",
@@ -2492,11 +2510,24 @@
       setLoginError($("login-error-register"), "Completa el nombre del negocio y tu nombre");
       return;
     }
+    const accept_legal = Boolean($("register-accept-legal")?.checked);
+    const accept_marketing = Boolean($("register-accept-marketing")?.checked);
+    if (withSignup && !accept_legal) {
+      setLoginError(
+        $("login-error-register"),
+        "Para crear la cuenta debes aceptar los Términos y Condiciones y la Política de Tratamiento de Datos Personales."
+      );
+      return;
+    }
     const data = await requestMagicLink({
       email: loginEmail,
-      ...(withSignup ? { business_name, owner_name } : {}),
+      ...(withSignup ? { business_name, owner_name, accept_legal, accept_marketing } : {}),
     });
     if (data.needs_signup) {
+      if (withSignup && data.message) {
+        setLoginError($("login-error-register"), data.message);
+        return;
+      }
       $("register-email-display").textContent = loginEmail;
       showLoginStep("register");
       $("register-business")?.focus();
@@ -2601,6 +2632,8 @@
   $("register-back-btn")?.addEventListener("click", () => {
     $("register-business").value = "";
     $("register-owner").value = "";
+    $("register-accept-legal").checked = false;
+    $("register-accept-marketing").checked = false;
     showLoginStep("email");
   });
 

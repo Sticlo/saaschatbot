@@ -13,7 +13,7 @@
         <span *ngIf="subscription?.is_trial">Estás en prueba gratis — activa un plan cuando quieras.</span>
         <span *ngIf="subscription?.is_paid">Tu plan activo: <strong>{{ subscription?.plan?.name }}</strong></span>
         <span *ngIf="loggedIn && !subscription">Tu cuenta está activa.</span>
-        <a routerLink="/panel">Ir al panel</a>
+        <a [href]="panelUrl">Ir al panel</a>
       </div>
 
       <p class="checkout-alert success" *ngIf="checkoutSuccess">{{ checkoutSuccess }}</p>

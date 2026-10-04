@@ -6,8 +6,9 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, joinedload
 
+from app.application.billing.subscription_service import plan_features_apply, subscription_is_paid
 from app.config import settings
-from app.domain.entities import Subscription, SubscriptionStatus, Tenant
+from app.domain.entities import Subscription, Tenant
 from app.infrastructure.cache.redis_client import get_redis
 
 
@@ -40,12 +41,12 @@ def daily_reply_limit(db: Session, tenant: Tenant) -> int:
         .filter(Subscription.tenant_id == tenant.id)
         .first()
     )
-    if sub and sub.plan:
+    if sub and sub.plan and plan_features_apply(sub):
         features = sub.plan.features if isinstance(sub.plan.features, dict) else {}
         custom = _plan_feature_int(features, "ai_daily_replies")
         if custom is not None:
             return custom
-    if sub and sub.status == SubscriptionStatus.ACTIVE.value:
+    if subscription_is_paid(sub):
         return settings.ai_paid_daily_reply_limit
     return settings.ai_trial_daily_reply_limit
 
@@ -58,12 +59,12 @@ def daily_classify_limit(db: Session, tenant: Tenant) -> int:
         .filter(Subscription.tenant_id == tenant.id)
         .first()
     )
-    if sub and sub.plan:
+    if sub and sub.plan and plan_features_apply(sub):
         features = sub.plan.features if isinstance(sub.plan.features, dict) else {}
         custom = _plan_feature_int(features, "ai_daily_classifications")
         if custom is not None:
             return custom
-    if sub and sub.status == SubscriptionStatus.ACTIVE.value:
+    if subscription_is_paid(sub):
         return settings.ai_paid_daily_classify_limit
     return settings.ai_trial_daily_classify_limit
 
