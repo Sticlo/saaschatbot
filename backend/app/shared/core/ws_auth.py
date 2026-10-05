@@ -1,45 +1,39 @@
 from __future__ import annotations
 
-import uuid
+from typing import Optional
 
 from fastapi import HTTPException, status
 
-from app.shared.core.auth_cookies import AUTH_COOKIE_NAME
+from app.config import settings
 from app.shared.core.deps import CurrentUser
-from app.shared.core.security import decode_access_token
+from app.shared.core.sessions import SessionInvalid, resolve_session
 from app.infrastructure.persistence.database import SessionLocal
-from app.domain.entities import User
 
 
 def authenticate_ws_token(token: str) -> CurrentUser:
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token requerido")
-    try:
-        payload = decode_access_token(token)
-        user_id = uuid.UUID(payload["sub"])
-        tenant_id = uuid.UUID(payload["tenant_id"])
-    except (ValueError, KeyError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido"
-        ) from exc
-
     with SessionLocal() as db:
-        user = (
-            db.query(User)
-            .filter(User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True))
-            .first()
-        )
-        if user is None:
+        try:
+            session = resolve_session(db, token)
+        except SessionInvalid as exc:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Usuario no encontrado o inactivo",
-            )
-        return CurrentUser(user)
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc) or "Token inválido"
+            ) from exc
+        return CurrentUser(session.user)
 
 
-def resolve_ws_token(*, query_token: str, cookie_token: str) -> str:
-    """Cookie HttpOnly tiene prioridad sobre query (legacy)."""
+def resolve_ws_token(*, cookie_token: str, protocol_token: str = "") -> str:
+    """Cookie HttpOnly (navegador) o subprotocolo `bearer.<token>` (clientes sin cookie).
+
+    Nunca por query string: las URLs quedan en logs de proxies y en el historial.
+    """
     cookie = (cookie_token or "").strip()
     if cookie:
         return cookie
-    return (query_token or "").strip()
+    return (protocol_token or "").strip()
+
+
+def ws_origin_allowed(origin: Optional[str]) -> bool:
+    """Bloquea el secuestro de WebSocket desde otros sitios (CSWSH)."""
+    if not origin:
+        return True
+    return origin.rstrip("/") in settings.trusted_origins()

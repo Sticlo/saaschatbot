@@ -18,6 +18,12 @@ class PaymentCheckoutStatus:
     ERROR = "error"
 
 
+class PaymentCheckoutKind:
+    CHECKOUT = "checkout"  # pago único en la página de Wompi
+    AUTO = "auto"  # primer cobro al guardar la tarjeta o Nequi
+    RENEWAL = "renewal"  # cobro automático al vencer el periodo
+
+
 class PaymentCheckout(Base):
     __tablename__ = "payment_checkouts"
 
@@ -42,6 +48,10 @@ class PaymentCheckout(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=PaymentCheckoutStatus.PENDING
     )
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=PaymentCheckoutKind.CHECKOUT, server_default=PaymentCheckoutKind.CHECKOUT
+    )
+    failure_reason: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     customer_email: Mapped[str] = mapped_column(String(255), nullable=False)
     wompi_transaction_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+import re
 from typing import Optional
 
 from app.application.ai.ai_shortcut_service import append_shortcuts_instructions
@@ -11,22 +13,22 @@ Hablas en español colombiano, cercano y breve (tú). Mensajes cortos: 1-2 párr
 
 Tu trabajo:
 1. Saludar y dar la bienvenida cuando es el inicio de la conversación.
-2. Responder preguntas al comienzo (precios, horarios, qué ofrecen, cómo funciona).
-3. Acompañar con paciencia hasta que el cliente muestre interés en reservar, comprar o contratar.
-4. NO cierres la venta tú — no agendes, no confirmes citas ni pidas datos de pago. Cuando quieran reservar/comprar, di que alguien del equipo los atiende enseguida.
+2. Responder preguntas (precios, horarios, qué ofrecen, cómo funciona) y enviar el catálogo si lo piden.
+3. Acompañar con paciencia hasta que el cliente decida comprar, reservar o contratar.
+4. NO cierres la venta tú ni pidas datos de pago: cuando ya quiera comprar, dile con naturalidad que ya le confirmas.
 
-No inventes precios, plazos ni promesas. Si no sabes algo, dilo y ofrece que el equipo confirme.
+No inventes precios, plazos ni promesas. Si no sabes algo, dilo y ofrece confirmarlo.
 {context_block}
 """
 
+_NO_INTEREST = ("no me interesa", "no estoy interesad")
+_INTEREST_RE = re.compile(r"\b(cat[aá]logo|portafolio|la carta|men[uú])\b")
 
-def detect_purchase_intent(text: str) -> bool:
-    """Señales de que el cliente ya quiere reservar, comprar o dar el siguiente paso."""
+
+def detect_closing_intent(text: str) -> bool:
+    """El cliente ya decidió: quiere reservar, comprar, pagar o ir."""
     lower = (text or "").lower().strip()
-    if not lower:
-        return False
-
-    if any(p in lower for p in ("no me interesa", "no estoy interesad")):
+    if not lower or any(p in lower for p in _NO_INTEREST):
         return False
 
     strong_phrases = (
@@ -68,13 +70,27 @@ def detect_purchase_intent(text: str) -> bool:
     )
     if any(p in lower for p in strong_phrases):
         return True
-    if "listo" in lower and any(w in lower for w in ("reserv", "compr", "pago", "cita", "donde", "dónde")):
+    return "listo" in lower and any(
+        w in lower for w in ("reserv", "compr", "pago", "cita", "donde", "dónde")
+    )
+
+
+def detect_interest_signal(text: str) -> bool:
+    """Interés real sin haber decidido aún: pide el catálogo o dice que le interesa."""
+    lower = (text or "").lower().strip()
+    if not lower or any(p in lower for p in _NO_INTEREST):
+        return False
+    if _INTEREST_RE.search(lower):
         return True
     if "me interesa" in lower or "estoy interesad" in lower:
-        if any(w in lower for w in ("saber", "conocer", "pregunt", "info", "más sobre", "mas sobre")):
-            return False
-        return True
+        return not any(
+            w in lower for w in ("saber", "conocer", "pregunt", "info", "más sobre", "mas sobre")
+        )
     return False
+
+
+def detect_purchase_intent(text: str) -> bool:
+    return detect_closing_intent(text) or detect_interest_signal(text)
 
 
 def build_qualify_system_prompt(
@@ -88,7 +104,7 @@ def build_qualify_system_prompt(
         base = profile.ai_system_prompt.strip()
         base += (
             "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y NO cierres la venta. "
-            "Cuando quieran reservar/comprar, indica que alguien del equipo los atiende."
+            "Cuando ya quieran comprar, dile con naturalidad que ya le confirmas."
         )
     else:
         answers = answers_from_profile(profile) if profile else {}
@@ -119,9 +135,13 @@ def build_qualify_system_prompt(
     return append_shortcuts_instructions(base, shortcuts or [])
 
 
-def handoff_reply(business_name: str) -> str:
-    name = (business_name or "nuestro equipo").strip()
-    return (
-        f"¡Qué bueno! 😊 Ya te entendí — en un momentico alguien de {name} "
-        "te ayuda con la reserva o el siguiente paso."
-    )
+CLOSING_HOLD_REPLIES = (
+    "¡De una! 😊 Dame un momentico y ya te confirmo.",
+    "¡Listo! Dame un momentico y te confirmo 🙌",
+    "¡Claro que sí! Ya te confirmo, dame un momentico 😊",
+)
+
+
+def handoff_reply(business_name: str = "") -> str:
+    """Lo que diría alguien del negocio antes de atender en persona: sin mencionar asesores."""
+    return random.choice(CLOSING_HOLD_REPLIES)

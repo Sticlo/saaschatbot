@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import uuid
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.shared.core.auth_cookies import AUTH_COOKIE_NAME
 from app.shared.core.permissions import role_at_least
-from app.shared.core.security import decode_access_token
+from app.shared.core.sessions import SessionInvalid, issue_token, needs_refresh, resolve_session
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import User, UserRole
 
@@ -51,26 +51,20 @@ def get_current_user(
 ) -> CurrentUser:
     token = _resolve_access_token(request, credentials)
     try:
-        payload = decode_access_token(token)
-        user_id = uuid.UUID(payload["sub"])
-        tenant_id = uuid.UUID(payload["tenant_id"])
-    except (ValueError, KeyError) as exc:
+        session = resolve_session(db, token)
+    except SessionInvalid as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
+            detail=str(exc) or "Token inválido",
+            headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user = (
-        db.query(User)
-        .filter(User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True))
-        .first()
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario no encontrado o inactivo",
-        )
-    return CurrentUser(user)
+    request.state.session_payload = session.payload
+    from_cookie = token == (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    if from_cookie and needs_refresh(session):
+        # SessionRefreshMiddleware la pone en la respuesta: el usuario activo no tiene que re-entrar.
+        request.state.renewed_token = issue_token(session.user)
+    return CurrentUser(session.user)
 
 
 def require_role(minimum: UserRole):
@@ -85,6 +79,14 @@ def require_role(minimum: UserRole):
     return dependency
 
 
+def require_platform_admin(current: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
+    # 404 y no 403: a un cliente cualquiera ni le contamos que la consola existe.
+    if (current.email or "").strip().lower() not in settings.platform_admins():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return current
+
+
 RequireOwner = Annotated[CurrentUser, Depends(require_role(UserRole.OWNER))]
+RequirePlatformAdmin = Annotated[CurrentUser, Depends(require_platform_admin)]
 RequireAgent = Annotated[CurrentUser, Depends(require_role(UserRole.AGENT))]
 RequireViewer = Annotated[CurrentUser, Depends(require_role(UserRole.VIEWER))]

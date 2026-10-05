@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -12,21 +10,15 @@ from app.domain.entities import Tenant
 from app.infrastructure.persistence.database import get_db
 from app.shared.core.deps import RequireViewer
 from app.config import ALLOWED_DEEPSEEK_MODEL, settings
-from app.infrastructure.ai.deepseek_client import check_provider_health, is_configured
+from app.infrastructure.ai.ai_text_provider import is_configured
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-
-_provider_cache: dict[str, object] = {"checked_at": 0.0, "ok": False, "error": None}
 
 
 @router.get("/status")
 def ai_status(current: RequireViewer, db: Session = Depends(get_db)):
-    """Estado del proveedor IA (DeepSeek) para el panel."""
-    ok, err = check_provider_health()
-    _provider_cache["checked_at"] = time.time()
-    _provider_cache["ok"] = ok
-    _provider_cache["error"] = None if ok else err
-
+    """Estado de la IA para el panel. Las fallas del proveedor no son asunto del dueño (las
+    cubren reintentos y el respaldo, y avisan al dev), así que aquí no se exponen."""
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     profile = get_or_create_tenant_profile(db, current.tenant_id) if tenant else None
     usage = build_ai_usage_summary(db, tenant) if tenant else {}
@@ -36,7 +28,7 @@ def ai_status(current: RequireViewer, db: Session = Depends(get_db)):
         "model": ALLOWED_DEEPSEEK_MODEL,
         "ai_mode": resolve_ai_mode(profile),
         "classifier_mode": "llm" if settings.ai_classifier_use_llm else "rules",
-        "provider_ok": bool(_provider_cache.get("ok")),
-        "provider_error": _provider_cache.get("error"),
+        "provider_ok": True,
+        "provider_error": None,
         **usage,
     }

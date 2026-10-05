@@ -135,6 +135,7 @@ def test_after_agent_reenables_ai_only_label_updates(monkeypatch):
 
     with SessionLocal() as db:
         tenant, session, conversation, message = _setup(db, interest_status="interested")
+        ai_service._mark_handed_off(conversation.id)
         msg = message("No me interesa ya")
         assert _close(db, tenant, session, conversation, msg, "no_interesado") is False
         assert conversation.interest_status == "not_interested"

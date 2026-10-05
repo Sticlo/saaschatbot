@@ -22,4 +22,6 @@ export const LEGAL = {
   /** Días tras cancelar la cuenta en que se borran los datos. */
   deletionDays: 30,
   graceDays: 3,
+  /** Debe coincidir con REMINDER_LEAD de backend/app/application/billing/auto_renew_service.py. */
+  renewalNoticeDays: 3,
 } as const;

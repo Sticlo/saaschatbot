@@ -143,6 +143,11 @@
   align-items: center;
 }
 
+.plans-grid.single {
+  grid-template-columns: minmax(0, 480px);
+  justify-content: center;
+}
+
 @media (min-width: 861px) {
   .plans-grid {
     gap: 2rem;
@@ -158,7 +163,7 @@
     align-items: stretch;
   }
 
-  .plan-card.premium-tier {
+  .plan-card.featured {
     order: -1;
   }
 }
@@ -175,12 +180,12 @@
   min-height: 100%;
 }
 
-.plan-card.popular:not(.premium-tier) {
+.plan-card.popular:not(.featured) {
   border: 1px solid var(--hz-primary-border);
   box-shadow: var(--hz-shadow);
 }
 
-.plan-card.premium-tier {
+.plan-card.featured {
   border: 2px solid var(--hz-primary);
   background: linear-gradient(165deg, #ffffff 0%, #fff8f2 48%, #fff0e6 100%);
   box-shadow:
@@ -191,13 +196,13 @@
 }
 
 @media (min-width: 861px) {
-  .plan-card.premium-tier {
+  .plan-card.featured {
     transform: translateY(-12px) scale(1.04);
     transform-origin: center center;
   }
 }
 
-.plan-card.premium-tier .plan-ribbon {
+.plan-card.featured .plan-ribbon {
   background: linear-gradient(90deg, #e85f00 0%, #ff6b00 45%, #ff9220 100%);
   padding: 0.65rem 1rem;
   font-size: 0.75rem;
@@ -329,31 +334,31 @@
   cursor: pointer;
 }
 
-.premium-tier .plan-body {
+.featured .plan-body {
   border-top-color: rgba(255, 107, 0, 0.18);
 }
 
-.premium-tier .features-title {
+.featured .features-title {
   color: var(--hz-primary);
 }
 
-.premium-tier .plan-head h2 {
+.featured .plan-head h2 {
   font-weight: 700;
   font-size: 1.45rem;
 }
 
-.premium-tier .price {
+.featured .price {
   color: var(--hz-primary);
   font-size: clamp(2.5rem, 4.5vw, 2.85rem);
 }
 
-.premium-tier .plan-cta-solid {
+.featured .plan-cta-solid {
   min-height: 52px;
   font-size: 1rem;
   box-shadow: 0 8px 20px rgba(255, 107, 0, 0.35);
 }
 
-.premium-tier .plan-cta-solid:hover {
+.featured .plan-cta-solid:hover {
   box-shadow: 0 10px 26px rgba(255, 107, 0, 0.42);
   transform: translateY(-1px);
 }
@@ -383,18 +388,6 @@
 .plan-cta-solid:hover {
   background: var(--hz-primary-hover);
   border-color: var(--hz-primary-hover);
-}
-
-.premium-includes {
-  margin: 0 0 0.75rem;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: #7a3800;
-  background: rgba(255, 107, 0, 0.12);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 107, 0, 0.28);
-  border-left: 4px solid var(--hz-primary);
 }
 
 .features-title {
@@ -633,7 +626,7 @@
 }
 
 @media (max-width: 480px) {
-  .plan-card.premium-tier {
+  .plan-card.featured {
     transform: none;
   }
 

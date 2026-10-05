@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Omitel — Consola de plataforma</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
+  <script src="/static/panel/theme.js?v=1"></script>
+  <link rel="stylesheet" href="/static/panel/styles.css?v=41" />
+  <link rel="stylesheet" href="/static/panel/admin.css?v=3" />
+</head>
+<body class="admin-body">
+  <header class="admin-top">
+    <div class="admin-brand">
+      <strong>Omitel</strong>
+      <span>Consola de plataforma</span>
+    </div>
+    <div class="admin-top-right">
+      <span id="admin-email" class="admin-muted"></span>
+      <a href="/panel" class="admin-link">Ir a mi panel</a>
+    </div>
+  </header>
+
+  <main id="admin-gate" class="admin-gate">
+    <p id="admin-gate-text">Cargando…</p>
+  </main>
+
+  <main id="admin-main" class="admin-main hidden">
+    <section class="admin-list">
+      <div class="admin-tabs" id="admin-tabs">
+        <button type="button" data-tab="tenants" class="active">Empresas</button>
+        <button type="button" data-tab="accounts">Cuentas</button>
+      </div>
+      <div class="admin-list-head">
+        <input id="admin-search" type="search" placeholder="Buscar empresa, slug o correo…" autocomplete="off" />
+        <button id="admin-refresh" type="button" class="admin-btn admin-btn-ghost">Actualizar</button>
+      </div>
+      <div class="admin-filters" id="admin-filters"></div>
+      <div class="admin-kpis" id="admin-kpis"></div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead id="admin-head"></thead>
+          <tbody id="admin-rows"></tbody>
+        </table>
+        <p id="admin-empty" class="admin-muted hidden">Nada con ese filtro.</p>
+      </div>
+    </section>
+
+    <aside id="admin-detail" class="admin-detail">
+      <p class="admin-muted admin-detail-empty">Elige una empresa para ver qué le ha pasado y ajustar su plan.</p>
+    </aside>
+  </main>
+
+  <div id="admin-toast" class="admin-toast hidden" role="status"></div>
+  <script src="/static/panel/admin.js?v=4"></script>
+</body>
+</html>

@@ -306,6 +306,41 @@ def send_image(
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
+def send_document(
+    session_name: str,
+    recipient: str,
+    *,
+    data_b64: str,
+    mimetype: str,
+    filename: str,
+    caption: str = "",
+) -> dict:
+    if uses_waha():
+        from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
+
+        chat_id, _ = _resolve_chat_id(recipient)
+        try:
+            return waha_client.send_file(
+                session_name, chat_id, data_b64=data_b64, mimetype=mimetype, filename=filename, caption=caption
+            )
+        except WahaAPIError as exc:
+            raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        return evolution_client.send_media(
+            session_name,
+            recipient,
+            media_b64=data_b64,
+            mimetype=mimetype,
+            caption=caption,
+            filename=filename,
+            mediatype="document",
+        )
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
 def send_buttons(
     session_name: str,
     recipient: str,

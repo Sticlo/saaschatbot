@@ -17,6 +17,8 @@ from app.application.appointments.appointment_service import (
 )
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 from app.application.billing.tenant_service import log_audit
+from app.application.platform.tenant_overrides import feature_allowed
+from app.domain.entities import Tenant
 from app.infrastructure.persistence.database import get_db
 from app.presentation.schemas.appointments import (
     AppointmentCreateRequest,
@@ -44,16 +46,26 @@ def _to_response(row) -> AppointmentResponse:
     )
 
 
-@router.get("/schedule", response_model=AppointmentScheduleResponse)
-def get_appointment_schedule(current: RequireViewer, db: Session = Depends(get_db)):
-    profile = get_or_create_tenant_profile(db, current.tenant_id)
-    db.commit()
+def _schedule_response(profile, *, booking_allowed: bool = True) -> AppointmentScheduleResponse:
     schedule = get_schedule(profile)
     return AppointmentScheduleResponse(
         open_time=schedule.open_time,
         close_time=schedule.close_time,
         slot_minutes=schedule.slot_minutes,
+        ai_booking_enabled=bool(profile.ai_booking_enabled) and booking_allowed,
+        ai_booking_allowed=booking_allowed,
     )
+
+
+def _booking_allowed(db: Session, tenant_id) -> bool:
+    return feature_allowed(db.get(Tenant, tenant_id), "ai_booking")
+
+
+@router.get("/schedule", response_model=AppointmentScheduleResponse)
+def get_appointment_schedule(current: RequireViewer, db: Session = Depends(get_db)):
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    db.commit()
+    return _schedule_response(profile, booking_allowed=_booking_allowed(db, current.tenant_id))
 
 
 @router.put("/schedule", response_model=AppointmentScheduleResponse)
@@ -73,6 +85,13 @@ def put_appointment_schedule(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    booking_allowed = _booking_allowed(db, current.tenant_id)
+    if body.ai_booking_enabled is not None:
+        if body.ai_booking_enabled and not booking_allowed:
+            raise HTTPException(
+                status_code=403, detail="Tu plan no incluye que la IA agende citas. Escríbenos para activarlo."
+            )
+        profile.ai_booking_enabled = body.ai_booking_enabled
     log_audit(
         db,
         tenant_id=current.tenant_id,
@@ -82,15 +101,12 @@ def put_appointment_schedule(
             "open_time": schedule.open_time,
             "close_time": schedule.close_time,
             "slot_minutes": schedule.slot_minutes,
+            "ai_booking_enabled": bool(profile.ai_booking_enabled),
         },
         ip_address=request.client.host if request.client else None,
     )
     db.commit()
-    return AppointmentScheduleResponse(
-        open_time=schedule.open_time,
-        close_time=schedule.close_time,
-        slot_minutes=schedule.slot_minutes,
-    )
+    return _schedule_response(profile, booking_allowed=booking_allowed)
 
 
 @router.get("/day", response_model=AppointmentDayResponse)

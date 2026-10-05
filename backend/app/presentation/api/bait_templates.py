@@ -340,7 +340,10 @@ def generate_template_with_ai(
     try:
         data = generate_bait_template(tenant=tenant, profile=profile, tone=body.tone)
     except DeepSeekError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="No pudimos generar la plantilla en este momento. Intenta de nuevo en un minuto.",
+        ) from exc
     return GenerateBaitTemplateResponse(
         text=data["text"],
         buttons=[

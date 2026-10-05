@@ -159,6 +159,7 @@ def _parse_evolution_message(
 def _prepare_sync_connection(instance_name: str, *, tenant_id) -> dict[str, int]:
     """Asegura webhook + settings realtime sin reiniciar ni pedir historial masivo."""
     from app.config import settings
+    from app.shared.core.webhook_secrets import evolution_webhook_secret_for
 
     dsn = settings.evolution_database_url
     baseline = fetch_stored_counts(dsn, instance_name)
@@ -168,7 +169,7 @@ def _prepare_sync_connection(instance_name: str, *, tenant_id) -> dict[str, int]
         evolution_client.ensure_webhook(
             instance_name,
             webhook_url,
-            settings.evolution_webhook_secret,
+            evolution_webhook_secret_for(tenant_id),
         )
     except EvolutionAPIError as exc:
         log.warning("ensure_webhook: %s", exc)

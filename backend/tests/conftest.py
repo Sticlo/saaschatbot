@@ -1,34 +1,80 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import make_url
 
-from app.infrastructure.persistence.database import Base, get_db
-from app.presentation.main import app
-from app.application.billing.plan_service import ensure_default_plan
+from app.config import settings
 
-DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg://saaschatbot:localdev123@localhost:5432/saaschatbot",
-    ),
-)
+# Los tests crean miles de empresas falsas: nunca deben tocar la base de datos real.
+# Esto tiene que correr antes de importar la app, que arma su engine con settings.database_url.
+TEST_REDIS_DB = 15
+
+
+def _test_database_url() -> str:
+    explicit = os.getenv("TEST_DATABASE_URL", "").strip()
+    if explicit:
+        return explicit
+    url = make_url(settings.database_url)
+    return url.set(database=f"{url.database}_test").render_as_string(hide_password=False)
+
+
+DATABASE_URL = _test_database_url()
+if not (make_url(DATABASE_URL).database or "").endswith("_test"):
+    raise RuntimeError("TEST_DATABASE_URL debe apuntar a una base cuyo nombre termine en _test")
+settings.database_url = DATABASE_URL
+settings.redis_url = urlunsplit(urlsplit(settings.redis_url)._replace(path=f"/{TEST_REDIS_DB}"))
+# Ni cobros ni consultas reales a Wompi: cada test que lo necesite pone sus propias llaves falsas.
+settings.wompi_public_key = ""
+settings.wompi_private_key = ""
+settings.wompi_integrity_secret = ""
+settings.wompi_events_secret = ""
+settings.wompi_api_base_url = ""
+
+
+def _prepare_test_database() -> bool:
+    """Crea la base _test si falta y la deja en la última migración."""
+    url = make_url(DATABASE_URL)
+    try:
+        admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+        with admin.connect() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": url.database}
+            ).scalar()
+            if not exists:
+                conn.execute(text(f'CREATE DATABASE "{url.database}"'))
+        admin.dispose()
+
+        from pathlib import Path
+
+        from alembic import command
+        from alembic.config import Config
+
+        backend_dir = Path(__file__).resolve().parents[1]
+        cfg = Config()
+        cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+        command.upgrade(cfg, "head")
+        return True
+    except Exception as exc:  # sin Postgres: los tests de integración se saltan
+        print(f"[tests] Base de pruebas no disponible: {exc}")
+        return False
+
+
+_DB_READY = _prepare_test_database()
+
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
+from app.application.billing.plan_service import ensure_default_plan  # noqa: E402
+from app.infrastructure.persistence.database import Base, get_db  # noqa: E402
+from app.presentation.main import app  # noqa: E402
 
 
 def db_available() -> bool:
-    try:
-        engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return True
-    except Exception:
-        return False
+    return _DB_READY
 
 
 requires_db = pytest.mark.skipif(
@@ -143,6 +189,16 @@ def connection_payload(instance: str, state: str, owner_phone: str = "5731500000
     if state == "open":
         data["wuid"] = f"{owner_phone}@s.whatsapp.net"
     return {"event": "connection.update", "instance": instance, "data": data}
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limits_in_tests(monkeypatch):
+    """El límite por IP de 30 auth/min tumba la suite (todos los tests salen de testclient)."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", False)
+    # Los tests nunca deben mandar alertas reales a Telegram/correo.
+    monkeypatch.setattr(settings, "ops_alerts_enabled", False)
 
 
 @pytest.fixture()

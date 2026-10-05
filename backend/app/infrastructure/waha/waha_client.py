@@ -157,6 +157,24 @@ class WahaClient:
         }
         return self._request("POST", "/api/sendImage", json=payload, timeout=45.0)
 
+    def send_file(
+        self,
+        session: str,
+        chat_id: str,
+        *,
+        data_b64: str,
+        mimetype: str,
+        filename: str,
+        caption: str = "",
+    ) -> dict:
+        payload = {
+            "session": session,
+            "chatId": chat_id,
+            "caption": caption,
+            "file": {"mimetype": mimetype, "filename": filename, "data": data_b64},
+        }
+        return self._request("POST", "/api/sendFile", json=payload, timeout=60.0)
+
     def send_buttons(
         self,
         session: str,

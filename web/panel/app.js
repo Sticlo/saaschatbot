@@ -44,7 +44,8 @@
     appointmentsDay: null,
     appointmentModalConversationId: null,
     aiStatus: null,
-    aiStatusPoll: null,
+    aiNotice: null,
+    aiNoticeTimer: null,
   };
 
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
@@ -58,7 +59,9 @@
   }
 
   // El backend inyecta la URL del sitio: en producción el panel vive en otro dominio.
-  const SITE_URL = String(window.OMITEL_SITE_URL || "").replace(/\/$/, "");
+  const SITE_URL = String(
+    document.querySelector('meta[name="omitel-site-url"]')?.getAttribute("content") || ""
+  ).replace(/\/$/, "");
 
   function siteUrl(path) {
     return SITE_URL && !isLocalDev() ? `${SITE_URL}${path}` : path;
@@ -202,7 +205,6 @@
 
   function headers(json = true) {
     const h = {};
-    if (state.token) h.Authorization = `Bearer ${state.token}`;
     if (json) h["Content-Type"] = "application/json";
     return h;
   }
@@ -217,7 +219,7 @@
         credentials: "include",
         signal: controller.signal,
         headers: isForm
-          ? { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}), ...(options.headers || {}) }
+          ? { ...(options.headers || {}) }
           : { ...headers(), ...(options.headers || {}) },
       });
       const text = await res.text();
@@ -935,6 +937,12 @@
 
   function renderOnboarding() {}
 
+  function formatPlanDate(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("es-CO", { day: "numeric", month: "short", timeZone: "America/Bogota" });
+  }
+
   function renderPlanStatus() {
     const bar = $("plan-status-bar");
     const label = $("plan-status-label");
@@ -945,7 +953,12 @@
     const sub = state.subscription;
     if (sub) {
       if (sub.is_trial) {
-        parts.push("Periodo de prueba");
+        const left = sub.trial_days_left;
+        parts.push(left ? `Prueba gratis: ${left === 1 ? "queda 1 día" : `quedan ${left} días`}` : "Periodo de prueba");
+        if (cta) cta.textContent = "Activar plan";
+        cta?.classList.remove("hidden");
+      } else if (sub.trial_expired) {
+        parts.push("Tu prueba gratis terminó: la IA no está respondiendo");
         if (cta) cta.textContent = "Activar plan";
         cta?.classList.remove("hidden");
       } else if (sub.needs_payment) {
@@ -953,8 +966,23 @@
         if (cta) cta.textContent = "Renovar plan";
         cta?.classList.remove("hidden");
       } else if (sub.is_paid && sub.plan?.name) {
-        parts.push(`Plan ${sub.plan.name}`);
-        cta?.classList.add("hidden");
+        parts.push(/^plan\b/i.test(sub.plan.name) ? sub.plan.name : `Plan ${sub.plan.name}`);
+        if (sub.cancel_at_period_end && sub.current_period_end) {
+          parts.push(`Se cancela el ${formatPlanDate(sub.current_period_end)}`);
+          if (cta) cta.textContent = "Reactivar";
+          cta?.classList.remove("hidden");
+        } else if (sub.renewal_failing) {
+          parts.push("No pudimos cobrar la renovación");
+          if (cta) cta.textContent = "Actualizar pago";
+          cta?.classList.remove("hidden");
+        } else if (sub.next_charge_at) {
+          parts.push(`Cobro automático: ${formatPlanDate(sub.next_charge_at)}`);
+          cta?.classList.add("hidden");
+        } else {
+          if (sub.current_period_end) parts.push(`Vence el ${formatPlanDate(sub.current_period_end)}`);
+          if (cta) cta.textContent = "Mi plan";
+          cta?.classList.remove("hidden");
+        }
       } else if (sub.plan?.name) {
         parts.push(sub.plan.name);
         cta?.classList.add("hidden");
@@ -962,7 +990,7 @@
     }
 
     const ai = state.aiStatus;
-    if (ai && !ai.daily_replies_unlimited && !ai.daily_classifications_unlimited) {
+    if (ai && !ai.plan_required && !ai.daily_replies_unlimited && !ai.daily_classifications_unlimited) {
       const left = ai.daily_classifications_remaining ?? ai.daily_replies_remaining;
       const cap = ai.daily_classifications_limit ?? ai.daily_replies_limit;
       if (typeof left === "number" && typeof cap === "number") {
@@ -1241,10 +1269,18 @@
     return wrap;
   }
 
+  function outboundTicks(status) {
+    if (status === "read") return '<span class="ticks read" title="Leído">✓✓</span>';
+    if (status === "delivered") return '<span class="ticks delivered" title="Entregado">✓✓</span>';
+    if (status === "failed") return '<span class="ticks failed" title="No se envió">!</span>';
+    return '<span class="ticks sent" title="Enviado">✓</span>';
+  }
+
   function renderMessages() {
     messagesEl.innerHTML = "";
     for (const m of dedupeMessages(state.messages)) {
-      const timeHtml = `<span class="time">${formatTime(m.created_at)} · ${m.source}</span>`;
+      const ticks = m.direction === "out" ? outboundTicks(m.status) : "";
+      const timeHtml = `<span class="time">${formatTime(m.created_at)} · ${m.source}${ticks}</span>`;
       const mediaType = detectMediaType(m.body);
 
       let div;
@@ -1359,6 +1395,13 @@
     if ($("schedule-close")) $("schedule-close").value = schedule.close_time || "18:00";
     if ($("schedule-slot-minutes")) {
       $("schedule-slot-minutes").value = String(schedule.slot_minutes || 60);
+    }
+    const bookingBox = $("schedule-ai-booking");
+    if (bookingBox) {
+      const allowed = schedule.ai_booking_allowed !== false;
+      bookingBox.checked = allowed && !!schedule.ai_booking_enabled;
+      bookingBox.disabled = !allowed;
+      bookingBox.title = allowed ? "" : "Tu plan no incluye que la IA agende citas. Escríbenos para activarlo.";
     }
   }
 
@@ -1496,9 +1539,11 @@
         open_time: $("schedule-open")?.value || "08:00",
         close_time: $("schedule-close")?.value || "18:00",
         slot_minutes: Number($("schedule-slot-minutes")?.value || 60),
+        ai_booking_enabled: !!$("schedule-ai-booking")?.checked,
       };
-      await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
-      setScheduleStatus("✓ Horario guardado");
+      const saved = await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
+      fillScheduleForm(saved);
+      setScheduleStatus(saved.ai_booking_enabled ? "✓ Guardado · la IA agenda citas" : "✓ Horario guardado");
       await loadAppointmentsDay(state.appointmentsDate);
     } catch (err) {
       setScheduleStatus(err.message);
@@ -1781,7 +1826,7 @@
       list.innerHTML = '<li class="muted">Aún no tienes atajos — agrega Menú, Precios, Horarios…</li>';
     } else {
       list.innerHTML = items.map((s) => {
-        const kind = s.type === "image" ? "Foto" : "Texto";
+        const kind = s.type === "image" ? "Foto" : s.type === "document" ? "PDF" : "Texto";
         return `<li><strong>${escapeHtml(s.label)}</strong> <span class="muted small">· ${kind}</span></li>`;
       }).join("");
     }
@@ -1803,7 +1848,7 @@
 
     const items = state.quickShortcuts || [];
     const pills = items.map((s) => {
-      const icon = s.type === "image" ? "🖼 " : "";
+      const icon = s.type === "image" ? "🖼 " : s.type === "document" ? "📄 " : "";
       return `<button type="button" class="quick-shortcut-pill" data-shortcut-id="${escapeHtml(s.id)}" title="Enviar ${escapeHtml(s.label)}">${icon}${escapeHtml(s.label)}</button>`;
     }).join("");
 
@@ -1858,26 +1903,45 @@
     const list = $("shortcuts-editor-list");
     if (!list) return;
     list.innerHTML = state.shortcutsDraft.map((s, idx) => {
-      const isImage = s.type === "image";
-      const thumb = s.image_url
+      const type = s.type || "text";
+      const isFile = type === "image" || type === "document";
+      const hasFile = type === "image" ? !!s.image_path : type === "document" && !!s.file_path;
+      const preview = type === "image" && s.image_url
         ? `<img src="${escapeHtml(s.image_url)}" class="shortcut-thumb" alt="" />`
-        : "";
+        : type === "document" && s.file_path
+          ? `<span class="small">📄 ${escapeHtml(s.file_name || "catalogo.pdf")}</span>`
+          : "";
+      const uploadLabel = s.uploading
+        ? "⏳ Leyendo archivo…"
+        : type === "image" ? "📷 Subir foto" : "📄 Subir PDF";
+      const accept = type === "image"
+        ? "image/jpeg,image/png,image/webp,image/gif"
+        : "application/pdf,.pdf";
+      const contentHint = s.content_failed
+        ? "No pude leer el archivo automáticamente. Escribe aquí tus productos y precios para que la IA los conozca."
+        : "La IA usa esto para responder precios y productos sin reenviar el archivo. Puedes corregirlo.";
       return `
         <div class="shortcut-editor-row" data-idx="${idx}">
           <input type="text" class="shortcut-label" maxlength="20" placeholder="Nombre — ej: Menú" value="${escapeHtml(s.label || "")}" />
           <div class="shortcut-type-row">
-            <label><input type="radio" name="stype-${idx}" value="text" ${!isImage ? "checked" : ""} /> Texto</label>
-            <label><input type="radio" name="stype-${idx}" value="image" ${isImage ? "checked" : ""} /> Foto</label>
+            <label><input type="radio" name="stype-${idx}" value="text" ${type === "text" ? "checked" : ""} /> Texto</label>
+            <label><input type="radio" name="stype-${idx}" value="image" ${type === "image" ? "checked" : ""} /> Foto</label>
+            <label><input type="radio" name="stype-${idx}" value="document" ${type === "document" ? "checked" : ""} /> PDF</label>
           </div>
-          <div class="shortcut-text-wrap ${isImage ? "hidden" : ""}">
+          <div class="shortcut-text-wrap ${isFile ? "hidden" : ""}">
             <textarea class="shortcut-text" rows="2" maxlength="500" placeholder="Ej: Hola! Aquí tienes nuestros precios…">${escapeHtml(s.text || "")}</textarea>
           </div>
-          <div class="shortcut-image-wrap ${isImage ? "" : "hidden"}">
+          <div class="shortcut-image-wrap ${isFile ? "" : "hidden"}">
             <label class="btn ghost small wa-upload-btn">
-              📷 Subir foto
-              <input type="file" class="shortcut-image-file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+              ${uploadLabel}
+              <input type="file" class="shortcut-file-input" accept="${accept}" ${s.uploading ? "disabled" : ""} hidden />
             </label>
-            ${thumb}
+            ${preview}
+          </div>
+          <div class="shortcut-content-wrap ${isFile && hasFile ? "" : "hidden"}">
+            <label class="small muted">Lo que la IA sabe de este archivo</label>
+            <textarea class="shortcut-content" rows="4" maxlength="4000" placeholder="Ej: Tenis blancos $120.000 (tallas 36-42)…">${escapeHtml(s.content || "")}</textarea>
+            <p class="small muted">${contentHint}</p>
           </div>
           <button type="button" class="btn-link shortcut-remove-btn">Quitar</button>
         </div>`;
@@ -1897,18 +1961,38 @@
       row.querySelector(".shortcut-text")?.addEventListener("input", (e) => {
         state.shortcutsDraft[idx].text = e.target.value;
       });
-      row.querySelector(".shortcut-image-file")?.addEventListener("change", async (e) => {
+      row.querySelector(".shortcut-content")?.addEventListener("input", (e) => {
+        state.shortcutsDraft[idx].content = e.target.value;
+      });
+      row.querySelector(".shortcut-file-input")?.addEventListener("change", async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const draft = state.shortcutsDraft[idx];
+        draft.uploading = true;
+        renderShortcutsEditor();
         try {
           const fd = new FormData();
           fd.append("file", file);
-          const res = await api("/outbound/assets", { method: "POST", body: fd }, 30000);
-          state.shortcutsDraft[idx].image_path = res.image_path;
-          state.shortcutsDraft[idx].image_url = res.image_url;
-          renderShortcutsEditor();
+          const res = await api("/quick-shortcuts/files", { method: "POST", body: fd }, 90000);
+          draft.type = res.type;
+          if (res.type === "document") {
+            draft.file_path = res.path;
+            draft.file_name = res.file_name;
+            draft.image_path = null;
+            draft.image_url = null;
+          } else {
+            draft.image_path = res.path;
+            draft.image_url = res.url;
+            draft.file_path = null;
+            draft.file_name = null;
+          }
+          draft.content = res.content || "";
+          draft.content_failed = !res.content_ok;
         } catch (err) {
           alert(err.message);
+        } finally {
+          draft.uploading = false;
+          renderShortcutsEditor();
         }
       });
       row.querySelector(".shortcut-remove-btn")?.addEventListener("click", () => {
@@ -1922,14 +2006,20 @@
   async function saveQuickShortcuts() {
     const payload = state.shortcutsDraft
       .filter((s) => s.label?.trim())
-      .map((s) => ({
-        id: s.id,
-        label: s.label.trim(),
-        type: s.type,
-        text: s.type === "text" ? (s.text || "").trim() : null,
-        image_path: s.type === "image" ? s.image_path : null,
-      }))
-      .filter((s) => (s.type === "text" ? s.text : s.image_path));
+      .map((s) => {
+        const type = s.type || "text";
+        return {
+          id: s.id,
+          label: s.label.trim(),
+          type,
+          text: type === "text" ? (s.text || "").trim() : null,
+          image_path: type === "image" ? s.image_path : null,
+          file_path: type === "document" ? s.file_path : null,
+          file_name: type === "document" ? s.file_name : null,
+          content: type !== "text" ? (s.content || "").trim() || null : null,
+        };
+      })
+      .filter((s) => (s.type === "text" ? s.text : s.type === "image" ? s.image_path : s.file_path));
 
     $("shortcuts-save-btn").disabled = true;
     try {
@@ -1958,12 +2048,6 @@
       return "Activa «IA activa» para que responda sola a este contacto.";
     }
     if (conv.mode === "manual") return "Modo manual activo — apágalo para que la IA responda";
-    if (state.aiStatus && !state.aiStatus.configured) {
-      return "Falta configurar DeepSeek en el servidor (DEEPSEEK_API_KEY).";
-    }
-    if (state.aiStatus && !state.aiStatus.provider_ok && state.aiStatus.provider_error) {
-      return state.aiStatus.provider_error;
-    }
     return "";
   }
 
@@ -2002,30 +2086,14 @@
     }
   }
 
-  async function syncDeepSeekFromHealth() {
-    try {
-      const res = await fetch("/health/deepseek", { credentials: "include" });
-      if (!res.ok) return null;
-      const data = await res.json();
-      console.info("[Omitel] DeepSeek health:", data);
-      if (data.ok) {
-        state.aiStatus = {
-          ...(state.aiStatus || {}),
-          configured: true,
-          provider_ok: true,
-          provider_error: null,
-        };
-        renderAiAlerts();
-        if (state.activeId) {
-          const conv = state.conversations.find((c) => c.id === state.activeId);
-          if (conv) syncChatToggles(conv);
-        }
-      }
-      return data;
-    } catch (err) {
-      console.warn("[Omitel] DeepSeek health ping failed:", err);
-      return null;
-    }
+  function showAiNotice(text, isError) {
+    state.aiNotice = { text, isError: !!isError };
+    renderAiAlerts();
+    clearTimeout(state.aiNoticeTimer);
+    state.aiNoticeTimer = setTimeout(() => {
+      state.aiNotice = null;
+      renderAiAlerts();
+    }, 120000);
   }
 
   async function refreshAiStatus() {
@@ -2033,8 +2101,6 @@
       const fresh = await api("/ai/status", {}, 15000);
       if (!fresh) return;
       state.aiStatus = fresh;
-      if (fresh.provider_ok) state.aiStatus.provider_error = null;
-      console.info("[Omitel] AI status:", fresh);
       renderAiAlerts();
       if (state.activeId) {
         const conv = state.conversations.find((c) => c.id === state.activeId);
@@ -2051,9 +2117,7 @@
     if (state.tenant && !state.tenant.ai_global_enabled) {
       parts.push("IA global apagada — los chats con IA activa no responderán solos.");
     }
-    if (state.aiStatus && state.aiStatus.configured && !state.aiStatus.provider_ok && state.aiStatus.provider_error) {
-      parts.push(state.aiStatus.provider_error);
-    }
+    if (state.aiNotice) parts.push(state.aiNotice.text);
     if (!parts.length) {
       banner.classList.add("hidden");
       banner.textContent = "";
@@ -2061,7 +2125,7 @@
       return;
     }
     banner.textContent = parts.join(" · ");
-    banner.classList.toggle("error", !!(state.aiStatus && !state.aiStatus.provider_ok));
+    banner.classList.toggle("error", !!state.aiNotice?.isError);
     banner.classList.remove("hidden");
     renderPlanStatus();
   }
@@ -2180,9 +2244,6 @@
       state.aiStatus = aiStatus;
       state.aiProfile = bizProfile;
       state.subscription = subscription;
-      if (state.aiStatus?.provider_ok) {
-        state.aiStatus.provider_error = null;
-      }
 
       if (tenant) {
         setBusinessName(tenant.business_name, !!bizProfile?.business_name_is_placeholder);
@@ -2224,13 +2285,6 @@
         openBusinessNameSetup();
       }
       connectWs();
-      await syncDeepSeekFromHealth().catch(() => {});
-      refreshAiStatus();
-      if (!state.aiStatusPoll) {
-        state.aiStatusPoll = setInterval(() => {
-          if (!state.aiStatus?.provider_ok) refreshAiStatus();
-        }, 20000);
-      }
       startWaHeartbeat();
       if (state.wa.status === "connected") startLivePoll();
     } catch (err) {
@@ -2318,6 +2372,12 @@
                 .map((m) => m.id || `${m.body}|${m.created_at}`)
                 .join("\n");
               renderMessages();
+            } else if (event.message.id) {
+              const idx = state.messages.findIndex((m) => m.id === event.message.id);
+              if (idx >= 0 && event.message.status && event.message.status !== state.messages[idx].status) {
+                state.messages[idx] = event.message;
+                renderMessages();
+              }
             }
           }
         }
@@ -2420,35 +2480,22 @@
           .catch(() => {});
         break;
       case "ai.error":
-        if (event.error) {
-          const errText = String(event.error);
-          const actionable =
-            /402|401|saldo|l[ií]mite|quota|inv[aá]lida|no configurada|whatsapp|enviar/i.test(errText);
-          if (actionable) {
-            state.aiStatus = {
-              ...(state.aiStatus || {}),
-              configured: true,
-              provider_ok: errText.includes("402") || errText.includes("401") ? false : state.aiStatus?.provider_ok,
-              provider_error: errText.includes("402")
-                ? "Sin saldo en DeepSeek — recarga en platform.deepseek.com"
-                : errText.includes("enviar") || errText.includes("WhatsApp")
-                  ? errText.slice(0, 200)
-                  : errText.slice(0, 200),
-            };
-            renderAiAlerts();
-          }
-          const hintEl = $("chat-ai-hint");
-          if (hintEl && state.activeId && event.conversation_id === state.activeId) {
-            hintEl.textContent = errText.slice(0, 220);
-            hintEl.classList.remove("hidden");
-          }
-          refreshAiStatus();
-          if (state.activeId) {
-            const conv = state.conversations.find((c) => c.id === state.activeId);
-            if (conv) syncChatToggles(conv);
-          }
+      case "ai.handoff": {
+        const text = String(event.error || event.message || "").slice(0, 220);
+        if (!text) break;
+        showAiNotice(text, event.type === "ai.error");
+        const hintEl = $("chat-ai-hint");
+        if (hintEl && state.activeId && event.conversation_id === state.activeId) {
+          hintEl.textContent = text;
+          hintEl.classList.remove("hidden");
+        }
+        if (event.type === "ai.error") refreshAiStatus();
+        if (state.activeId) {
+          const conv = state.conversations.find((c) => c.id === state.activeId);
+          if (conv) syncChatToggles(conv);
         }
         break;
+      }
       default:
         break;
     }
@@ -2539,7 +2586,7 @@
   }
 
   async function completeAuth(data) {
-    state.token = data.access_token || null;
+    state.token = null;
     try {
       localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {

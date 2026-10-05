@@ -31,6 +31,9 @@ class SubscriptionSummaryResponse(BaseModel):
     plan: PlanResponse
     is_trial: bool
     is_paid: bool
+    trial_ends_at: Optional[datetime] = None
+    trial_days_left: Optional[int] = None
+    trial_expired: bool = False
     trial_bait_limit: int
     trial_bait_used: int
     trial_bait_remaining: int
@@ -39,6 +42,13 @@ class SubscriptionSummaryResponse(BaseModel):
     needs_payment: bool
     current_period_start: Optional[datetime]
     current_period_end: Optional[datetime]
+    auto_renew: bool = False
+    payment_method_type: Optional[str] = None
+    payment_method_label: Optional[str] = None
+    next_charge_at: Optional[datetime] = None
+    renewal_failing: bool = False
+    cancel_at_period_end: bool = False
+    cancelled_at: Optional[datetime] = None
 
 
 class ChangePasswordRequest(BaseModel):

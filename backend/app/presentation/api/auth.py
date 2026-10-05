@@ -12,7 +12,14 @@ from sqlalchemy.orm import Session
 from app.shared.core.auth_cookies import clear_auth_cookie, set_auth_cookie
 
 from app.shared.core.deps import RequireViewer
-from app.shared.core.security import create_access_token, hash_password, verify_password
+from app.shared.core.security import burn_password_check_time, hash_password, verify_password
+from app.shared.core.sessions import (
+    SessionInvalid,
+    issue_token,
+    resolve_session,
+    revoke_all_sessions,
+    revoke_token,
+)
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, User
 from app.infrastructure.cache.redis_client import cache_set, tenant_cache_key
@@ -53,7 +60,13 @@ from app.application.auth.magic_link_service import consume_magic_link, create_m
 from app.application.billing.subscription_service import get_tenant_subscription
 from app.config import settings
 from app.domain.entities.enums import SubscriptionStatus
-from app.shared.core.rate_limit import rate_limit_exceeded, rate_limit_record
+from app.shared.core.rate_limit import (
+    client_ip,
+    enforce_rate_limit,
+    rate_limit_exceeded,
+    rate_limit_record,
+)
+from app.shared.core.auth_cookies import AUTH_COOKIE_NAME
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = logging.getLogger(__name__)
@@ -64,7 +77,7 @@ _FORGOT_PASSWORD_MESSAGE = (
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_ip(request)
 
 
 def _auth_json_response(token_body: TokenResponse, *, status_code: int = 200) -> JSONResponse:
@@ -74,12 +87,7 @@ def _auth_json_response(token_body: TokenResponse, *, status_code: int = 200) ->
 
 
 def _token_for_user(user: User) -> TokenResponse:
-    token = create_access_token(
-        user_id=str(user.id),
-        tenant_id=str(user.tenant_id),
-        role=user.role,
-        email=user.email,
-    )
+    token = issue_token(user)
     return TokenResponse(
         access_token=token,
         user_id=user.id,
@@ -97,8 +105,9 @@ def register(
 ):
     if not body.accept_legal:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LEGAL_REQUIRED_MESSAGE)
+    enforce_rate_limit(f"register:ip:{_client_ip(request)}", limit=10, window_seconds=3600)
     try:
-        pwd_hash = hash_password(body.password)
+        pwd_hash = hash_password(body.password, email=body.email)
         tenant, owner = register_tenant_with_owner(
             db,
             business_name=body.business_name.strip(),
@@ -106,6 +115,7 @@ def register(
             email=body.email.lower().strip(),
             hashed_password=pwd_hash,
         )
+        owner.last_login_at = datetime.now(timezone.utc)
         record_legal_consent(
             db,
             tenant_id=tenant.id,
@@ -122,7 +132,7 @@ def register(
             user_id=owner.id,
             action="tenant.registered",
             details={"business_name": tenant.business_name, "slug": tenant.slug},
-            ip_address=request.client.host if request.client else None,
+            ip_address=_client_ip(request),
         )
         db.commit()
         db.refresh(owner)
@@ -154,7 +164,9 @@ def register(
 
 
 @router.post("/lookup-email", response_model=EmailLookupResponse)
-def lookup_email(body: EmailLookupRequest, db: Session = Depends(get_db)):
+def lookup_email(body: EmailLookupRequest, request: Request, db: Session = Depends(get_db)):
+    # Revela si un correo tiene cuenta (lo necesita el login): límite estricto contra enumeración.
+    enforce_rate_limit(f"lookup:ip:{_client_ip(request)}", limit=30, window_seconds=600)
     email = body.email.lower().strip()
     exists = (
         db.query(User.id)
@@ -309,12 +321,7 @@ def _oauth_finish_url(access_token: str, destination: str) -> str:
 
 
 def _oauth_success_redirect(user: User, db: Session, next_url: Optional[str] = None) -> RedirectResponse:
-    access_token = create_access_token(
-        user_id=str(user.id),
-        tenant_id=str(user.tenant_id),
-        role=user.role,
-        email=user.email,
-    )
+    access_token = issue_token(user)
     destination = _resolve_oauth_redirect(user, db, next_url)
     return RedirectResponse(_oauth_finish_url(access_token, destination))
 
@@ -340,7 +347,8 @@ def oauth_finish(
 
 
 @router.get("/google/start")
-def google_oauth_start(next: Optional[str] = Query(default=None)):
+def google_oauth_start(request: Request, next: Optional[str] = Query(default=None)):
+    enforce_rate_limit(f"oauth:ip:{_client_ip(request)}", limit=30, window_seconds=600)
     if not oauth_provider_enabled("google"):
         return _oauth_error_redirect(
             "Google no está configurado. Añade GOOGLE_CLIENT_ID al .env del backend."
@@ -367,7 +375,7 @@ def google_oauth_callback(
         user = resolve_oauth_user(
             db,
             profile,
-            ip_address=request.client.host if request.client else None,
+            ip_address=_client_ip(request),
         )
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
@@ -383,7 +391,8 @@ def google_oauth_callback(
 
 
 @router.get("/github/start")
-def github_oauth_start(next: Optional[str] = Query(default=None)):
+def github_oauth_start(request: Request, next: Optional[str] = Query(default=None)):
+    enforce_rate_limit(f"oauth:ip:{_client_ip(request)}", limit=30, window_seconds=600)
     if not oauth_provider_enabled("github"):
         return _oauth_error_redirect(
             "GitHub no está configurado. Añade GITHUB_CLIENT_ID al .env del backend."
@@ -410,7 +419,7 @@ def github_oauth_callback(
         user = resolve_oauth_user(
             db,
             profile,
-            ip_address=request.client.host if request.client else None,
+            ip_address=_client_ip(request),
         )
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
@@ -428,6 +437,9 @@ def github_oauth_callback(
 @router.post("/magic-link", response_model=MagicLinkResponse)
 def request_magic_link(body: MagicLinkRequest, request: Request, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
+    # Cada enlace es un correo enviado: frena el spam a terceros y el gasto en el proveedor.
+    enforce_rate_limit(f"magic:email:{email}", limit=5, window_seconds=900)
+    enforce_rate_limit(f"magic:ip:{_client_ip(request)}", limit=20, window_seconds=3600)
     user = (
         db.query(User.id)
         .filter(User.email == email, User.is_active.is_(True))
@@ -472,11 +484,12 @@ def request_magic_link(body: MagicLinkRequest, request: Request, db: Session = D
 
 @router.post("/magic-link/verify", response_model=TokenResponse)
 def verify_magic_link(body: MagicLinkVerifyRequest, request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(f"magic-verify:ip:{_client_ip(request)}", limit=30, window_seconds=900)
     try:
         user = consume_magic_link(
             db,
             body.token.strip(),
-            ip_address=request.client.host if request.client else None,
+            ip_address=_client_ip(request),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -500,15 +513,29 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip = _client_ip(request)
     rate_key = f"login:{email}:{ip}"
 
-    if rate_limit_exceeded(rate_key, limit=settings.auth_login_max_attempts):
+    # Por correo+IP (usuario que se equivoca), por correo (ataque distribuido a una cuenta) y
+    # por IP (una IP probando muchas cuentas).
+    window = settings.auth_login_window_seconds
+    if (
+        rate_limit_exceeded(rate_key, limit=settings.auth_login_max_attempts)
+        or rate_limit_exceeded(f"login:email:{email}", limit=settings.auth_login_max_attempts * 3)
+        or rate_limit_exceeded(f"login:ip:{ip}", limit=settings.auth_login_max_attempts * 5)
+    ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Demasiados intentos. Espera unos minutos e intenta de nuevo.",
+            headers={"Retry-After": str(window)},
         )
+
+    def record_failure() -> None:
+        rate_limit_record(rate_key, window_seconds=window)
+        rate_limit_record(f"login:email:{email}", window_seconds=window)
+        rate_limit_record(f"login:ip:{ip}", window_seconds=window)
 
     user = db.query(User).filter(User.email == email, User.is_active.is_(True)).first()
     if user is None:
-        rate_limit_record(rate_key, window_seconds=settings.auth_login_window_seconds)
+        burn_password_check_time(body.password)
+        record_failure()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos",
@@ -520,7 +547,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
             detail=f"Esta cuenta usa {provider}. Entra con ese botón.",
         )
     if not verify_password(body.password, user.hashed_password):
-        rate_limit_record(rate_key, window_seconds=settings.auth_login_window_seconds)
+        record_failure()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email o contraseña incorrectos",
@@ -539,7 +566,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
         tenant_id=user.tenant_id,
         user_id=user.id,
         action="user.login",
-        ip_address=request.client.host if request.client else None,
+        ip_address=_client_ip(request),
     )
     db.commit()
 
@@ -547,8 +574,40 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     return _auth_json_response(_token_for_user(user))
 
 
+def _presented_token(request: Request) -> str:
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(response: Response) -> None:
+def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
+    """Cierra esta sesión: el token queda revocado aunque alguien lo hubiera copiado."""
+    token = _presented_token(request)
+    if token:
+        try:
+            revoke_token(resolve_session(db, token).payload)
+        except SessionInvalid:
+            pass
+    clear_auth_cookie(response)
+
+
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+def logout_all(request: Request, response: Response, current: RequireViewer, db: Session = Depends(get_db)) -> None:
+    """Cierra la sesión en todos los dispositivos (p. ej. si perdiste el celular)."""
+    user = db.query(User).filter(User.id == current.id).first()
+    if user is not None:
+        revoke_all_sessions(user)
+        log_audit(
+            db,
+            tenant_id=current.tenant_id,
+            user_id=current.id,
+            action="user.logout_all",
+            ip_address=_client_ip(request),
+        )
+        db.commit()
+    request.state.renewed_token = None
     clear_auth_cookie(response)
 
 
@@ -561,9 +620,11 @@ def me(current: RequireViewer):
 def change_password(
     body: ChangePasswordRequest,
     request: Request,
+    response: Response,
     current: RequireViewer,
     db: Session = Depends(get_db),
 ):
+    enforce_rate_limit(f"change-password:user:{current.id}", limit=10, window_seconds=3600)
     user = db.query(User).filter(User.id == current.id).first()
     if user is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -584,7 +645,7 @@ def change_password(
         )
 
     try:
-        user.hashed_password = hash_password(body.new_password)
+        user.hashed_password = hash_password(body.new_password, email=user.email)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -595,7 +656,12 @@ def change_password(
         tenant_id=current.tenant_id,
         user_id=current.id,
         action="user.password_changed",
-        ip_address=request.client.host if request.client else None,
+        ip_address=_client_ip(request),
     )
+    # Cualquier otra sesión (posible intruso) queda fuera; este dispositivo sigue dentro.
+    revoke_all_sessions(user)
     db.commit()
+    db.refresh(user)
+    request.state.renewed_token = None
+    set_auth_cookie(response, issue_token(user))
 

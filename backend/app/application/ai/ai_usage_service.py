@@ -6,7 +6,12 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.application.billing.subscription_service import plan_features_apply, subscription_is_paid
+from app.application.billing.subscription_service import (
+    plan_features_apply,
+    service_lapsed,
+    subscription_is_paid,
+)
+from app.application.platform.tenant_overrides import limit_override
 from app.config import settings
 from app.domain.entities import Subscription, Tenant
 from app.infrastructure.cache.redis_client import get_redis
@@ -34,13 +39,27 @@ def _plan_feature_int(plan_features: dict, key: str) -> Optional[int]:
         return None
 
 
-def daily_reply_limit(db: Session, tenant: Tenant) -> int:
-    sub = (
+PLAN_REQUIRED = -1
+PLAN_REQUIRED_MESSAGE = "Tu prueba gratis terminó o tu plan venció: actívalo para que la IA siga trabajando."
+
+
+def _tenant_subscription(db: Session, tenant: Tenant) -> Optional[Subscription]:
+    return (
         db.query(Subscription)
         .options(joinedload(Subscription.plan))
         .filter(Subscription.tenant_id == tenant.id)
         .first()
     )
+
+
+def daily_reply_limit(db: Session, tenant: Tenant) -> int:
+    """0 = ilimitado; PLAN_REQUIRED = sin prueba vigente ni plan pagado."""
+    sub = _tenant_subscription(db, tenant)
+    if service_lapsed(sub):
+        return PLAN_REQUIRED
+    override = limit_override(tenant, "ai_daily_replies")
+    if override is not None:
+        return override
     if sub and sub.plan and plan_features_apply(sub):
         features = sub.plan.features if isinstance(sub.plan.features, dict) else {}
         custom = _plan_feature_int(features, "ai_daily_replies")
@@ -53,12 +72,12 @@ def daily_reply_limit(db: Session, tenant: Tenant) -> int:
 
 def daily_classify_limit(db: Session, tenant: Tenant) -> int:
     """0 = ilimitado (plan pagado — clasificar es el core del producto)."""
-    sub = (
-        db.query(Subscription)
-        .options(joinedload(Subscription.plan))
-        .filter(Subscription.tenant_id == tenant.id)
-        .first()
-    )
+    sub = _tenant_subscription(db, tenant)
+    if service_lapsed(sub):
+        return PLAN_REQUIRED
+    override = limit_override(tenant, "ai_daily_classifications")
+    if override is not None:
+        return override
     if sub and sub.plan and plan_features_apply(sub):
         features = sub.plan.features if isinstance(sub.plan.features, dict) else {}
         custom = _plan_feature_int(features, "ai_daily_classifications")
@@ -110,6 +129,8 @@ def check_daily_reply_quota(
     used = get_daily_reply_count(tenant.id)
     if limit == 0:
         return True, used, 0, None
+    if limit == PLAN_REQUIRED:
+        return False, used, 0, PLAN_REQUIRED_MESSAGE
     if limit < 0:
         return False, 0, 0, "Respuestas IA no incluidas en tu plan"
     if used >= limit:
@@ -129,6 +150,8 @@ def check_daily_classify_quota(
     used = get_daily_classify_count(tenant.id)
     if limit == 0:
         return True, used, 0, None
+    if limit == PLAN_REQUIRED:
+        return False, used, 0, PLAN_REQUIRED_MESSAGE
     if used >= limit:
         return (
             False,
@@ -147,6 +170,7 @@ def build_ai_usage_summary(db: Session, tenant: Tenant) -> dict:
     classify_unlimited = classify_limit == 0
     reply_unlimited = reply_limit == 0
     return {
+        "plan_required": reply_limit == PLAN_REQUIRED,
         "daily_replies_used": reply_used,
         "daily_replies_limit": reply_limit,
         "daily_replies_unlimited": reply_unlimited,

@@ -9,6 +9,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.shared.core.webhook_secrets import evolution_webhook_secret_for, secret_fingerprint
 from app.shared.core.phone import (
     evolution_send_target,
     instance_name_for_tenant,
@@ -46,6 +47,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
     send_image as gateway_send_image,
+    send_document as gateway_send_document,
     uses_waha,
 )
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
@@ -163,7 +165,14 @@ def ensure_evolution_webhook(
     from app.infrastructure.cache.redis_client import get_redis
 
     webhook_url = _webhook_url(tenant_id)
-    if not force:
+    secret = evolution_webhook_secret_for(tenant_id)
+    marker_key = f"webhook:secret-fp:{tenant_id}"
+    fingerprint = secret_fingerprint(secret)
+    try:
+        secret_current = get_redis().get(marker_key) == fingerprint
+    except Exception:
+        secret_current = False
+    if not force and secret_current:
         try:
             found = gateway_request(
                 "GET",
@@ -182,11 +191,11 @@ def ensure_evolution_webhook(
     if not force and not get_redis().set(key, "1", nx=True, ex=120):
         return
     try:
-        gateway_ensure_webhook(
-            session.instance_name,
-            webhook_url,
-            settings.evolution_webhook_secret,
-        )
+        gateway_ensure_webhook(session.instance_name, webhook_url, secret)
+        try:
+            get_redis().set(marker_key, fingerprint)
+        except Exception:
+            pass
         log.info(
             "Webhook Evolution actualizado instancia=%s url=%s force=%s",
             session.instance_name,
@@ -357,7 +366,7 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
                 gateway_create_instance(
                     session.instance_name,
                     _webhook_url(tenant.id),
-                    settings.evolution_webhook_secret,
+                    evolution_webhook_secret_for(tenant.id),
                 )
             except WhatsAppGatewayError as exc:
                 if exc.status_code not in (400, 403, 409):
@@ -368,7 +377,7 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
                 gateway_ensure_webhook(
                     session.instance_name,
                     _webhook_url(tenant.id),
-                    settings.evolution_webhook_secret,
+                    evolution_webhook_secret_for(tenant.id),
                 )
             except WhatsAppGatewayError as exc:
                 log.warning("No se pudo actualizar webhook: %s", exc)
@@ -380,7 +389,7 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
             session,
             tenant,
             webhook_url=_webhook_url(tenant.id),
-            webhook_secret=settings.evolution_webhook_secret,
+            webhook_secret=evolution_webhook_secret_for(tenant.id),
         )
     except WhatsAppGatewayError:
         raise
@@ -600,14 +609,9 @@ def send_text_message(
     )
 
     result = gateway_send_text(session.instance_name, recipient, text)
+    from app.application.messaging.message_service import extract_whatsapp_message_id
 
-    evolution_id = None
-    if isinstance(result, dict):
-        evolution_id = (
-            result.get("key", {}).get("id")
-            if isinstance(result.get("key"), dict)
-            else result.get("messageId") or result.get("id")
-        )
+    evolution_id = extract_whatsapp_message_id(result)
 
     message = Message(
         tenant_id=tenant.id,
@@ -667,16 +671,48 @@ def send_image_message(
     )
 
 
+def send_document_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    file_path: str,
+    file_name: str,
+    source: str,
+) -> Message:
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise EvolutionAPIError(reason)
+
+    conversation, recipient = _prepare_outbound_recipient(
+        db, tenant=tenant, session=session, conversation=conversation
+    )
+    from app.application.outbound.tenant_asset_service import read_asset_base64
+
+    b64, mime = read_asset_base64(file_path, tenant_id=tenant.id)
+    result = gateway_send_document(
+        session.instance_name,
+        recipient,
+        data_b64=b64,
+        mimetype=mime,
+        filename=file_name,
+    )
+    return _record_outbound_message(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        # Sin «[document]»: ese prefijo haría que el panel intente descargarlo de WhatsApp.
+        body=f"📄 {file_name}"[:4096],
+        source=source,
+        evolution_id=_extract_evolution_id(result),
+    )
+
+
 def _extract_evolution_id(result: dict) -> Optional[str]:
-    if not isinstance(result, dict):
-        return None
-    key = result.get("key")
-    if isinstance(key, dict) and key.get("id"):
-        return str(key["id"])
-    for field in ("messageId", "id"):
-        if result.get(field):
-            return str(result[field])
-    return None
+    from app.application.messaging.message_service import extract_whatsapp_message_id
+
+    return extract_whatsapp_message_id(result)
 
 
 def _prepare_outbound_recipient(

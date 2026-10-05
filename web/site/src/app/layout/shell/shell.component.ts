@@ -118,7 +118,6 @@ export class ShellComponent implements OnInit {
     }
     return 'Activar plan';
   }
-
   openCookieSettings(): void {
     this.cookieConsent.openSettings();
   }

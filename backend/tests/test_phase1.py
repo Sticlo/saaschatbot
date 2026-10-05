@@ -26,16 +26,13 @@ def test_list_public_plans(client: TestClient):
     response = client.get("/api/v1/plans")
     assert response.status_code == 200
     plans = response.json()
-    assert len(plans) >= 2
-    pro = next(p for p in plans if p["slug"] == "pro")
-    assert pro["price_cop"] == 120_000
-    assert pro["trial_bait_limit"] == 10
-    assert pro["daily_bait_limit"] == 50
-    assert pro["max_team_members"] == 2
-    premium = next(p for p in plans if p["slug"] == "premium")
-    assert premium["price_cop"] == 200_000
-    assert premium["daily_bait_limit"] == 100
-    assert premium["features"]["ai_daily_replies"] == 0
+    assert [p["slug"] for p in plans] == ["pro"]
+    [plan] = plans
+    assert plan["price_cop"] == 200_000
+    assert plan["trial_bait_limit"] == 10
+    assert plan["daily_bait_limit"] == 100
+    assert plan["max_team_members"] == 5
+    assert plan["features"]["ai_daily_replies"] == 0
 
 
 def test_register_login_and_subscription(client: TestClient):

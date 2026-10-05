@@ -465,9 +465,29 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 return
 
         if event == "connection.update":
+            from app.domain.entities.enums import WhatsAppStatus
+
+            was_connected = tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value
             handle_connection_update(db, tenant=tenant, session=session, data=data)
             db.commit()
-            from app.domain.entities.enums import WhatsAppStatus
+            if was_connected and tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
+                from app.application.platform.incidents import record_incident
+
+                record_incident(
+                    tenant_id,
+                    "system.whatsapp_disconnected",
+                    f"WhatsApp se desconectó (estado: {tenant.whatsapp_status})",
+                    throttle_seconds=1800,
+                )
+            elif not was_connected and tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
+                from app.application.platform.incidents import record_incident
+
+                record_incident(
+                    tenant_id,
+                    "system.whatsapp_connected",
+                    "WhatsApp quedó conectado",
+                    throttle_seconds=300,
+                )
 
             if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
                 from app.application.sync.sync_scheduler import ensure_whatsapp_sync_after_connect
@@ -663,7 +683,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                         instance_name=session.instance_name,
                     )
         elif event == "messages.update":
-            update_message_status(db, tenant_id, data if isinstance(data, dict) else {})
+            update_message_status(db, tenant_id, data)
 
         if event != "connection.update":
             db.commit()

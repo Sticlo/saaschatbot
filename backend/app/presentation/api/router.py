@@ -11,6 +11,7 @@ from app.presentation.api import (
     billing,
     conversations,
     plans,
+    platform,
     quick_shortcuts,
     subscriptions,
     tenants,
@@ -32,3 +33,4 @@ api_router.include_router(appointments.router)
 api_router.include_router(ai.router)
 api_router.include_router(users.router)
 api_router.include_router(audit_logs.router)
+api_router.include_router(platform.router)

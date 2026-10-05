@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import uuid
 from pathlib import Path
 
@@ -8,7 +9,16 @@ from fastapi import HTTPException, UploadFile
 
 _ASSETS_ROOT = Path(__file__).resolve().parents[2] / "static" / "assets"
 _MAX_BYTES = 5 * 1024 * 1024
+MAX_PDF_BYTES = 10 * 1024 * 1024
+PDF_MIME = "application/pdf"
 _ALLOWED_MIME = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})
+_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    PDF_MIME: ".pdf",
+}
 
 
 def assets_dir(tenant_id: uuid.UUID) -> Path:
@@ -17,28 +27,54 @@ def assets_dir(tenant_id: uuid.UUID) -> Path:
     return path
 
 
+def _detect_mime(upload: UploadFile) -> str:
+    mime = (upload.content_type or "").split(";")[0].strip().lower()
+    if mime in _EXTENSIONS:
+        return mime
+    guessed, _ = mimetypes.guess_type(upload.filename or "")
+    return (guessed or "").lower()
+
+
+def _store(tenant_id: uuid.UUID, raw: bytes, mime: str) -> str:
+    filename = f"{uuid.uuid4().hex}{_EXTENSIONS[mime]}"
+    (assets_dir(tenant_id) / filename).write_bytes(raw)
+    return f"assets/{tenant_id}/{filename}"
+
+
 def save_tenant_image(tenant_id: uuid.UUID, upload: UploadFile) -> str:
     raw = upload.file.read()
     if len(raw) > _MAX_BYTES:
         raise HTTPException(status_code=413, detail="La imagen no puede superar 5 MB")
-
-    mime = (upload.content_type or "").split(";")[0].strip().lower()
-    if mime not in _ALLOWED_MIME:
-        guessed, _ = mimetypes.guess_type(upload.filename or "")
-        mime = (guessed or "").lower()
+    mime = _detect_mime(upload)
     if mime not in _ALLOWED_MIME:
         raise HTTPException(status_code=400, detail="Solo se permiten imágenes JPG, PNG, WEBP o GIF")
+    return _store(tenant_id, raw, mime)
 
-    ext = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }[mime]
-    filename = f"{uuid.uuid4().hex}{ext}"
-    dest = assets_dir(tenant_id) / filename
-    dest.write_bytes(raw)
-    return f"assets/{tenant_id}/{filename}"
+
+def display_file_name(raw_name: str, *, default: str = "catalogo.pdf") -> str:
+    """Nombre que verá el cliente en WhatsApp, sin rutas ni caracteres raros."""
+    name = Path(raw_name or "").name
+    name = re.sub(r"[^\w .()\-áéíóúÁÉÍÓÚñÑ]", "", name).strip(" .")[:80]
+    if not name:
+        return default
+    return name if name.lower().endswith(".pdf") else f"{name}.pdf"
+
+
+def save_tenant_catalog_file(tenant_id: uuid.UUID, upload: UploadFile) -> tuple[str, str]:
+    """Imagen o PDF para un atajo (menú, carta, catálogo). Devuelve (ruta, mime)."""
+    raw = upload.file.read()
+    mime = _detect_mime(upload)
+    if mime == PDF_MIME:
+        if len(raw) > MAX_PDF_BYTES:
+            raise HTTPException(status_code=413, detail="El PDF no puede superar 10 MB")
+        if not raw.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="El archivo no parece un PDF válido")
+    elif mime in _ALLOWED_MIME:
+        if len(raw) > _MAX_BYTES:
+            raise HTTPException(status_code=413, detail="La imagen no puede superar 5 MB")
+    else:
+        raise HTTPException(status_code=400, detail="Sube una imagen (JPG, PNG, WEBP) o un PDF")
+    return _store(tenant_id, raw, mime), mime
 
 
 def resolve_asset_path(relative_path: str, *, tenant_id: uuid.UUID) -> Path:

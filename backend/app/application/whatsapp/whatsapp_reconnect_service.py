@@ -61,8 +61,18 @@ def try_reconnect(db: Session, tenant: Tenant, session: WhatsAppSession) -> bool
             cache_set(_backoff_key(tenant), "1", ttl_seconds=CONNECT_RETRY_SECONDS)
             return False
         if isinstance(result, dict) and _asks_for_qr(result):
+            from app.application.monitoring.dev_alerts import alert_dev
+
             log.warning("WhatsApp pide escanear QR de nuevo tenant=%s — el celular cerró la sesión", tenant.id)
             cache_set(_backoff_key(tenant), "1", ttl_seconds=NEEDS_QR_BACKOFF_SECONDS)
+            # Un negocio desvinculado deja de vender: vale la pena escribirle antes de que lo note.
+            alert_dev(
+                f"whatsapp:needs_qr:{tenant.id}",
+                f"WhatsApp de «{tenant.business_name}» se desvinculó",
+                f"Tenant {tenant.id}. Hay que escanear el QR otra vez desde el panel.",
+                severity="warning",
+                throttle_seconds=6 * 3600,
+            )
             return False
         log.info("Reconexión WhatsApp solicitada tenant=%s", tenant.id)
         return False

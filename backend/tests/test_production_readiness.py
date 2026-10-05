@@ -49,7 +49,7 @@ def test_renewing_early_keeps_the_days_already_paid():
 
 @requires_db
 def test_lapsed_subscriptions_become_past_due_and_lose_paid_limits(monkeypatch):
-    from app.application.ai.ai_usage_service import daily_reply_limit
+    from app.application.ai.ai_usage_service import PLAN_REQUIRED, daily_reply_limit
     from app.application.billing.plan_service import ensure_default_plan
     from app.application.billing.subscription_service import (
         build_subscription_summary,
@@ -96,7 +96,7 @@ def test_lapsed_subscriptions_become_past_due_and_lose_paid_limits(monkeypatch):
         assert summary["is_paid"] is False
         assert summary["needs_payment"] is True, "el panel pide renovar aunque el barrido no haya corrido"
         assert summary["status"] == SubscriptionStatus.PAST_DUE.value
-        assert daily_reply_limit(db, lapsed_tenant_row) == settings.ai_trial_daily_reply_limit
+        assert daily_reply_limit(db, lapsed_tenant_row) == PLAN_REQUIRED, "sin plan vigente la IA se detiene"
 
         assert expire_lapsed_subscriptions(db, now=now) >= 1
 
@@ -125,9 +125,11 @@ def _prod_settings(**overrides):
         cors_origins="https://omitel.net, https://omitel.net/",
         evolution_webhook_internal_url="",
         evolution_in_docker=True,
+        resend_api_key="re_test_not_used",
+        chatwoot_enabled=False,
     )
     values.update(overrides)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 def test_production_cors_allows_only_the_public_site():
@@ -166,5 +168,5 @@ def test_panel_page_knows_where_the_public_site_lives(client, monkeypatch):
     monkeypatch.setattr(settings, "site_public_url", "https://www.omitel.net/")
     response = client.get("/panel")
     assert response.status_code == 200
-    assert 'window.OMITEL_SITE_URL = "https://www.omitel.net";' in response.text
+    assert 'name="omitel-site-url" content="https://www.omitel.net"' in response.text
     assert "</head>" in response.text

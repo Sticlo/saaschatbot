@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,8 @@ class User(Base):
         String(20), nullable=False, default=UserRole.AGENT.value
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Se incrementa para invalidar todas las sesiones emitidas (clave cambiada, «salir de todos lados»).
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

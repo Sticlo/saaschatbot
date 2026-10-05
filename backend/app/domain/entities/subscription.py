@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, false, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,7 +40,24 @@ class Subscription(Base):
     current_period_end: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     wompi_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Cobro automático: fuente de pago Wompi (tarjeta o Nequi) autorizada por el dueño.
+    auto_renew: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    payment_source_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    payment_method_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    payment_method_label: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    auto_renew_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    cancel_feedback: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    renewal_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_renewal_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Fin de periodo para el que ya se envió el aviso previo al cobro (uno por periodo).
+    renewal_reminder_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

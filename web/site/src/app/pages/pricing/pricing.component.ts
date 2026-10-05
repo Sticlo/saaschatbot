@@ -5,7 +5,7 @@ import { Subscription, combineLatest } from 'rxjs';
 
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { Plan } from '../../core/models/plan.model';
-import { SubscriptionSummary } from '../../core/models/billing.model';
+import { CheckoutStatus, SubscriptionSummary } from '../../core/models/billing.model';
 import { PlansService } from '../../core/services/plans.service';
 import { appUrl } from '../../core/oauth-url';
 import { BillingService } from '../../core/services/billing.service';
@@ -17,13 +17,10 @@ export interface PlanFeature {
   highlight?: boolean;
 }
 
-interface WompiWidgetCheckout {
-  open: (callback: (result: { transaction?: { id?: string; status?: string } }) => void) => void;
-}
-
-interface WompiWidgetConstructor {
-  new (config: Record<string, unknown>): WompiWidgetCheckout;
-}
+/** Página de pago oficial de Wompi (sandbox o producción según la llave pública). */
+const WOMPI_WEB_CHECKOUT = 'https://checkout.wompi.co/p/';
+const CHECKOUT_POLL_MS = 3000;
+const CHECKOUT_POLL_ATTEMPTS = 40;
 
 @Component({
   selector: 'app-pricing',
@@ -53,12 +50,13 @@ export class PricingComponent implements OnInit, OnDestroy {
   checkoutLoading = false;
   checkoutError = '';
   checkoutSuccess = '';
+  checkoutInfo = '';
   activePlanSlug: string | null = null;
 
   readonly trialFeatures: string[] = [
-    '7 días de acceso al panel',
+    '3 días con todo el plan incluido',
     'Conecta WhatsApp y ve tus chats',
-    'IA qualify con límites de prueba',
+    'La IA responde y te avisa quién quiere comprar',
     'Sin tarjeta de crédito',
   ];
 
@@ -68,6 +66,7 @@ export class PricingComponent implements OnInit, OnDestroy {
     if (!isPlatformBrowser(this.platformId)) {
       return;
     }
+    window.addEventListener('pageshow', this.onPageShow);
 
     this.plansService.listPublicPlans().subscribe({
       next: (plans) => {
@@ -98,6 +97,13 @@ export class PricingComponent implements OnInit, OnDestroy {
     this.billing.getConfig().subscribe({
       next: (cfg) => {
         this.billingSandbox = !!cfg.sandbox;
+        this.autoRenewEnabled = !!cfg.auto_renew_enabled;
+        this.configLoaded = true;
+        this.maybeStartPlanCheckout();
+      },
+      error: () => {
+        this.configLoaded = true;
+        this.maybeStartPlanCheckout();
       },
     });
 
@@ -110,7 +116,7 @@ export class PricingComponent implements OnInit, OnDestroy {
         }
         this.router.navigate([], {
           relativeTo: this.route,
-          queryParams: { checkout: null, ref: null },
+          queryParams: { checkout: null, ref: null, id: null, env: null },
           queryParamsHandling: 'merge',
           replaceUrl: true,
         });
@@ -119,6 +125,7 @@ export class PricingComponent implements OnInit, OnDestroy {
       const planSlug = params.get('plan');
       if (planSlug) {
         this.pendingPlanSlug = planSlug;
+        this.payOnce = params.get('once') === '1';
         this.maybeStartPlanCheckout();
       }
     });
@@ -126,12 +133,36 @@ export class PricingComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sessionSub?.unsubscribe();
+    if (isPlatformBrowser(this.platformId)) {
+      window.removeEventListener('pageshow', this.onPageShow);
+    }
   }
 
+  /** Volver con «atrás» desde Wompi restaura la página congelada con el botón en «Abriendo…». */
+  private readonly onPageShow = (event: PageTransitionEvent): void => {
+    if (event.persisted) {
+      this.checkoutLoading = false;
+      this.activePlanSlug = null;
+    }
+  };
+
   private pendingPlanSlug: string | null = null;
+  /** Pago único en la página de Wompi (PSE, etc.) en vez de guardar la tarjeta para cobro automático. */
+  private payOnce = false;
+  private autoRenewEnabled = false;
+  private configLoaded = false;
+
+  /** Por defecto se guarda la tarjeta o Nequi con cobro automático (menos bajas por olvido). */
+  private goToPlan(planSlug: string): void {
+    if (this.payOnce || !this.autoRenewEnabled) {
+      this.startCheckout(planSlug);
+    } else {
+      this.router.navigate(['/mi-plan'], { queryParams: { plan: planSlug } });
+    }
+  }
 
   private maybeStartPlanCheckout(): void {
-    if (!this.loggedIn || !this.pendingPlanSlug || this.checkoutLoading) {
+    if (!this.loggedIn || !this.pendingPlanSlug || this.checkoutLoading || !this.configLoaded) {
       return;
     }
     const plan = this.plans.find((p) => p.slug === this.pendingPlanSlug);
@@ -139,7 +170,7 @@ export class PricingComponent implements OnInit, OnDestroy {
       return;
     }
     this.pendingPlanSlug = null;
-    this.startCheckout(plan.slug);
+    this.goToPlan(plan.slug);
   }
 
   formatCop(value: number): string {
@@ -150,24 +181,12 @@ export class PricingComponent implements OnInit, OnDestroy {
     }).format(value);
   }
 
-  isFeatured(plan: Plan): boolean {
-    return plan.slug === 'pro';
+  ribbonLabel(_plan: Plan): string | null {
+    return 'Todo incluido';
   }
 
-  isPremium(plan: Plan): boolean {
-    return plan.slug === 'premium';
-  }
-
-  ribbonLabel(plan: Plan): string | null {
-    if (plan.slug === 'pro') return 'Más vendido';
-    if (plan.slug === 'premium') return 'Máximo volumen';
-    return null;
-  }
-
-  referencePrice(plan: Plan): number | null {
-    if (plan.slug === 'pro') return 150_000;
-    if (plan.slug === 'premium') return 250_000;
-    return null;
+  referencePrice(_plan: Plan): number | null {
+    return 250_000;
   }
 
   discountLabel(plan: Plan): string | null {
@@ -208,7 +227,7 @@ export class PricingComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.startCheckout(plan.slug);
+    this.goToPlan(plan.slug);
   }
 
   private async startCheckout(planSlug: string): Promise<void> {
@@ -218,38 +237,18 @@ export class PricingComponent implements OnInit, OnDestroy {
     this.activePlanSlug = planSlug;
 
     this.billing.createCheckout(planSlug).subscribe({
-      next: async (session) => {
-        try {
-          await this.loadWompiScript();
-          const WidgetCheckout = (window as unknown as { WidgetCheckout: WompiWidgetConstructor })
-            .WidgetCheckout;
-          const widget = new WidgetCheckout({
-            currency: session.currency,
-            amountInCents: session.amount_in_cents,
-            reference: session.reference,
-            publicKey: session.public_key,
-            redirectUrl: session.redirect_url,
-            signature: { integrity: session.integrity_signature },
-            customerData: {
-              email: session.customer_email,
-              fullName: session.customer_name,
-            },
-          });
-          widget.open((result) => {
-            const tx = result.transaction;
-            if (tx?.id) {
-              this.confirmCheckout(session.reference, tx.id);
-            } else if (tx?.status === 'APPROVED') {
-              this.pollCheckout(session.reference);
-            }
-          });
-        } catch {
-          this.checkoutError =
-            'No pudimos abrir el checkout de Wompi. Recarga e intenta de nuevo.';
-        } finally {
-          this.checkoutLoading = false;
-          this.activePlanSlug = null;
-        }
+      next: (session) => {
+        const params = new URLSearchParams({
+          'public-key': session.public_key,
+          currency: session.currency,
+          'amount-in-cents': String(session.amount_in_cents),
+          reference: session.reference,
+          'signature:integrity': session.integrity_signature,
+          'redirect-url': session.redirect_url,
+          'customer-data:email': session.customer_email,
+          'customer-data:full-name': session.customer_name,
+        });
+        window.location.assign(`${WOMPI_WEB_CHECKOUT}?${params.toString()}`);
       },
       error: (err) => {
         this.checkoutLoading = false;
@@ -269,95 +268,64 @@ export class PricingComponent implements OnInit, OnDestroy {
   }
 
   private confirmCheckout(reference: string, transactionId: string): void {
-    this.checkoutLoading = true;
+    this.checkoutInfo = 'Confirmando tu pago con Wompi…';
     this.billing.syncCheckout(reference, transactionId).subscribe({
       next: (status) => {
-        this.checkoutLoading = false;
-        if (status.status === 'approved') {
-          this.checkoutSuccess = `¡Listo! Tu ${status.plan_name || 'plan'} está activo.`;
-          this.session.refreshSubscription();
-          this.session.refresh();
-          return;
-        }
-        this.pollCheckout(reference);
+        if (!this.showCheckoutResult(status)) this.pollCheckout(reference);
       },
-      error: () => {
-        this.checkoutLoading = false;
-        this.pollCheckout(reference);
-      },
+      error: () => this.pollCheckout(reference),
     });
   }
 
   private pollCheckout(reference: string, attempt = 0): void {
+    this.checkoutInfo = 'Confirmando tu pago con Wompi…';
     this.billing.getCheckoutStatus(reference).subscribe({
       next: (status) => {
-        if (status.status === 'approved') {
-          this.checkoutSuccess = `¡Listo! Tu ${status.plan_name || 'plan'} está activo.`;
-          this.session.refreshSubscription();
-          this.session.refresh();
+        if (this.showCheckoutResult(status)) return;
+        if (attempt < CHECKOUT_POLL_ATTEMPTS) {
+          window.setTimeout(() => this.pollCheckout(reference, attempt + 1), CHECKOUT_POLL_MS);
           return;
         }
-        if (attempt < 8) {
-          window.setTimeout(() => this.pollCheckout(reference, attempt + 1), 2000);
-        }
+        this.checkoutInfo =
+          'Wompi todavía está procesando tu pago (con PSE puede tardar unos minutos). Tu plan se activa solo apenas se confirme; recarga esta página más tarde.';
+      },
+      error: () => {
+        this.checkoutInfo = '';
+        this.checkoutError = 'No pudimos consultar tu pago. Recarga la página en un momento.';
       },
     });
   }
 
-  private loadWompiScript(): Promise<void> {
-    if ((window as unknown as { WidgetCheckout?: WompiWidgetConstructor }).WidgetCheckout) {
-      return Promise.resolve();
+  /** true si el pago ya terminó (aprobado o rechazado). */
+  private showCheckoutResult(status: CheckoutStatus): boolean {
+    if (status.status === 'approved') {
+      this.checkoutInfo = '';
+      this.checkoutSuccess = `¡Listo! Tu ${status.plan_name || 'plan'} está activo.`;
+      this.session.refreshSubscription();
+      this.session.refresh();
+      return true;
     }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.wompi.co/widget.js';
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('wompi_script'));
-      document.body.appendChild(script);
-    });
+    if (status.status === 'declined' || status.status === 'error') {
+      this.checkoutInfo = '';
+      this.checkoutError = `Wompi no aprobó el pago${status.failure_reason ? ': ' + status.failure_reason : ''}. No se te cobró nada; puedes intentarlo de nuevo.`;
+      return true;
+    }
+    return false;
   }
 
-  /** Lista compacta Pro — lo esencial. */
-  proFeatures(_plan: Plan): PlanFeature[] {
-    return [
-      { text: 'Panel de chats en tiempo real' },
-      { text: 'IA que saluda y responde dudas' },
-      { text: 'Pestaña Interesados — tú cierras' },
-      { text: 'Personalizar IA con tu negocio' },
-      { text: 'Atajos: menú, precios, fotos' },
-      { text: 'Clasificación de leads ilimitada' },
-      { text: 'Hasta 400 respuestas IA al día' },
-      { text: '2 usuarios · 1 WhatsApp' },
-      { text: 'Onboarding guiado incluido' },
-    ];
-  }
-
-  /** Premium: todo Pro + extras — lista más larga = más valor percibido. */
-  premiumFeatures(_plan: Plan): PlanFeature[] {
-    return [
-      { text: 'Panel de chats en tiempo real' },
-      { text: 'IA que saluda y responde dudas' },
-      { text: 'Pestaña Interesados — tú cierras' },
-      { text: 'Personalizar IA con tu negocio' },
-      { text: 'Atajos: menú, precios, fotos' },
-      { text: 'Clasificación de leads ilimitada' },
-      { text: 'Respuestas IA ilimitadas', highlight: true, tag: 'Nuevo' },
-      { text: '5 usuarios en el panel', highlight: true },
-      { text: 'Onboarding prioritario', highlight: true },
-      { text: 'Soporte preferente', highlight: true },
-    ];
-  }
-
-  featuresFor(plan: Plan): PlanFeature[] {
-    return this.isPremium(plan)
-      ? this.premiumFeatures(plan)
-      : this.proFeatures(plan);
-  }
-
-  featuresTitle(plan: Plan): string {
-    return this.isPremium(plan) ? 'Todo incluido' : 'Beneficios incluidos';
-  }
+  readonly features: PlanFeature[] = [
+    { text: 'Panel de chats en tiempo real' },
+    { text: 'IA que saluda, responde dudas y conoce tus productos' },
+    { text: 'Respuestas de IA ilimitadas', highlight: true },
+    { text: 'Te avisa quién quiere comprar — tú cierras' },
+    { text: 'Envía tu catálogo o menú en PDF o foto', highlight: true },
+    { text: 'Agenda citas y reservas por ti (si la activas)', highlight: true },
+    { text: 'Personalizar la IA con tu negocio' },
+    { text: 'Atajos: menú, precios, fotos' },
+    { text: 'Clasificación de clientes ilimitada' },
+    { text: 'Hasta 5 usuarios · 1 WhatsApp' },
+    { text: 'Onboarding guiado y soporte prioritario' },
+  ];
 
   private fallbackPlans(): Plan[] {
     return [
@@ -365,27 +333,8 @@ export class PricingComponent implements OnInit, OnDestroy {
         id: 'pro',
         slug: 'pro',
         name: 'Plan Pro',
-        description: 'Todo lo que necesitas para ordenar WhatsApp y no perder ventas.',
-        price_cop: 120_000,
-        price_usd_cents: 3000,
-        trial_bait_limit: 10,
-        daily_bait_limit: 50,
-        max_team_members: 2,
-        features: {
-          ai_on_reply: true,
-          ai_daily_replies: 400,
-          ai_daily_classifications: 0,
-          realtime_panel: true,
-        },
-        is_active: true,
-        is_public: true,
-        sort_order: 0,
-      },
-      {
-        id: 'premium',
-        slug: 'premium',
-        name: 'Plan Premium',
-        description: 'Para equipos y mucho volumen. IA sin tope y soporte prioritario.',
+        description:
+          'Todo Omitel incluido: IA sin límite que atiende tu WhatsApp, catálogo, citas, equipo de hasta 5 personas y soporte prioritario.',
         price_cop: 200_000,
         price_usd_cents: 5000,
         trial_bait_limit: 10,
@@ -401,7 +350,7 @@ export class PricingComponent implements OnInit, OnDestroy {
         },
         is_active: true,
         is_public: true,
-        sort_order: 1,
+        sort_order: 0,
       },
     ];
   }

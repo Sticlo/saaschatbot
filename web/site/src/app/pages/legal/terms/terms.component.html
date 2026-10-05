@@ -72,13 +72,28 @@
     <section id="planes">
       <h2>5. Prueba gratuita, planes y pagos</h2>
       <ul>
-        <li>La prueba gratuita tiene los límites de uso que se indican en la plataforma y puede cambiar o terminar
-          con aviso previo.</li>
+        <li>La prueba gratuita dura 3 días desde el registro, no requiere medio de pago y no genera cobros. Al
+          terminar, el asistente deja de responder hasta que actives un plan; tus datos y configuración se
+          conservan.</li>
         <li>Los precios están en pesos colombianos e incluyen los impuestos que apliquen, salvo que se indique lo
           contrario. Los pagos se procesan a través de Wompi.</li>
-        <li>Cada pago activa el plan por 30 días. <strong>No hay renovación ni cobro automático:</strong> para
-          continuar debes pagar el siguiente periodo. Si renuevas antes de que venza, los días se suman al periodo
+        <li>Cada pago activa el plan por 30 días. Si renuevas antes de que venza, los días se suman al periodo
           vigente.</li>
+        <li><strong>Cobro automático (opcional).</strong> Solo se activa si guardas una tarjeta o cuenta Nequi en
+          <a routerLink="/mi-plan">Mi plan</a> y marcas expresamente la casilla que autoriza a Omitel a cobrar el
+          valor del plan cada 30 días. Los datos del medio de pago los custodia Wompi; Omitel no los almacena.
+          Mientras esté activo:
+          <ul>
+            <li>Te enviamos un correo {{ legal.renewalNoticeDays }} días antes de cada cobro con el valor y la fecha.</li>
+            <li>El cobro se hace 1 día antes de que venza el periodo, por el precio vigente del plan. Si el precio
+              cambia, te avisamos con al menos 30 días de anticipación y puedes cancelar antes del cobro.</li>
+            <li>Si el cobro es rechazado, lo reintentamos una vez al día hasta 3 veces y te avisamos por correo.
+              Si no se logra, el plan vence normalmente.</li>
+            <li>Puedes quitar el medio de pago o cancelar la suscripción en cualquier momento, en un clic, desde
+              Mi plan. Al cancelar no se vuelve a cobrar y conservas el acceso hasta el final del periodo pagado.</li>
+          </ul>
+        </li>
+        <li>Si no activas el cobro automático, para continuar debes pagar manualmente el siguiente periodo.</li>
         <li>Al vencer el plan tienes {{ legal.graceDays }} días de gracia; después, las funciones de pago se
           suspenden hasta que renueves. Tus datos se conservan mientras la cuenta exista.</li>
         <li>Emitimos factura electrónica con los datos que nos suministres.</li>
@@ -183,7 +198,8 @@
     <section id="terminacion">
       <h2>13. Suspensión y terminación</h2>
       <ul>
-        <li>Puedes cancelar tu cuenta cuando quieras escribiendo a
+        <li>Puedes cancelar tu suscripción cuando quieras desde <a routerLink="/mi-plan">Mi plan</a>, sin
+          trámites adicionales. Para cerrar la cuenta y borrar tus datos escribe a
           <a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a>.</li>
         <li>Podemos suspender o terminar una cuenta por incumplimiento de estos términos, por orden de autoridad o
           para proteger a otros usuarios, avisándote cuando sea posible.</li>

@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 from app.shared.core.deps import RequireOwner, RequireViewer
 from app.shared.core.security import hash_password
 from app.infrastructure.persistence.database import get_db
-from app.domain.entities import User, UserRole
+from app.domain.entities import Tenant, User, UserRole
 from app.presentation.schemas.auth import InviteUserRequest, UpdateUserRoleRequest, UserResponse
 from app.application.billing.subscription_service import get_tenant_subscription
 from app.application.billing.tenant_service import log_audit
+from app.application.platform.tenant_overrides import limit_override
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -44,13 +45,13 @@ def invite_user(
         .filter(User.tenant_id == current.tenant_id, User.is_active.is_(True))
         .count()
     )
-    if active_count >= subscription.plan.max_team_members:
+    max_members = limit_override(db.get(Tenant, current.tenant_id), "max_team_members")
+    if max_members is None:
+        max_members = subscription.plan.max_team_members
+    if active_count >= max_members:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Límite de usuarios alcanzado ({subscription.plan.max_team_members} "
-                f"en plan {subscription.plan.name})"
-            ),
+            detail=f"Límite de usuarios alcanzado ({max_members} en plan {subscription.plan.name})",
         )
 
     user = User(

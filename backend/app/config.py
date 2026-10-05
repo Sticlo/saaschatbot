@@ -37,9 +37,42 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
 
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 43200
+    # 7 días; con uso activo la cookie se renueva sola (session_refresh_after_minutes).
+    jwt_access_token_expire_minutes: int = 10080
+    session_refresh_after_minutes: int = 1440
+
+    # Anti-abuso. Límites por IP en ventana de 1 minuto (Redis); si Redis cae no bloquean.
+    rate_limit_enabled: bool = True
+    rate_limit_api_per_minute: int = 300
+    rate_limit_auth_per_minute: int = 30
+    rate_limit_webhook_per_minute: int = 600
+    rate_limit_billing_per_hour: int = 12
+    # Detrás de Cloudflare (proxy naranja): usar CF-Connecting-IP como IP real. Solo activar
+    # si el origen acepta tráfico únicamente de Cloudflare; si no, la IP se puede falsificar.
+    trust_cloudflare_ip: bool = False
+    max_request_body_bytes: int = 1_048_576
+    # Catálogos en PDF de hasta 10 MB + el sobre del multipart.
+    max_upload_body_bytes: int = 11 * 1_048_576
+    max_webhook_body_bytes: int = 40 * 1_048_576
+    # Token para ver /health detallado desde fuera (monitoreo). Vacío = solo red interna.
+    health_token: str = ""
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.0
+    # Alertas al desarrollador (Telegram y/o correo). Vacíos = solo quedan en el log.
+    ops_alerts_enabled: bool = True
+    # Correos (separados por coma) que entran a la consola de plataforma en /panel/admin.
+    platform_admin_emails: str = ""
+    ops_alert_email: str = ""
+    ops_telegram_bot_token: str = ""
+    ops_telegram_chat_id: str = ""
+    # Mismo problema repetido: un aviso cada tantos segundos con el conteo acumulado.
+    ops_alert_throttle_seconds: int = 900
+    ops_ai_queue_alert_threshold: int = 150
+    ops_webhook_queue_alert_threshold: int = 500
 
     trial_bait_limit: int = 10
+    # Prueba gratis desde el registro; al vencer la IA deja de responder hasta que paguen.
+    trial_days: int = 3
     paid_daily_bait_limit: int = 100
     default_plan_slug: str = "pro"
 
@@ -53,6 +86,9 @@ class Settings(BaseSettings):
     gemini_api_base: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_audio_model: str = "gemini-3.5-flash-lite"
     gemini_image_model: str = "gemini-3.5-flash-lite"
+    # Respaldo de texto cuando DeepSeek no responde.
+    gemini_text_model: str = "gemini-3.5-flash-lite"
+    ai_provider_timeout_seconds: float = 25.0
     ai_audio_max_mb: float = 15.0
     ai_image_max_mb: float = 10.0
     ai_reply_delay_min_seconds: float = 2.0
@@ -90,6 +126,8 @@ class Settings(BaseSettings):
     evolution_database_url: str = ""
     app_public_url: str = "http://localhost:8000"
     evolution_webhook_secret: str = "change-me-webhook-secret"
+    # Cada negocio recibe su propia clave derivada; aceptar la global solo durante una migración.
+    evolution_webhook_accept_legacy_secret: bool = False
     # True solo si Evolution corre dentro de Docker y la API en el host (localhost).
     evolution_in_docker: bool = False
 
@@ -161,8 +199,17 @@ class Settings(BaseSettings):
             "://127.0.0.1", "://chatwoot"
         )
 
+    def chatwoot_webhook_path_token(self) -> str:
+        """Chatwoot no permite cabeceras propias en webhooks: la clave va en la ruta."""
+        import hashlib
+        import hmac
+
+        return hmac.new(
+            self.chatwoot_webhook_secret.encode("utf-8"), b"chatwoot-webhook", hashlib.sha256
+        ).hexdigest()
+
     def chatwoot_webhook_url(self) -> str:
-        return f"{self.evolution_webhook_base_url()}/webhooks/chatwoot"
+        return f"{self.evolution_webhook_base_url()}/webhooks/chatwoot/{self.chatwoot_webhook_path_token()}"
 
     def panel_base_url(self) -> str:
         return (self.panel_public_url or self.site_public_url).rstrip("/")
@@ -178,6 +225,36 @@ class Settings(BaseSettings):
                 "http://127.0.0.1:4000",
             ]
         return sorted(set(origins))
+
+    def trusted_origins(self) -> set[str]:
+        """Orígenes desde los que un navegador puede hacer peticiones con la cookie de sesión."""
+        origins = set(self.cors_allowed_origins())
+        for url in (self.app_public_url, self.panel_public_url):
+            if url:
+                origins.add(url.strip().rstrip("/"))
+        return origins
+
+    def platform_admins(self) -> set[str]:
+        return {e.strip().lower() for e in self.platform_admin_emails.split(",") if e.strip()}
+
+    def is_production(self) -> bool:
+        return (self.app_env or "").lower() in ("production", "prod")
+
+    def trusted_hosts(self) -> list[str]:
+        """Hosts válidos del header Host (anti-cache poisoning / Host header)."""
+        from urllib.parse import urlparse
+
+        hosts = {"localhost", "127.0.0.1"}
+        for url in (
+            self.app_public_url,
+            self.site_public_url,
+            self.panel_public_url,
+            self.wompi_checkout_redirect_url,
+        ):
+            host = urlparse((url or "").strip()).hostname
+            if host:
+                hosts.add(host)
+        return sorted(hosts)
 
     def evolution_webhook_base_url(self) -> str:
         """URL que Evolution usa para POST de webhooks."""
@@ -267,6 +344,17 @@ class Settings(BaseSettings):
             if self.evolution_webhook_secret.strip().lower() in _INSECURE_WEBHOOK_SECRETS:
                 raise ValueError(
                     "EVOLUTION_WEBHOOK_SECRET debe configurarse en producción"
+                )
+            if self.chatwoot_enabled and (
+                self.chatwoot_webhook_secret.strip().lower() in _INSECURE_WEBHOOK_SECRETS
+                or self.chatwoot_webhook_secret.startswith("dev-")
+            ):
+                raise ValueError("CHATWOOT_WEBHOOK_SECRET debe configurarse en producción")
+            if not self.resend_api_key.strip():
+                raise ValueError("RESEND_API_KEY es obligatorio en producción (enlaces de acceso)")
+            if self.wompi_public_key.strip() and not self.wompi_events_secret.strip():
+                raise ValueError(
+                    "WOMPI_EVENTS_SECRET es obligatorio con Wompi activo (firma de los webhooks)"
                 )
             if self.debug:
                 object.__setattr__(self, "debug", False)

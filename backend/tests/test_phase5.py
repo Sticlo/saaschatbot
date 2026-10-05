@@ -11,6 +11,8 @@ from tests.conftest import requires_db
 
 class _FakeTenant:
     ai_global_enabled = True
+    is_active = True
+    platform_overrides = None
 
 
 class _FakeConversation:
@@ -251,16 +253,20 @@ def test_qualify_replies_without_marking_interested(
 
 
 @requires_db
-@patch("app.application.ai.ai_service.send_text_message")
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.classify_inbound_message")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_qualify_purchase_intent_hands_off_to_human(_sleep, mock_classify, mock_send):
+def test_qualify_purchase_intent_hands_off_to_human(_sleep, mock_classify, mock_generate, mock_send):
+    from app.application.ai.ai_shortcut_service import AiGeneratedReply
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
     from app.application.ai.ai_service import process_ai_reply
 
     mock_classify.return_value = {"category": "interesado", "reason": "reserva"}
+    # Aunque la IA no marque cierre, «¿dónde reservo?» ya es decisión de compra.
+    mock_generate.return_value = AiGeneratedReply(message="¡De una! Dame un momentico y te confirmo 🙌")
 
     with SessionLocal() as db:
         tenant = Tenant(

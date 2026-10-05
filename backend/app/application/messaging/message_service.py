@@ -1250,36 +1250,119 @@ _STATUS_RANK = {
     MessageStatus.READ.value: 3,
 }
 
+_STATUS_MAP = {
+    "ERROR": MessageStatus.FAILED.value,
+    "FAILED": MessageStatus.FAILED.value,
+    "PENDING": MessageStatus.PENDING.value,
+    "SERVER_ACK": MessageStatus.SENT.value,
+    "SENT": MessageStatus.SENT.value,
+    "DELIVERY_ACK": MessageStatus.DELIVERED.value,
+    "DELIVERED": MessageStatus.DELIVERED.value,
+    "READ": MessageStatus.READ.value,
+    "READ_ACK": MessageStatus.READ.value,
+    "PLAYED": MessageStatus.READ.value,
+    "0": MessageStatus.FAILED.value,
+    "1": MessageStatus.SENT.value,
+    "2": MessageStatus.DELIVERED.value,
+    "3": MessageStatus.READ.value,
+    "4": MessageStatus.READ.value,
+    "5": MessageStatus.READ.value,
+}
 
-def update_message_status(db: Session, tenant_id: UUID, data: dict) -> None:
-    if not isinstance(data, dict):
-        return
-    key = data.get("key") if isinstance(data.get("key"), dict) else {}
-    # Evolution v2 manda el id de WhatsApp en `keyId` y no incluye `key`.
-    msg_id = key.get("id") or data.get("keyId")
-    status = data.get("status") or data.get("update") or data.get("ack")
-    if not msg_id:
-        return
 
+def extract_whatsapp_message_id(payload: object) -> Optional[str]:
+    """Saca el id de WhatsApp de una respuesta de envío o de un acuse."""
+    if not isinstance(payload, dict):
+        return None
+    candidates = [payload]
+    nested = payload.get("data")
+    if isinstance(nested, dict):
+        candidates.append(nested)
+    for item in candidates:
+        key = item.get("key") if isinstance(item.get("key"), dict) else {}
+        for raw in (key.get("id"), item.get("keyId"), item.get("messageId")):
+            if raw:
+                return str(raw)
+    return None
+
+
+def _status_from_update(data: dict) -> Optional[str]:
+    raw = data.get("status", data.get("ack"))
+    update = data.get("update")
+    if raw is None and isinstance(update, dict):
+        raw = update.get("status", update.get("ack"))
+    elif raw is None:
+        raw = update
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw = raw.get("status", raw.get("ack"))
+    if raw is None:
+        return None
+    return _STATUS_MAP.get(str(raw).upper())
+
+
+def _find_message_by_wa_id(db: Session, tenant_id: UUID, msg_id: str) -> Optional[Message]:
+    raw = str(msg_id)
     message = (
         db.query(Message)
-        .filter(Message.tenant_id == tenant_id, Message.evolution_message_id == str(msg_id))
+        .filter(Message.tenant_id == tenant_id, Message.evolution_message_id == raw)
         .first()
     )
-    if not message:
-        return
+    if message:
+        return message
+    stem = raw.split(":", 1)[0]
+    if stem == raw or len(stem) < 10:
+        return (
+            db.query(Message)
+            .filter(
+                Message.tenant_id == tenant_id,
+                Message.evolution_message_id.like(f"{raw}:%"),
+            )
+            .first()
+        )
+    return (
+        db.query(Message)
+        .filter(
+            Message.tenant_id == tenant_id,
+            or_(
+                Message.evolution_message_id == stem,
+                Message.evolution_message_id.like(f"{stem}:%"),
+            ),
+        )
+        .first()
+    )
 
-    status_map = {
-        "SERVER_ACK": MessageStatus.SENT.value,
-        "DELIVERY_ACK": MessageStatus.DELIVERED.value,
-        "READ": MessageStatus.READ.value,
-        "READ_ACK": MessageStatus.READ.value,
-        "PLAYED": MessageStatus.READ.value,
-        "2": MessageStatus.DELIVERED.value,
-        "3": MessageStatus.READ.value,
-    }
-    mapped = status_map.get(str(status).upper())
+
+def update_message_status(db: Session, tenant_id: UUID, data: dict) -> Optional[Message]:
+    if isinstance(data, list):
+        last = None
+        for item in data:
+            if isinstance(item, dict):
+                last = update_message_status(db, tenant_id, item) or last
+        return last
+    if not isinstance(data, dict):
+        return None
+    msg_id = extract_whatsapp_message_id(data)
+    mapped = _status_from_update(data)
+    if not msg_id or not mapped:
+        return None
+
+    message = _find_message_by_wa_id(db, tenant_id, msg_id)
+    if message is None:
+        return None
+
     # Tras reconectar los acuses llegan desordenados: un "entregado" tardío no deshace un "leído".
-    if mapped and _STATUS_RANK.get(mapped, 0) > _STATUS_RANK.get(message.status, 0):
+    if _STATUS_RANK.get(mapped, 0) > _STATUS_RANK.get(message.status, 0):
         message.status = mapped
         db.flush()
+        conversation = (
+            db.query(Conversation).filter(Conversation.id == message.conversation_id).first()
+        )
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if conversation is not None and tenant is not None:
+            publish_message_event(
+                tenant, conversation, message, event_type="message.updated"
+            )
+        return message
+    return None

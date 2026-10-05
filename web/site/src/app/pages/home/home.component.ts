@@ -142,7 +142,7 @@ export class HomeComponent implements OnInit, OnDestroy {
     { value: '24/7', label: 'IA respondiendo mientras duermes' },
     { value: '−70%', label: 'Menos tiempo en chats repetitivos' },
     { value: '1 panel', label: 'Todos tus chats en un solo lugar' },
-    { value: '7 días', label: 'Prueba gratis, sin tarjeta' },
+    { value: '3 días', label: 'Prueba gratis, sin tarjeta' },
   ];
 
   /** Titular del problema partido en líneas y palabras para la revelación ligada al scroll. */
@@ -214,8 +214,8 @@ export class HomeComponent implements OnInit, OnDestroy {
       a: 'Sí. Omitel sincroniza conversaciones nuevas. Los chats antiguos no se importan automáticamente al conectar.',
     },
     {
-      q: '¿Qué pasa después de los 7 días gratis?',
-      a: 'Eliges un plan desde $120.000/mes. Sin contratos — cancelas cuando quieras.',
+      q: '¿Qué pasa después de los 3 días gratis?',
+      a: 'La IA deja de responder hasta que actives el plan: $200.000/mes con todo incluido. Tus chats y tu configuración quedan guardados. Sin contratos — cancelas cuando quieras.',
     },
   ];
 

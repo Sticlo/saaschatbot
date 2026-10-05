@@ -13,7 +13,7 @@ from app.application.appointments.appointment_service import (
     create_appointment,
     parse_slot_to_datetimes,
 )
-from app.domain.entities import Conversation, Tenant
+from app.domain.entities import Appointment, Conversation, Tenant
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +79,14 @@ class BookSlotRequest:
     notes: str = ""
 
 
+@dataclass(frozen=True)
+class BookingContext:
+    """Agenda que ve la IA cuando el negocio la deja agendar."""
+
+    free_slots: list[dict[str, Any]]
+    existing_appointment: str = ""
+
+
 def slot_key(date_iso: str, start: str, end: str) -> tuple[str, str, str]:
     return date_iso.strip(), start.strip(), end.strip()
 
@@ -104,30 +112,73 @@ def format_slot_line(slot: dict[str, Any]) -> str:
     return f'- {label} | date="{slot["date"]}" start="{slot["start"]}" end="{slot["end"]}"'
 
 
-def append_appointment_instructions(base_prompt: str, free_slots: list[dict[str, Any]]) -> str:
+_BOOKING_RULES = """
+Agenda de citas: tú puedes agendar, mirando estos horarios libres (no hay otros):
+{slot_lines}
+{existing}
+- Si preguntan por cita, reserva u horario, ofrece 2 a 4 opciones cercanas a lo que piden.
+- Agenda solo cuando el cliente elija un horario concreto de la lista: pon book_slot
+  {{"date":"YYYY-MM-DD","start":"HH:MM","notes":"para qué es y su nombre si lo dio"}}
+  y en message confirma el día y la hora.
+- Si pide un horario que no está en la lista, dile que ese no está disponible y ofrece los más cercanos.
+- Si solo informas opciones o el cliente no ha elegido, book_slot debe ser null.
+- Pedir o agendar una cita no es "cierre": tú la agendas, usa stage "interesado".
+"""
+
+
+def _group_slots_by_day(free_slots: list[dict[str, Any]]) -> list[str]:
+    days: dict[str, list[str]] = {}
+    labels: dict[str, str] = {}
+    for slot in free_slots:
+        day = str(slot["date"])
+        days.setdefault(day, []).append(str(slot["start"]))
+        labels.setdefault(day, str(slot.get("label") or day).split(" ")[0])
+    return [f"- {labels[day]} ({day}): {', '.join(starts)}" for day, starts in days.items()]
+
+
+def append_appointment_instructions(
+    base_prompt: str,
+    free_slots: list[dict[str, Any]],
+    *,
+    existing_appointment: str = "",
+) -> str:
+    existing = (
+        f"- Este cliente ya tiene cita: {existing_appointment}. No agendes otra salvo que pida "
+        "una cita adicional; si quiere cambiarla o cancelarla, dile que ya le confirmas (stage cierre).\n"
+        if existing_appointment
+        else ""
+    )
     if not free_slots:
         return base_prompt.rstrip() + (
-            "\n\nNo hay horarios libres cargados en la agenda. "
-            "Si piden cita, di que el equipo confirma disponibilidad pronto."
+            "\n\nAgenda de citas: no quedan horarios libres en los próximos días. "
+            "Si piden cita, dile que ya le confirmas disponibilidad (stage cierre).\n" + existing
         )
-    lines = [format_slot_line(s) for s in free_slots]
-    block = """
-Horarios libres en la agenda (solo puedes ofrecer estos — no inventes otros):
-{slot_lines}
-
-Si preguntan por cita u horario, ofrece 2 a 4 opciones de la lista.
-Si el cliente elige uno de la lista, confirma la reserva con book_slot en el JSON.
-
-Responde SOLO con JSON válido (sin markdown):
-{{"message":"tu respuesta","shortcut_id":null,"book_slot":null}}
-o al confirmar horario de la lista:
-{{"message":"confirmación breve","shortcut_id":null,"book_slot":{{"date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","notes":"qué pidió"}}}}
-
-Reglas:
-- book_slot solo con date/start/end de la lista de horarios libres.
-- Si solo informas opciones, book_slot debe ser null.
-""".format(slot_lines="\n".join(lines))
+    duration = _slot_minutes(free_slots[0])
+    slot_lines = "\n".join(_group_slots_by_day(free_slots))
+    if duration:
+        slot_lines = f"(cada cita dura {duration} min)\n{slot_lines}"
+    block = _BOOKING_RULES.format(slot_lines=slot_lines, existing=existing)
     return base_prompt.rstrip() + "\n" + block
+
+
+def _slot_minutes(slot: dict[str, Any]) -> Optional[int]:
+    try:
+        sh, sm = (int(x) for x in str(slot["start"]).split(":"))
+        eh, em = (int(x) for x in str(slot["end"]).split(":"))
+    except (KeyError, ValueError):
+        return None
+    minutes = (eh * 60 + em) - (sh * 60 + sm)
+    return minutes if minutes > 0 else None
+
+
+def slot_taken_message(free_slots: list[dict[str, Any]]) -> str:
+    options = free_slots[:3]
+    if not options:
+        return "Uy, ese horario se acaba de ocupar 🙈 Dame un momentico y te confirmo otro."
+    lines = ["Uy, ese horario se acaba de ocupar 🙈 Tengo libre:"]
+    lines += [f"• {slot.get('label') or slot['date'] + ' ' + slot['start']}" for slot in options]
+    lines.append("¿Cuál te sirve?")
+    return "\n".join(lines)
 
 
 def valid_book_slot_keys(free_slots: list[dict[str, Any]]) -> frozenset[tuple[str, str, str]]:
@@ -140,13 +191,17 @@ def parse_book_slot(raw: Any, *, valid_keys: frozenset[tuple[str, str, str]]) ->
     date_iso = str(raw.get("date") or "").strip()
     start = str(raw.get("start") or "").strip()
     end = str(raw.get("end") or "").strip()
-    if not date_iso or not start or not end:
+    if not date_iso or not start:
         return None
     key = slot_key(date_iso, start, end)
     if key not in valid_keys:
-        return None
-    notes = str(raw.get("notes") or "").strip()
-    return BookSlotRequest(date=date_iso, start=start, end=end, notes=notes)
+        # La IA suele omitir la hora de fin: basta con que día e inicio sean un bloque libre.
+        matches = sorted(k for k in valid_keys if k[0] == date_iso and k[1] == start)
+        if not matches:
+            return None
+        key = matches[0]
+    notes = str(raw.get("notes") or "").strip()[:500]
+    return BookSlotRequest(date=key[0], start=key[1], end=key[2], notes=notes)
 
 
 def _resolve_day_from_text(text: str, today: date) -> Optional[date]:
@@ -262,7 +317,7 @@ def try_create_booking(
     client_name: str,
     client_phone: Optional[str] = None,
     message_notes: str = "",
-) -> bool:
+) -> Optional[Appointment]:
     if isinstance(slot, BookSlotRequest):
         date_iso, start, end, notes = slot.date, slot.start, slot.end, slot.notes
     else:
@@ -277,7 +332,7 @@ def try_create_booking(
         merged_notes = " | ".join(
             p for p in (notes, message_notes) if p and p.strip()
         ).strip() or None
-        create_appointment(
+        return create_appointment(
             db,
             tenant_id=tenant.id,
             starts_at=starts_at,
@@ -287,7 +342,6 @@ def try_create_booking(
             notes=merged_notes,
             conversation_id=conversation.id,
         )
-        return True
     except (ValueError, TypeError) as exc:
         log.warning("No se pudo crear cita IA tenant=%s: %s", tenant.id, exc)
-        return False
+        return None

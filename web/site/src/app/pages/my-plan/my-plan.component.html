@@ -1,0 +1,302 @@
+<app-shell>
+  <section class="container my-plan">
+    <header class="my-plan-head">
+      <h1>Mi plan</h1>
+      <p class="muted">Tu suscripción, tu medio de pago y la cancelación, todo en un solo lugar.</p>
+    </header>
+
+    @if (success) {
+      <p class="notice notice-ok" role="status">{{ success }}</p>
+    }
+    @if (error && !showMethodForm) {
+      <p class="notice notice-error" role="alert">{{ error }}</p>
+    }
+
+    @if (loading) {
+      <div class="card plan-card skeleton" aria-busy="true"></div>
+    } @else if (subscription) {
+      <article class="card plan-card">
+        <div class="plan-card-top">
+          <div>
+            <h2>{{ subscription.plan.name }}</h2>
+            @if (subscription.plan.price_cop) {
+              <p class="plan-price">{{ formatCop(subscription.plan.price_cop) }} <span>/ 30 días</span></p>
+            }
+          </div>
+          <span class="badge" [class.badge-ok]="statusTone === 'ok'" [class.badge-warn]="statusTone === 'warn'">
+            {{ statusLabel }}
+          </span>
+        </div>
+
+        <dl class="plan-facts">
+          @if (subscription.is_trial) {
+            <div>
+              <dt>Prueba gratis</dt>
+              <dd>
+                @if (subscription.trial_ends_at) {
+                  Termina el {{ formatDate(subscription.trial_ends_at) }}
+                  ({{ subscription.trial_days_left === 1 ? 'queda 1 día' : 'quedan ' + subscription.trial_days_left + ' días' }}).
+                }
+                Activa tu plan para que tu asistente no se detenga.
+              </dd>
+            </div>
+          } @else if (subscription.trial_expired) {
+            <div>
+              <dt>Prueba gratis</dt>
+              <dd>
+                Terminó el {{ formatDate(subscription.trial_ends_at) }}. Tu asistente no está respondiendo:
+                activa tu plan y sigue donde lo dejaste.
+              </dd>
+            </div>
+          }
+          @if (subscription.is_paid && subscription.current_period_end) {
+            <div>
+              <dt>Activo hasta</dt>
+              <dd>{{ formatDate(subscription.current_period_end) }}</dd>
+            </div>
+          }
+          @if (subscription.next_charge_at) {
+            <div>
+              <dt>Próximo cobro automático</dt>
+              <dd>
+                {{ formatDate(subscription.next_charge_at) }} · {{ formatCop(subscription.plan.price_cop) }}
+                a {{ subscription.payment_method_label }}
+              </dd>
+            </div>
+          } @else if (subscription.is_paid && !subscription.cancel_at_period_end) {
+            <div>
+              <dt>Renovación</dt>
+              <dd>Manual: activa el cobro automático para no tener que acordarte.</dd>
+            </div>
+          }
+        </dl>
+
+        @if (canRenewInWompi) {
+          <div class="wompi-pay">
+            <a class="btn btn-ghost" routerLink="/precios" [queryParams]="{ plan: subscription.plan.slug, once: 1 }">
+              Renovar 30 días en Wompi · {{ formatCop(subscription.plan.price_cop) }}
+            </a>
+            <p class="hint">O activa el cobro automático abajo para no tener que acordarte cada mes.</p>
+          </div>
+        }
+
+        @if (subscription.renewal_failing && !subscription.cancel_at_period_end) {
+          <p class="notice notice-warn">
+            No pudimos cobrar tu última renovación. Actualiza tu medio de pago para no perder el servicio.
+          </p>
+        }
+
+        @if (subscription.cancel_at_period_end) {
+          <div class="notice notice-warn cancel-pending">
+            <p>
+              Cancelaste tu suscripción. Tienes acceso hasta el
+              <strong>{{ formatDate(subscription.current_period_end) }}</strong> y no se hará ningún cobro.
+            </p>
+            <button type="button" class="btn btn-primary" [disabled]="busy" (click)="resume()">
+              Reactivar suscripción
+            </button>
+          </div>
+        }
+      </article>
+
+      <article class="card plan-card">
+        <div class="section-title">
+          <h2>Medio de pago</h2>
+          @if (subscription.payment_method_label && !showMethodForm) {
+            <div class="method-actions">
+              <button type="button" class="link-btn" (click)="openMethodForm()">Cambiar</button>
+              <button type="button" class="link-btn link-danger" [disabled]="busy" (click)="removeMethod()">Quitar</button>
+            </div>
+          }
+        </div>
+
+        @if (!autoRenewAvailable) {
+          <p class="muted">
+            El cobro automático estará disponible muy pronto. Mientras tanto puedes pagar desde
+            <a routerLink="/precios">Precios</a>.
+          </p>
+        } @else if (!showMethodForm) {
+          @if (subscription.payment_method_label) {
+            <p class="method-chip">
+              <span class="method-icon" aria-hidden="true">{{ subscription.payment_method_type === 'NEQUI' ? 'N' : '▭' }}</span>
+              {{ subscription.payment_method_label }}
+              @if (subscription.auto_renew) {
+                <span class="muted">· cobro automático activo</span>
+              }
+            </p>
+          } @else {
+            <p class="muted">No tienes un medio de pago guardado.</p>
+            <button type="button" class="btn btn-primary" (click)="openMethodForm()">
+              Activar cobro automático
+            </button>
+          }
+        } @else {
+          <form class="method-form" (ngSubmit)="submitMethod()" novalidate>
+            <p class="secure-banner">
+              <span aria-hidden="true">🔒</span>
+              <span>
+                <strong>Pago procesado por Wompi</strong> (Grupo Bancolombia). Los datos de tu tarjeta o Nequi van
+                cifrados directo a Wompi: Omitel nunca los ve ni los guarda.
+              </span>
+            </p>
+            @if (chargesNow || !subscription.is_paid) {
+              <fieldset class="plan-picker" [disabled]="processing">
+                <legend>Plan</legend>
+                @for (plan of plans; track plan.slug) {
+                  <label class="plan-option" [class.selected]="selectedPlanSlug === plan.slug">
+                    <input type="radio" name="plan" [value]="plan.slug" [(ngModel)]="selectedPlanSlug" />
+                    <span class="plan-option-name">{{ plan.name }}</span>
+                    <span class="plan-option-price">{{ formatCop(plan.price_cop) }} / 30 días</span>
+                  </label>
+                }
+              </fieldset>
+            }
+
+            <div class="tabs" role="tablist">
+              <button type="button" role="tab" [class.active]="tab === 'CARD'" [attr.aria-selected]="tab === 'CARD'"
+                [disabled]="processing" (click)="tab = 'CARD'">Tarjeta</button>
+              <button type="button" role="tab" [class.active]="tab === 'NEQUI'" [attr.aria-selected]="tab === 'NEQUI'"
+                [disabled]="processing" (click)="tab = 'NEQUI'">Nequi</button>
+            </div>
+
+            @if (tab === 'CARD') {
+              <div class="fields">
+                <label class="field-wide">
+                  Número de la tarjeta
+                  <input name="cardNumber" inputmode="numeric" autocomplete="cc-number" placeholder="4242 4242 4242 4242"
+                    [(ngModel)]="cardNumber" (input)="formatCardNumber()" [disabled]="processing" />
+                </label>
+                <label class="field-wide">
+                  Nombre como aparece en la tarjeta
+                  <input name="cardHolder" autocomplete="cc-name" [(ngModel)]="cardHolder" [disabled]="processing" />
+                </label>
+                <label>
+                  Vence (MM/AA)
+                  <input name="cardExpiry" inputmode="numeric" autocomplete="cc-exp" placeholder="08/28"
+                    [(ngModel)]="cardExpiry" (input)="formatExpiry()" [disabled]="processing" />
+                </label>
+                <label>
+                  CVC
+                  <input name="cardCvc" inputmode="numeric" autocomplete="cc-csc" maxlength="4" placeholder="123"
+                    [(ngModel)]="cardCvc" [disabled]="processing" />
+                </label>
+              </div>
+            } @else {
+              <div class="fields">
+                <label class="field-wide">
+                  Celular Nequi
+                  <input name="nequiPhone" inputmode="tel" autocomplete="tel-national" placeholder="300 123 4567"
+                    [(ngModel)]="nequiPhone" [disabled]="processing" />
+                </label>
+                <p class="hint field-wide">
+                  Te llegará una notificación a la app Nequi para autorizar los cobros a Omitel.
+                </p>
+              </div>
+            }
+
+            @if (phase === 'nequi_waiting') {
+              <p class="notice notice-info" role="status">
+                Abre tu app Nequi y aprueba la suscripción. Esperamos hasta 3 minutos.
+              </p>
+            }
+
+            <div class="consents">
+              <label class="check">
+                <input type="checkbox" name="acceptAutoRenew" [(ngModel)]="acceptAutoRenew" [disabled]="processing" />
+                <span>
+                  Autorizo a Omitel a cobrar automáticamente <strong>{{ formatCop(priceForAuthorization) }}</strong>
+                  cada 30 días a este medio de pago hasta que cancele. Recibiré un aviso por correo antes de cada
+                  cobro y puedo cancelar en cualquier momento desde Mi plan, según los
+                  <a routerLink="/terminos" fragment="planes" target="_blank" rel="noopener">Términos</a>.
+                </span>
+              </label>
+              <label class="check">
+                <input type="checkbox" name="acceptWompi" [(ngModel)]="acceptWompi" [disabled]="processing" />
+                <span>
+                  Acepto los
+                  <a [href]="wompiTerms?.acceptance_permalink || 'https://wompi.com'" target="_blank" rel="noopener">términos de uso de Wompi</a>
+                  y la
+                  <a [href]="wompiTerms?.personal_data_permalink || 'https://wompi.com'" target="_blank" rel="noopener">autorización de tratamiento de datos de Wompi</a>,
+                  la pasarela que procesa el pago.
+                </span>
+              </label>
+            </div>
+
+            @if (error) {
+              <p class="notice notice-error" role="alert">{{ error }}</p>
+            }
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" [disabled]="processing">{{ submitLabel }}</button>
+              @if (subscription.payment_method_label || subscription.is_paid) {
+                <button type="button" class="btn btn-ghost" [disabled]="processing" (click)="closeMethodForm()">
+                  Cancelar
+                </button>
+              }
+            </div>
+
+            @if (chargesNow) {
+              <p class="hint">
+                ¿Prefieres no guardar la tarjeta?
+                <a routerLink="/precios" [queryParams]="{ plan: selectedPlanSlug, once: 1 }">Paga una sola vez en la página de Wompi</a>
+                (tarjeta, PSE o Nequi).
+              </p>
+            }
+          </form>
+        }
+      </article>
+
+      @if (canCancel) {
+        <article class="card plan-card cancel-card">
+          <h2>Cancelar suscripción</h2>
+          <p class="muted">
+            Puedes cancelar cuando quieras, sin llamadas ni trámites. Conservas el acceso hasta el final del periodo
+            que ya pagaste y no se vuelve a cobrar.
+          </p>
+          <button type="button" class="btn btn-ghost btn-danger-outline" (click)="openCancel()">
+            Cancelar suscripción
+          </button>
+        </article>
+      }
+    } @else {
+      <p class="notice notice-error">No pudimos cargar tu suscripción. Recarga la página.</p>
+    }
+  </section>
+</app-shell>
+
+@if (cancelOpen && subscription) {
+  <div class="modal-backdrop" (click)="closeCancel()"></div>
+  <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
+    <h2 id="cancel-title">¿Seguro que quieres cancelar?</h2>
+    <p class="muted">
+      @if (subscription.is_paid && subscription.current_period_end) {
+        Tu plan seguirá activo hasta el <strong>{{ formatDate(subscription.current_period_end) }}</strong>.
+        Después, tu asistente dejará de responder en WhatsApp y no se hará ningún cobro.
+      } @else {
+        Tu suscripción terminará ahora y no se hará ningún cobro.
+      }
+    </p>
+
+    <fieldset class="reasons" [disabled]="busy">
+      <legend>¿Por qué te vas? Nos ayuda a mejorar.</legend>
+      @for (reason of cancelReasons; track reason.value) {
+        <label class="check">
+          <input type="radio" name="cancelReason" [value]="reason.value" [(ngModel)]="cancelReason" />
+          <span>{{ reason.label }}</span>
+        </label>
+      }
+    </fieldset>
+    <label class="feedback">
+      ¿Algo que podamos mejorar? (opcional)
+      <textarea name="cancelFeedback" rows="3" maxlength="500" [(ngModel)]="cancelFeedback" [disabled]="busy"></textarea>
+    </label>
+
+    <div class="form-actions">
+      <button type="button" class="btn btn-primary" [disabled]="busy" (click)="closeCancel()">Mantener mi plan</button>
+      <button type="button" class="btn btn-ghost btn-danger-outline" [disabled]="busy || !cancelReason"
+        (click)="confirmCancel()">
+        {{ busy ? 'Cancelando…' : 'Confirmar cancelación' }}
+      </button>
+    </div>
+  </div>
+}

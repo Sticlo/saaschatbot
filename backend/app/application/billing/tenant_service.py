@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.domain.entities import (
     AuditLog,
     Subscription,
@@ -66,6 +68,7 @@ def register_tenant_with_owner(
         tenant_id=tenant.id,
         plan_id=plan.id,
         status=SubscriptionStatus.TRIAL.value,
+        trial_ends_at=datetime.now(timezone.utc) + timedelta(days=settings.trial_days),
     )
     owner = User(
         tenant_id=tenant.id,

@@ -25,6 +25,9 @@ from app.application.workers.worker_runtime import (
 log = logging.getLogger(__name__)
 
 AI_REPLY_QUEUE = "queue:ai_replies"
+# Reintentos con fecha (score = epoch en que toca): la IA no respondió y se vuelve a intentar.
+AI_DELAYED_QUEUE = "queue:ai_replies:delayed"
+DELAYED_PROMOTE_INTERVAL_SECONDS = 2.0
 AI_PROCESS_LOCK_PREFIX = "ai:lock:"
 AI_PROCESS_LOCK_TTL_SECONDS = 120
 AI_QUEUED_PREFIX = "ai:queued:"
@@ -228,10 +231,46 @@ def _requeue_job(data: dict, retry: int) -> None:
     get_redis().lpush(AI_REPLY_QUEUE, json.dumps(payload))
 
 
+def schedule_ai_retry(
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    *,
+    delay_seconds: float,
+) -> None:
+    item = json.dumps(
+        {
+            "tenant_id": str(tenant_id),
+            "conversation_id": str(conversation_id),
+            "message_id": str(message_id),
+            "retry": 0,
+        }
+    )
+    get_redis().zadd(AI_DELAYED_QUEUE, {item: time.time() + delay_seconds})
+    log.info("IA reintento en %.0fs conv=%s msg=%s", delay_seconds, conversation_id, message_id)
+
+
+def promote_due_ai_retries(now: Optional[float] = None) -> int:
+    """Pasa a la cola normal los reintentos que ya vencieron. Seguro con varios workers:
+    solo quien logra el ZREM encola el job."""
+    client = get_redis()
+    due = client.zrangebyscore(AI_DELAYED_QUEUE, "-inf", now or time.time(), start=0, num=100)
+    promoted = 0
+    for raw in due:
+        if client.zrem(AI_DELAYED_QUEUE, raw):
+            client.lpush(AI_REPLY_QUEUE, raw)
+            promoted += 1
+    return promoted
+
+
 def _worker_loop() -> None:
     log.info("AI worker started")
+    last_promote = 0.0
     while not _worker_stop.is_set():
         try:
+            if time.monotonic() - last_promote >= DELAYED_PROMOTE_INTERVAL_SECONDS:
+                last_promote = time.monotonic()
+                promote_due_ai_retries()
             item = get_redis().brpop(AI_REPLY_QUEUE, timeout=2)
             if not item:
                 continue

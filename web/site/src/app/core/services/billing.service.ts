@@ -7,7 +7,10 @@ import {
   BillingConfig,
   CheckoutSession,
   CheckoutStatus,
+  PaymentMethodRequest,
+  PaymentMethodResult,
   SubscriptionSummary,
+  WompiTerms,
 } from '../models/billing.model';
 
 const API_TIMEOUT_MS = 8000;
@@ -59,6 +62,42 @@ export class BillingService {
         { transaction_id: transactionId },
         { withCredentials: true },
       )
+      .pipe(timeout(API_TIMEOUT_MS));
+  }
+
+  getWompiTerms(): Observable<WompiTerms> {
+    return this.http
+      .get<WompiTerms>(`${this.apiBase}/api/v1/billing/wompi-terms`, { withCredentials: true })
+      .pipe(timeout(API_TIMEOUT_MS));
+  }
+
+  savePaymentMethod(body: PaymentMethodRequest): Observable<PaymentMethodResult> {
+    return this.http
+      .post<PaymentMethodResult>(`${this.apiBase}/api/v1/billing/payment-method`, body, {
+        withCredentials: true,
+      })
+      .pipe(timeout(40_000));
+  }
+
+  removePaymentMethod(): Observable<void> {
+    return this.http
+      .delete<void>(`${this.apiBase}/api/v1/billing/payment-method`, { withCredentials: true })
+      .pipe(timeout(API_TIMEOUT_MS * 2));
+  }
+
+  cancelSubscription(reason: string, feedback: string): Observable<void> {
+    return this.http
+      .post<void>(
+        `${this.apiBase}/api/v1/billing/subscription/cancel`,
+        { reason, feedback },
+        { withCredentials: true },
+      )
+      .pipe(timeout(API_TIMEOUT_MS * 2));
+  }
+
+  resumeSubscription(): Observable<void> {
+    return this.http
+      .post<void>(`${this.apiBase}/api/v1/billing/subscription/resume`, {}, { withCredentials: true })
       .pipe(timeout(API_TIMEOUT_MS));
   }
 }

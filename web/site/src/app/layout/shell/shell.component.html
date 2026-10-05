@@ -27,7 +27,7 @@
 
       <ng-container *ngIf="user$ | async as user; else guestNav">
         <div class="nav-actions">
-          <a routerLink="/precios" class="btn btn-ghost">
+          <a routerLink="/mi-plan" class="btn btn-ghost">
             {{ planCtaLabel(subscription$ | async) }}
           </a>
           <a [href]="panelUrl" class="btn btn-primary">
@@ -55,7 +55,7 @@
               <span>{{ user.email }}</span>
             </div>
 
-            <a routerLink="/precios" class="user-dropdown-item" (click)="userMenuOpen = false">
+            <a routerLink="/mi-plan" class="user-dropdown-item" (click)="userMenuOpen = false">
               {{ planCtaLabel(subscription$ | async) }}
             </a>
             <a [href]="panelUrl" class="user-dropdown-item">Panel WhatsApp</a>
@@ -113,7 +113,7 @@
   <a routerLink="/precios" routerLinkActive="active" (click)="closeMobileNav()">Precios</a>
   <a routerLink="/extras" routerLinkActive="active" (click)="closeMobileNav()">Extras</a>
   <ng-container *ngIf="user$ | async; else guestMobileLinks">
-    <a routerLink="/precios" (click)="closeMobileNav()">{{ planCtaLabel(subscription$ | async) }}</a>
+    <a routerLink="/mi-plan" (click)="closeMobileNav()">{{ planCtaLabel(subscription$ | async) }}</a>
     <a [href]="panelUrl" (click)="closeMobileNav()">Panel WhatsApp</a>
     <button type="button" class="mobile-nav-logout" [disabled]="loggingOut" (click)="logout(); closeMobileNav()">
       {{ loggingOut ? 'Saliendo…' : 'Salir' }}

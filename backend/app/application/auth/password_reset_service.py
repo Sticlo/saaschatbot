@@ -12,6 +12,7 @@ from app.domain.entities import User
 from app.infrastructure.cache.redis_client import cache_delete, cache_get, cache_set
 from app.infrastructure.email.email_service import send_password_reset_email
 from app.shared.core.security import hash_password
+from app.shared.core.sessions import revoke_all_sessions
 
 _RESET_PREFIX = "password_reset:"
 
@@ -48,8 +49,6 @@ def reset_password_with_token(db: Session, token: str, new_password: str, *, ip_
     if not email or not user_id:
         raise ValueError("Enlace inválido")
 
-    cache_delete(_cache_key(token))
-
     user = (
         db.query(User)
         .filter(User.id == user_id, User.email == email, User.is_active.is_(True))
@@ -63,7 +62,11 @@ def reset_password_with_token(db: Session, token: str, new_password: str, *, ip_
             f"Esta cuenta usa {user.oauth_provider.title()}. Entra con ese método."
         )
 
-    user.hashed_password = hash_password(new_password)
+    # Validar antes de gastar el enlace: una clave débil no obliga a pedir otro correo.
+    user.hashed_password = hash_password(new_password, email=user.email)
+    cache_delete(_cache_key(token))
+    # Si alguien entró a la cuenta, restablecer la clave lo saca de todos los dispositivos.
+    revoke_all_sessions(user)
     log_audit(
         db,
         tenant_id=user.tenant_id,

@@ -2,7 +2,7 @@
   <section class="pricing-light-zone">
     <div class="container pricing-page">
       <div class="section-head">
-        <h1>Elige el plan para tu negocio</h1>
+        <h1>Un solo plan, todo incluido</h1>
         <p class="lead">
           Omitel responde al inicio, ordena tus chats y te avisa quién quiere comprar.
           Tú cierras en Interesados.
@@ -10,32 +10,35 @@
       </div>
 
       <div class="billing-banner" *ngIf="loggedIn">
-        <span *ngIf="subscription?.is_trial">Estás en prueba gratis — activa un plan cuando quieras.</span>
+        <span *ngIf="subscription?.is_trial">
+          Estás en prueba gratis{{ subscription?.trial_days_left ? ' (' + (subscription?.trial_days_left === 1 ? 'queda 1 día' : 'quedan ' + subscription?.trial_days_left + ' días') + ')' : '' }}
+          — activa tu plan para no detener a tu asistente.
+        </span>
+        <span *ngIf="subscription?.trial_expired">Tu prueba gratis terminó — activa tu plan para que la IA siga respondiendo.</span>
         <span *ngIf="subscription?.is_paid">Tu plan activo: <strong>{{ subscription?.plan?.name }}</strong></span>
         <span *ngIf="loggedIn && !subscription">Tu cuenta está activa.</span>
         <a [href]="panelUrl">Ir al panel</a>
       </div>
 
       <p class="checkout-alert success" *ngIf="checkoutSuccess">{{ checkoutSuccess }}</p>
+      <p class="checkout-alert muted" role="status" *ngIf="checkoutInfo && !checkoutSuccess && !checkoutError">{{ checkoutInfo }}</p>
       <p class="checkout-alert error" *ngIf="checkoutError">{{ checkoutError }}</p>
 
       <div class="payments-trust" *ngIf="billingEnabled">
         <span class="payments-badge" *ngIf="billingSandbox">Modo prueba Wompi</span>
         <span>Pago seguro con</span>
         <strong>Tarjeta · PSE · Nequi</strong>
-        <span class="payments-note">Facturación mensual · cancela cuando quieras</span>
+        <span class="payments-note">Cobro automático cada 30 días · cancela cuando quieras desde Mi plan</span>
       </div>
 
       <p class="checkout-alert muted" *ngIf="loggedIn && !billingEnabled">
         Pagos en línea próximamente. Mientras tanto, escríbenos para activar tu plan.
       </p>
 
-      <div class="plans-grid">
+      <div class="plans-grid" [class.single]="plans.length === 1">
         <article
-          class="plan-card"
+          class="plan-card featured"
           *ngFor="let plan of plans"
-          [class.popular]="isFeatured(plan)"
-          [class.premium-tier]="isPremium(plan)"
         >
           <div class="plan-ribbon" *ngIf="ribbonLabel(plan) as label">{{ label }}</div>
 
@@ -59,33 +62,29 @@
                 </div>
               </div>
               <p class="price-note">
-                Precio de lanzamiento. Facturación mensual, cancela cuando quieras.
+                Precio de lanzamiento. Se renueva solo cada 30 días; cancela cuando quieras.
               </p>
 
               <button
                 type="button"
-                class="plan-cta"
-                [class.plan-cta-solid]="isFeatured(plan) || isPremium(plan)"
+                class="plan-cta plan-cta-solid"
                 [class.plan-cta-active]="isCurrentPlan(plan)"
                 [disabled]="!canSelectPlan(plan)"
                 (click)="onPlanSelect(plan)"
               >
                 {{
                   checkoutLoading && activePlanSlug === plan.slug
-                    ? 'Abriendo pago…'
+                    ? 'Abriendo Wompi…'
                     : ctaLabel(plan)
                 }}
               </button>
             </div>
 
             <div class="plan-body">
-              <p class="premium-includes" *ngIf="isPremium(plan)">
-                Incluye todo el Plan Pro y suma capacidad para crecer.
-              </p>
-              <h3 class="features-title">{{ featuresTitle(plan) }}</h3>
+              <h3 class="features-title">Qué incluye</h3>
               <ul class="feature-list">
                 <li
-                  *ngFor="let item of featuresFor(plan)"
+                  *ngFor="let item of features"
                   [class.highlight]="item.highlight"
                 >
                   <span class="check" aria-hidden="true"></span>
@@ -104,7 +103,7 @@
         <div class="trial-inner">
           <div>
             <p class="trial-eyebrow">Sin compromiso</p>
-            <h3>Prueba gratis 7 días</h3>
+            <h3>Prueba gratis 3 días</h3>
             <p class="trial-desc">
               Crea tu cuenta en Omitel, conecta WhatsApp y prueba el panel antes de pagar.
             </p>

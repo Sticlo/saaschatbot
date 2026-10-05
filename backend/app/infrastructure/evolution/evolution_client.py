@@ -206,10 +206,11 @@ class EvolutionClient:
         mimetype: str,
         caption: str = "",
         filename: str = "image.jpg",
+        mediatype: str = "image",
     ) -> dict:
         payload = {
             "number": number,
-            "mediatype": "image",
+            "mediatype": mediatype,
             "mimetype": mimetype,
             "caption": caption,
             "media": media_b64,

@@ -1,5 +1,5 @@
 # Se construye desde la raíz del repo (contexto ".."): la imagen necesita también web/panel.
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 

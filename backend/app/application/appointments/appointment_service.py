@@ -271,17 +271,21 @@ def parse_slot_to_datetimes(day: date, start_hhmm: str, end_hhmm: str) -> tuple[
     return _combine_local(day, _parse_hhmm(start_hhmm)), _combine_local(day, _parse_hhmm(end_hhmm))
 
 
+BOOKING_LEAD_MINUTES = 30
+
+
 def collect_upcoming_free_slots(
     db: Session,
     *,
     tenant_id: uuid.UUID,
     days: int = 4,
     limit: int = 12,
+    now: Optional[datetime] = None,
 ) -> list[dict[str, Any]]:
     """Próximos bloques libres para que la IA los ofrezca."""
-    from datetime import datetime
-
-    today = datetime.now(BOGOTA).date()
+    current = (now or datetime.now(BOGOTA)).astimezone(BOGOTA)
+    earliest = current + timedelta(minutes=BOOKING_LEAD_MINUTES)
+    today = current.date()
     out: list[dict[str, Any]] = []
     for offset in range(max(1, days)):
         day = today + timedelta(days=offset)
@@ -293,6 +297,8 @@ def collect_upcoming_free_slots(
                 continue
             start = str(slot.get("start") or "")
             end = str(slot.get("end") or "")
+            if _combine_local(day, _parse_hhmm(start)) < earliest:
+                continue
             out.append(
                 {
                     "date": day_label,
@@ -304,6 +310,32 @@ def collect_upcoming_free_slots(
             if len(out) >= limit:
                 return out
     return out
+
+
+def upcoming_appointment_for_conversation(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    now: Optional[datetime] = None,
+) -> Optional[Appointment]:
+    current = now or datetime.now(timezone.utc)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.tenant_id == tenant_id,
+            Appointment.conversation_id == conversation_id,
+            Appointment.ends_at > current,
+        )
+        .order_by(Appointment.starts_at.asc())
+        .first()
+    )
+
+
+def describe_appointment(row: Appointment, *, today: Optional[date] = None) -> str:
+    local = row.starts_at.astimezone(BOGOTA)
+    ref = today or datetime.now(BOGOTA).date()
+    return f"{_human_day_label(local.date(), ref)} {local.date().isoformat()} a las {local.strftime('%H:%M')}"
 
 
 def _human_day_label(day: date, today: date) -> str:

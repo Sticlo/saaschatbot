@@ -6,18 +6,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.domain.entities import DEFAULT_PLAN_ID, PREMIUM_PLAN_ID, Plan
+from app.domain.entities import DEFAULT_PLAN_ID, Plan
 
-PRO_FEATURES = {
-    "ai_on_reply": True,
-    "realtime_panel": True,
-    "maps_scraper": False,
-    "priority_support": False,
-    "ai_daily_replies": 400,
-    "ai_daily_classifications": 0,
-}
-
-PREMIUM_FEATURES = {
+PLAN_FEATURES = {
     "ai_on_reply": True,
     "realtime_panel": True,
     "maps_scraper": True,
@@ -56,7 +47,7 @@ def list_public_plans(db: Session) -> list[Plan]:
 
 
 def ensure_default_plan(db: Session) -> Plan:
-    """Idempotente: crea planes Pro y Premium si la tabla está vacía."""
+    """Idempotente: crea el plan único si la tabla está vacía."""
     existing = db.query(Plan).filter(Plan.slug == settings.default_plan_slug).first()
     if existing:
         return existing
@@ -67,38 +58,18 @@ def ensure_default_plan(db: Session) -> Plan:
             slug="pro",
             name="Plan Pro",
             description=(
-                "IA que saluda, responde dudas y te avisa quién quiere comprar. "
-                "Ideal para negocios con WhatsApp activo."
-            ),
-            price_cop=120_000,
-            price_usd_cents=3_000,
-            trial_bait_limit=settings.trial_bait_limit,
-            daily_bait_limit=50,
-            max_team_members=2,
-            features=PRO_FEATURES,
-            is_active=True,
-            is_public=True,
-            sort_order=0,
-        )
-    )
-    db.add(
-        Plan(
-            id=PREMIUM_PLAN_ID,
-            slug="premium",
-            name="Plan Premium",
-            description=(
-                "Todo lo del Pro con IA ilimitada, más equipo y soporte prioritario. "
-                "Para alto volumen en WhatsApp."
+                "Todo Omitel incluido: IA sin límite que atiende tu WhatsApp, catálogo, citas, "
+                "equipo de hasta 5 personas y soporte prioritario."
             ),
             price_cop=200_000,
             price_usd_cents=5_000,
             trial_bait_limit=settings.trial_bait_limit,
             daily_bait_limit=100,
             max_team_members=5,
-            features=PREMIUM_FEATURES,
+            features=PLAN_FEATURES,
             is_active=True,
             is_public=True,
-            sort_order=1,
+            sort_order=0,
         )
     )
     db.commit()

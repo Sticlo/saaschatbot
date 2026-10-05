@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.config import settings
 from app.infrastructure.persistence.database import SessionLocal
 from app.application.chatwoot.chatwoot_webhook_processor import process_chatwoot_webhook
+from app.shared.core.webhook_secrets import secrets_match
 
 log = logging.getLogger(__name__)
 
@@ -14,12 +15,16 @@ router = APIRouter(prefix="/webhooks/chatwoot", tags=["webhooks"])
 
 
 @router.post("")
-async def chatwoot_webhook(request: Request):
+@router.post("/{path_token}")
+async def chatwoot_webhook(request: Request, path_token: str = ""):
     if not settings.chatwoot_enabled:
         return {"received": True, "ignored": True}
 
-    secret = request.headers.get("X-Chatwoot-Secret") or request.headers.get("x-chatwoot-secret")
-    if secret and secret != settings.chatwoot_webhook_secret:
+    authorized = secrets_match(
+        settings.chatwoot_webhook_secret, request.headers.get("x-chatwoot-secret")
+    ) or secrets_match(settings.chatwoot_webhook_path_token(), path_token)
+    if not authorized:
+        log.warning("Webhook Chatwoot rechazado: clave ausente o incorrecta")
         raise HTTPException(status_code=401, detail="Webhook Chatwoot no autorizado")
 
     try:
@@ -30,7 +35,7 @@ async def chatwoot_webhook(request: Request):
     db = SessionLocal()
     try:
         process_chatwoot_webhook(db, payload)
-    except Exception:
+    except Exception as exc:
         log.exception("Error procesando webhook Chatwoot")
         raise HTTPException(status_code=500, detail="Error procesando webhook") from exc
     finally:

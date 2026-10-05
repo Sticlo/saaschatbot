@@ -31,10 +31,9 @@ from app.presentation.schemas.whatsapp import (
 from app.application.realtime.realtime_service import publish_conversation_updated
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
-from app.application.whatsapp.whatsapp_service import (
-    send_image_message,
-    send_text_message,
-)
+from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError
+from app.application.whatsapp.whatsapp_service import send_text_message
+from app.application.ai.ai_shortcut_service import send_shortcut_content
 from app.application.outbound.quick_shortcut_service import find_shortcut
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -528,25 +527,14 @@ def send_shortcut_message(
         raise HTTPException(status_code=409, detail=reason)
 
     try:
-        if shortcut.get("type") == "image":
-            message = send_image_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                image_path=str(shortcut["image_path"]),
-                caption="",
-                source=MessageSource.AGENT.value,
-            )
-        else:
-            message = send_text_message(
-                db,
-                tenant=tenant,
-                session=session,
-                conversation=conversation,
-                text=str(shortcut["text"]),
-                source=MessageSource.AGENT.value,
-            )
+        message = send_shortcut_content(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            shortcut=shortcut,
+            source=MessageSource.AGENT.value,
+        )
         log_audit(
             db,
             tenant_id=tenant.id,
@@ -561,7 +549,7 @@ def send_shortcut_message(
         )
         db.commit()
         db.refresh(message)
-    except EvolutionAPIError as exc:
+    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

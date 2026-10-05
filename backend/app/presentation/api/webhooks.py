@@ -8,6 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.application.workers.queue_service import enqueue_webhook
+from app.shared.core.webhook_secrets import evolution_webhook_authorized
 
 log = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ def _normalize_event(payload: dict) -> str:
 
 @router.post("/{tenant_id}")
 async def evolution_webhook(tenant_id: uuid.UUID, request: Request):
-    secret = request.headers.get("X-Webhook-Secret") or request.headers.get("x-webhook-secret")
-    if secret != settings.evolution_webhook_secret:
+    if not evolution_webhook_authorized(tenant_id, request.headers.get("x-webhook-secret")):
+        log.warning("Webhook Evolution rechazado tenant=%s", tenant_id)
         raise HTTPException(status_code=401, detail="Webhook no autorizado")
 
     try:

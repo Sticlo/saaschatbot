@@ -45,6 +45,11 @@ export const routes: Routes = [
     title: 'Nueva contraseña — Omitel',
   },
   {
+    path: 'mi-plan',
+    loadComponent: () => import('./pages/my-plan/my-plan.component').then((m) => m.MyPlanComponent),
+    title: 'Mi plan — Omitel',
+  },
+  {
     path: 'privacidad',
     loadComponent: () => import('./pages/legal/privacy/privacy.component').then((m) => m.PrivacyComponent),
     title: 'Política de Tratamiento de Datos — Omitel',

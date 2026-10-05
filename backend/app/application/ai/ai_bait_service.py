@@ -7,7 +7,8 @@ from typing import Any, Optional
 
 from app.application.ai.ai_conversation_service import build_system_prompt
 from app.domain.entities import Tenant, TenantProfile
-from app.infrastructure.ai.deepseek_client import DeepSeekError, chat_completion, is_configured
+from app.infrastructure.ai.ai_text_provider import chat_completion, is_configured
+from app.infrastructure.ai.deepseek_client import DeepSeekError
 
 log = logging.getLogger(__name__)
 

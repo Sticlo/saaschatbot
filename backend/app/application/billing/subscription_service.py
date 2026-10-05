@@ -12,6 +12,9 @@ from app.infrastructure.cache.redis_client import cache_set, tenant_cache_key
 
 log = logging.getLogger(__name__)
 
+# El cobro automático se intenta desde un día antes de vencer, para no cortar el servicio.
+CHARGE_LEAD = timedelta(days=1)
+
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -28,11 +31,38 @@ def subscription_is_paid(subscription: Optional[Subscription], now: Optional[dat
     return now <= _aware(end) + timedelta(days=settings.subscription_grace_days)
 
 
-def plan_features_apply(subscription: Optional[Subscription]) -> bool:
-    """Los límites del plan valen en prueba o pagando; no con el pago vencido."""
-    if subscription is None:
+def trial_is_running(subscription: Optional[Subscription], now: Optional[datetime] = None) -> bool:
+    if subscription is None or subscription.status != SubscriptionStatus.TRIAL.value:
         return False
-    return subscription.status == SubscriptionStatus.TRIAL.value or subscription_is_paid(subscription)
+    end = getattr(subscription, "trial_ends_at", None)
+    return end is None or (now or datetime.now(timezone.utc)) < _aware(end)
+
+
+def trial_has_expired(subscription: Optional[Subscription], now: Optional[datetime] = None) -> bool:
+    """Probó y nunca pagó: la prueba terminó y no tiene ningún periodo pagado."""
+    end = getattr(subscription, "trial_ends_at", None)
+    if subscription is None or end is None or subscription.current_period_end is not None:
+        return False
+    if subscription.status not in (SubscriptionStatus.TRIAL.value, SubscriptionStatus.PAST_DUE.value):
+        return False
+    return (now or datetime.now(timezone.utc)) >= _aware(end)
+
+
+def trial_days_left(subscription: Optional[Subscription], now: Optional[datetime] = None) -> Optional[int]:
+    if not trial_is_running(subscription, now) or subscription.trial_ends_at is None:
+        return None
+    remaining = _aware(subscription.trial_ends_at) - (now or datetime.now(timezone.utc))
+    return max(1, -(-remaining // timedelta(days=1)))
+
+
+def plan_features_apply(subscription: Optional[Subscription]) -> bool:
+    """Los límites del plan valen en prueba vigente o pagando; no con la prueba o el pago vencidos."""
+    return trial_is_running(subscription) or subscription_is_paid(subscription)
+
+
+def service_lapsed(subscription: Optional[Subscription]) -> bool:
+    """Sin prueba vigente ni plan pagado: la IA deja de trabajar hasta que paguen."""
+    return subscription is not None and not plan_features_apply(subscription)
 
 
 def expire_lapsed_subscriptions(db: Session, now: Optional[datetime] = None) -> int:
@@ -79,12 +109,26 @@ def get_tenant_subscription(db: Session, tenant_id: Any) -> Optional[Subscriptio
     )
 
 
+def next_charge_at(subscription: Subscription) -> Optional[datetime]:
+    if not subscription.auto_renew or subscription.cancel_at_period_end or not subscription.payment_source_id:
+        return None
+    if subscription.next_renewal_attempt_at is not None:
+        return _aware(subscription.next_renewal_attempt_at)
+    if subscription.current_period_end is None:
+        return None
+    return _aware(subscription.current_period_end) - CHARGE_LEAD
+
+
 def build_subscription_summary(
     tenant: Tenant, subscription: Subscription, plan: Plan
 ) -> dict[str, Any]:
-    is_trial = subscription.status == SubscriptionStatus.TRIAL.value
-    is_active_paid = subscription_is_paid(subscription)
-    lapsed = subscription.status == SubscriptionStatus.ACTIVE.value and not is_active_paid
+    now = datetime.now(timezone.utc)
+    is_trial = trial_is_running(subscription, now)
+    trial_expired = trial_has_expired(subscription, now)
+    is_active_paid = subscription_is_paid(subscription, now)
+    lapsed = (subscription.status == SubscriptionStatus.ACTIVE.value and not is_active_paid) or (
+        subscription.status == SubscriptionStatus.TRIAL.value and trial_expired
+    )
 
     trial_limit = plan.trial_bait_limit
     trial_used = tenant.trial_bait_used
@@ -112,6 +156,9 @@ def build_subscription_summary(
         "plan": plan,
         "is_trial": is_trial,
         "is_paid": is_active_paid,
+        "trial_ends_at": subscription.trial_ends_at,
+        "trial_days_left": trial_days_left(subscription, now),
+        "trial_expired": trial_expired,
         "trial_bait_limit": trial_limit,
         "trial_bait_used": trial_used,
         "trial_bait_remaining": trial_remaining,
@@ -120,6 +167,13 @@ def build_subscription_summary(
         "needs_payment": needs_payment,
         "current_period_start": subscription.current_period_start,
         "current_period_end": subscription.current_period_end,
+        "auto_renew": bool(subscription.auto_renew),
+        "payment_method_type": subscription.payment_method_type,
+        "payment_method_label": subscription.payment_method_label,
+        "next_charge_at": next_charge_at(subscription),
+        "renewal_failing": (subscription.renewal_attempts or 0) > 0,
+        "cancel_at_period_end": bool(subscription.cancel_at_period_end),
+        "cancelled_at": subscription.cancelled_at,
     }
 
 

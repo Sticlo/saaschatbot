@@ -273,3 +273,39 @@ def test_message_that_failed_to_save_is_processed_when_evolution_retries(wa_offl
     with SessionLocal() as db:
         assert [m.body for m in _messages(db, tenant.id)] == ["¿me confirman?"]
     assert len(wa_offline["ai_jobs"]) == 1
+
+
+def test_extract_whatsapp_id_from_wrapped_send_response():
+    from app.application.messaging.message_service import extract_whatsapp_message_id
+
+    assert extract_whatsapp_message_id({"key": {"id": "3EB0ABC"}}) == "3EB0ABC"
+    assert extract_whatsapp_message_id({"data": {"key": {"id": "3EB0DEF"}}}) == "3EB0DEF"
+    assert extract_whatsapp_message_id({"keyId": "3AB2XYZ", "status": "DELIVERY_ACK"}) == "3AB2XYZ"
+    assert extract_whatsapp_message_id({}) is None
+
+
+@requires_db
+def test_messages_update_list_and_device_suffix_still_mark_delivered(wa_offline):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, wa = make_wa_tenant(db)
+    msg_id = _msg_id()
+    _send_from_phone(tenant, wa, msg_id)
+
+    process_evolution_webhook(
+        tenant.id,
+        {
+            "event": "messages.update",
+            "instance": wa.instance_name,
+            "data": [
+                {
+                    "keyId": f"{msg_id}:0",
+                    "update": {"status": "DELIVERY_ACK"},
+                    "remoteJid": "573001112233@s.whatsapp.net",
+                    "fromMe": True,
+                }
+            ],
+        },
+    )
+    assert _message_status(tenant.id, msg_id) == "delivered"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 
 import httpx
@@ -58,6 +59,44 @@ def send_password_reset_email(*, to_email: str, url: str) -> str | None:
         log_label="Password reset",
         url=url,
     )
+
+
+def send_billing_email(
+    *,
+    to_email: str,
+    subject: str,
+    title: str,
+    paragraphs: list[str],
+    cta_label: str,
+    cta_url: str,
+) -> None:
+    """Avisos de facturación: recordatorio de cobro, recibo, cobro fallido, cancelación."""
+    body = "".join(
+        f'<p style="line-height:1.55;color:#4a4d57;margin:0 0 0.85rem">{text}</p>' for text in paragraphs
+    )
+    html = f"""
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;color:#1d1e20">
+  <h1 style="font-size:1.35rem;margin:0 0 0.75rem">{title}</h1>
+  {body}
+  <p style="margin:1.5rem 0">
+    <a href="{cta_url}" style="display:inline-block;background:#ff6b00;color:#fff;text-decoration:none;padding:0.75rem 1.25rem;border-radius:8px;font-weight:700">
+      {cta_label}
+    </a>
+  </p>
+  <p style="font-size:0.82rem;color:#9aa0ae">Omitel · Este es un aviso sobre tu suscripción.</p>
+</div>
+"""
+    _send_html_email(to_email=to_email, subject=subject, html=html, log_label=subject, url=cta_url)
+
+
+def send_ops_alert_email(*, to_email: str, subject: str, text: str) -> None:
+    """Aviso técnico al desarrollador (no a clientes)."""
+    body = html.escape(text).replace("\n", "<br>")
+    page = (
+        '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;'
+        f'line-height:1.5;color:#1d1e20;max-width:640px">{body}</div>'
+    )
+    _send_html_email(to_email=to_email, subject=subject, html=page, log_label="Alerta dev", url="")
 
 
 def _send_html_email(

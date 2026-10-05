@@ -3,14 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="X-Frame-Options" content="DENY" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
   <title>Omitel — Panel</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=38" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=41" />
 </head>
 <body>
   <div id="app">
@@ -110,7 +108,7 @@
         <div class="topbar-right">
           <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
             <span id="plan-status-label" class="plan-status-label"></span>
-            <a href="/precios" data-site-path="/precios" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
+            <a href="/mi-plan" data-site-path="/mi-plan" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
           </div>
           <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
             <span>Tema claro</span>
@@ -363,6 +361,13 @@
                   <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
                 </label>
               </div>
+              <label class="appointments-ai-toggle">
+                <input type="checkbox" id="schedule-ai-booking" />
+                <span>
+                  <strong>La IA agenda citas sola</strong>
+                  <span class="muted small">Para reservas, consultas o turnos: la IA mira los horarios libres, ofrece opciones y agenda. Déjalo apagado si vendes productos.</span>
+                </span>
+              </label>
               <button type="button" id="schedule-save-btn" class="btn primary small">Guardar horario</button>
               <p id="schedule-save-status" class="appointments-status muted small"></p>
             </section>
@@ -433,7 +438,7 @@
       <div class="modal-card shortcuts-modal-card">
         <button id="shortcuts-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
         <h3>Atajos rápidos del negocio</h3>
-        <p class="muted small">Son los mismos en <strong>todos tus chats</strong>. Aparecen arriba del mensaje cuando atiendes a un cliente.</p>
+        <p class="muted small">Son los mismos en <strong>todos tus chats</strong>. Aparecen arriba del mensaje cuando atiendes a un cliente. Sube tu catálogo o carta en PDF o foto: la IA lo lee, responde precios y lo envía una sola vez por chat.</p>
         <div id="shortcuts-editor-list" class="shortcuts-editor-list"></div>
         <button type="button" id="shortcuts-add-btn" class="btn ghost small">+ Agregar atajo</button>
         <div class="shortcuts-modal-actions">
@@ -503,6 +508,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=96"></script>
+  <script src="/static/panel/app.js?v=107"></script>
 </body>
 </html>

@@ -11,12 +11,15 @@ class AppointmentScheduleResponse(BaseModel):
     open_time: str
     close_time: str
     slot_minutes: int
+    ai_booking_enabled: bool = False
+    ai_booking_allowed: bool = True
 
 
 class AppointmentScheduleUpdate(BaseModel):
     open_time: str = Field(min_length=4, max_length=5)
     close_time: str = Field(min_length=4, max_length=5)
     slot_minutes: int = Field(ge=15, le=240)
+    ai_booking_enabled: Optional[bool] = None
 
 
 class AppointmentSlotAppointment(BaseModel):
