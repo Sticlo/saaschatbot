@@ -122,8 +122,14 @@ class TenantSettingsUpdate(BaseModel):
     business_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
 
 
+class AlertRecipient(BaseModel):
+    name: str = Field(default="", max_length=60)
+    phone: str = Field(default="", max_length=32)
+    scope: str = Field(default="all", pattern="^(all|sales)$")
+
+
 class InterestAlertSettings(BaseModel):
-    alert_phone: str = Field(default="", max_length=32)
+    recipients: list[AlertRecipient] = Field(default_factory=list, max_length=10)
     alert_threshold: int = Field(default=10, ge=1, le=500)
 
 

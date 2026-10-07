@@ -107,7 +107,9 @@ services:
       DATABASE_SAVE_DATA_CONTACTS: "true"
       DATABASE_SAVE_DATA_CHATS: "true"
       DATABASE_SAVE_DATA_LABELS: "false"
-      DATABASE_SAVE_DATA_HISTORIC: "true"
+      # Omitel solo atiende chats que llegan después de escanear el QR: el historial del
+      # celular no se guarda (ahorra espacio y respaldos).
+      DATABASE_SAVE_DATA_HISTORIC: "false"
       DATABASE_SAVE_IS_ON_WHATSAPP: "false"
       DATABASE_DELETE_MESSAGE: "false"
       CACHE_REDIS_ENABLED: "true"

@@ -473,6 +473,46 @@ def _send_reminders(db: Session, now: datetime) -> int:
     return sent
 
 
+def _send_manual_renewal_reminders(db: Session, now: datetime) -> int:
+    """Quien pagó en la página de Wompi (sin cobro automático) recibe un aviso para renovar a mano."""
+    due = (
+        db.query(Subscription)
+        .filter(
+            Subscription.auto_renew.is_(False),
+            Subscription.cancel_at_period_end.is_(False),
+            Subscription.status == SubscriptionStatus.ACTIVE.value,
+            Subscription.current_period_end.isnot(None),
+            Subscription.current_period_end > now,
+            Subscription.current_period_end <= now + REMINDER_LEAD,
+        )
+        .all()
+    )
+    sent = 0
+    for subscription in due:
+        end = _aware(subscription.current_period_end)
+        if subscription.renewal_reminder_for is not None and _aware(subscription.renewal_reminder_for) == end:
+            continue
+        plan = subscription.plan
+        _notify(
+            db,
+            subscription.tenant_id,
+            subject=f"Tu plan de Omitel vence el {format_date(end)}",
+            title="Renueva tu plan",
+            paragraphs=[
+                f"Tu {plan.name} está activo hasta el {format_date(end)}. Para que la IA siga respondiendo a tus "
+                f"clientes, renueva por {format_cop(plan.price_cop)} desde Mi plan: puedes pagar con PSE, "
+                "Bancolombia, Daviplata, Nequi o tarjeta en la página de Wompi.",
+                "Si activas el cobro automático con tarjeta o Nequi, no tendrás que acordarte cada mes.",
+            ],
+            cta="Renovar mi plan",
+        )
+        subscription.renewal_reminder_for = end
+        sent += 1
+    if due:
+        db.commit()
+    return sent
+
+
 def _charge_due_renewals(db: Session, now: datetime) -> int:
     due_ids = [
         row.id
@@ -650,6 +690,7 @@ def process_auto_renewals(db: Session, now: Optional[datetime] = None) -> dict[s
         ("ended", _end_cancelled_periods),
         ("reconciled", _reconcile_pending),
         ("reminded", _send_reminders),
+        ("reminded_manual", _send_manual_renewal_reminders),
     ]
     if wompi_sync_enabled():
         steps.append(("charged", _charge_due_renewals))

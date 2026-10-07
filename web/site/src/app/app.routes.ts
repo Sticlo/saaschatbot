@@ -12,9 +12,14 @@ export const routes: Routes = [
     title: 'Precios — Omitel',
   },
   {
-    path: 'extras',
-    loadComponent: () => import('./pages/extras/extras.component').then((m) => m.ExtrasComponent),
-    title: 'Extras — Omitel',
+    path: 'nosotros',
+    loadComponent: () => import('./pages/company/about.component').then((m) => m.AboutComponent),
+    title: 'Nosotros — Omitel',
+  },
+  {
+    path: 'seguridad',
+    loadComponent: () => import('./pages/company/security.component').then((m) => m.SecurityComponent),
+    title: 'Seguridad y privacidad — Omitel',
   },
   {
     path: 'login',

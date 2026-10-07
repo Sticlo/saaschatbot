@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
-import { whatsappUrl } from '../../core/contact';
 import { readStorage, writeStorage } from '../../core/safe-storage';
 import { environment } from '../../../environments/environment';
 import { appUrl } from '../../core/oauth-url';
@@ -51,14 +50,6 @@ interface CompareRow {
 interface FaqItem {
   q: string;
   a: string;
-}
-
-interface WebOffering {
-  icon: string;
-  title: string;
-  line: string;
-  price: string;
-  highlights: string[];
 }
 
 interface DemoChatMessage {
@@ -140,7 +131,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   readonly stats: Stat[] = [
     { value: '24/7', label: 'IA respondiendo mientras duermes' },
-    { value: '−70%', label: 'Menos tiempo en chats repetitivos' },
+    { value: 'Segundos', label: 'Lo que tarda la IA en contestar' },
     { value: '1 panel', label: 'Todos tus chats en un solo lugar' },
     { value: '3 días', label: 'Prueba gratis, sin tarjeta' },
   ];
@@ -186,7 +177,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   readonly industries: Industry[] = [
     { name: 'Hoteles', example: 'Disponibilidad, tarifas y reservas' },
-    { name: 'Moteles', example: 'Precios, habitaciones y horarios' },
+    { name: 'Inmobiliarias', example: 'Arriendos, visitas y requisitos' },
     { name: 'Restaurantes', example: 'Reservas, menú y domicilios' },
     { name: 'Clínicas', example: 'Citas, horarios y especialidades' },
     { name: 'Tiendas', example: 'Stock, envíos y apartados' },
@@ -206,6 +197,10 @@ export class HomeComponent implements OnInit, OnDestroy {
       a: 'No. Conectas el mismo número que ya usas escaneando un QR. Tus chats siguen en el celular.',
     },
     {
+      q: '¿Me pueden bloquear el número de WhatsApp?',
+      a: 'Ninguna herramienta conectada a WhatsApp puede prometer riesgo cero, y desconfía de quien lo haga. Omitel está hecho para lo que WhatsApp permite: responder a los clientes que te escriben. No envía mensajes masivos ni escribe a desconocidos, y la IA espera unos segundos antes de contestar, como una persona. Los bloqueos casi siempre vienen del spam, así que usado para atender clientes el riesgo es bajo. Si necesitas envíos masivos o la API oficial de WhatsApp, te armamos una versión a medida: escríbenos.',
+    },
+    {
       q: '¿La IA responde sola a todos?',
       a: 'Tú decides chat por chat. Puedes activar IA global, marcar «Interesado» o poner un chat en modo manual.',
     },
@@ -218,37 +213,6 @@ export class HomeComponent implements OnInit, OnDestroy {
       a: 'La IA deja de responder hasta que actives el plan: $200.000/mes con todo incluido. Tus chats y tu configuración quedan guardados. Sin contratos — cancelas cuando quieras.',
     },
   ];
-
-  readonly webOfferings: WebOffering[] = [
-    {
-      icon: 'landing',
-      title: 'Páginas web y landings',
-      line: 'Sitio profesional, rápido y listo para captar clientes desde Google o redes.',
-      price: 'Desde $600.000',
-      highlights: ['Diseño responsive', 'Botón a WhatsApp', 'Lista para publicar'],
-    },
-    {
-      icon: 'app',
-      title: 'Sistemas web para negocios',
-      line: 'Web con varias páginas y secciones para mejorar tu SEO. Pensado para empresas de servicios.',
-      price: 'Desde $1.000.000',
-      highlights: ['Más páginas en Google', 'Empresas de servicios', 'WhatsApp y formularios'],
-    },
-    {
-      icon: 'platform',
-      title: 'Sistemas a medida',
-      line: 'Plataformas completas con varios módulos, roles, permisos e integraciones.',
-      price: 'Desde $3.000.000',
-      highlights: ['Arquitectura escalable', 'Multi-usuario', 'Soporte en implementación'],
-    },
-  ];
-
-  webQuoteHref(topic?: string): string {
-    const message = topic
-      ? `Hola, me interesa cotizar: ${topic}`
-      : 'Hola, me interesa una cotización de desarrollo web (páginas o aplicaciones).';
-    return whatsappUrl(message);
-  }
 
   readonly scenarios: DemoScenario[] = [
     {

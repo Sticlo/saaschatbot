@@ -8,7 +8,8 @@
       <nav class="nav-links" aria-label="Principal">
         <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
         <a routerLink="/precios" routerLinkActive="active">Precios</a>
-        <a routerLink="/extras" routerLinkActive="active">Extras</a>
+        <a routerLink="/nosotros" routerLinkActive="active">Nosotros</a>
+        <a routerLink="/seguridad" routerLinkActive="active">Seguridad</a>
       </nav>
 
       <button
@@ -111,8 +112,8 @@
   </div>
   <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" (click)="closeMobileNav()">Inicio</a>
   <a routerLink="/precios" routerLinkActive="active" (click)="closeMobileNav()">Precios</a>
-  <a routerLink="/extras" routerLinkActive="active" (click)="closeMobileNav()">Extras</a>
-  <ng-container *ngIf="user$ | async; else guestMobileLinks">
+  <a routerLink="/nosotros" routerLinkActive="active" (click)="closeMobileNav()">Nosotros</a>
+  <a routerLink="/seguridad" routerLinkActive="active" (click)="closeMobileNav()">Seguridad</a>  <ng-container *ngIf="user$ | async; else guestMobileLinks">
     <a routerLink="/mi-plan" (click)="closeMobileNav()">{{ planCtaLabel(subscription$ | async) }}</a>
     <a [href]="panelUrl" (click)="closeMobileNav()">Panel WhatsApp</a>
     <button type="button" class="mobile-nav-logout" [disabled]="loggingOut" (click)="logout(); closeMobileNav()">
@@ -168,7 +169,8 @@
     </div>
     <div class="footer-links">
       <a routerLink="/precios">Precios</a>
-      <a routerLink="/extras">Extras</a>
+      <a routerLink="/nosotros">Nosotros</a>
+      <a routerLink="/seguridad">Seguridad</a>
       <ng-container *ngIf="user$ | async; else guestFooter">
         <a [href]="panelUrl">Panel WhatsApp</a>
         <button type="button" class="footer-logout" (click)="logout()">Salir</button>

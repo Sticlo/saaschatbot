@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=41" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=42" />
 </head>
 <body>
   <div id="app">
@@ -314,17 +314,18 @@
             <section class="ai-shortcuts-card">
               <div class="ai-shortcuts-card-head">
                 <h3>Alertas por WhatsApp</h3>
-                <p class="muted small">Te escribimos a tu celular cuando se acumulen clientes <strong>interesados sin responder</strong>, para que no se enfríe ninguna venta.</p>
+                <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando un cliente <strong>ya quiere comprar</strong> o agenda una cita, con sus datos.</p>
               </div>
+              <div class="alert-recipients-head">
+                <span>Números que reciben las alertas</span>
+                <span class="ai-field-hint">Con indicativo. Hasta 5: tú, el encargado o quienes despachan.</span>
+              </div>
+              <div id="alert-recipients" class="alert-recipients"></div>
+              <button type="button" id="alert-add-btn" class="btn ghost small alert-add-btn">+ Agregar otro número</button>
               <div class="alert-settings-row">
                 <label class="ai-field">
-                  <span>Número que recibe las alertas</span>
-                  <span class="ai-field-hint">Tu celular personal o el del encargado, con indicativo. Vacío = sin alertas.</span>
-                  <input type="tel" id="alert-phone" maxlength="32" placeholder="+57 300 123 4567" />
-                </label>
-                <label class="ai-field">
-                  <span>Avisar cuando haya</span>
-                  <span class="ai-field-hint">interesados sin responder</span>
+                  <span>Avisar de interesados sin responder cuando haya</span>
+                  <span class="ai-field-hint">Llega solo a los números con «Todas las alertas».</span>
                   <input type="number" id="alert-threshold" min="1" max="500" value="10" />
                 </label>
               </div>
@@ -508,6 +509,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=107"></script>
+  <script src="/static/panel/app.js?v=108"></script>
 </body>
 </html>

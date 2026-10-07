@@ -350,6 +350,34 @@ legend {
   gap: 0.75rem;
 }
 
+.wompi-other {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+
+  p {
+    margin: 0;
+  }
+}
+
+.method-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+    border-radius: 999px;
+    background: var(--surface-2);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+}
+
 .secure-banner {
   display: flex;
   gap: 0.6rem;

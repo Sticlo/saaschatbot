@@ -157,9 +157,33 @@
                 [disabled]="processing" (click)="tab = 'CARD'">Tarjeta</button>
               <button type="button" role="tab" [class.active]="tab === 'NEQUI'" [attr.aria-selected]="tab === 'NEQUI'"
                 [disabled]="processing" (click)="tab = 'NEQUI'">Nequi</button>
+              @if (chargesNow) {
+                <button type="button" role="tab" [class.active]="payInWompi" [attr.aria-selected]="payInWompi"
+                  [disabled]="processing" (click)="tab = 'WOMPI'">PSE y más</button>
+              }
             </div>
 
-            @if (tab === 'CARD') {
+            @if (payInWompi) {
+              <div class="wompi-other">
+                <p>
+                  Paga en la <strong>página oficial de Wompi</strong> con el medio que prefieras:
+                </p>
+                <ul class="method-chips">
+                  <li>PSE (todos los bancos)</li>
+                  <li>Transferencia Bancolombia</li>
+                  <li>Daviplata</li>
+                  <li>Nequi</li>
+                  <li>Tarjeta</li>
+                </ul>
+                <p class="hint">
+                  Este pago activa 30 días y <strong>no se renueva solo</strong>. Te avisamos por correo 3 días antes de
+                  que venza para que renueves.
+                </p>
+                <a class="btn btn-primary" routerLink="/precios" [queryParams]="{ plan: selectedPlanSlug, once: 1 }">
+                  Ir a pagar en Wompi · {{ formatCop(priceForAuthorization) }}
+                </a>
+              </div>
+            } @else if (tab === 'CARD') {
               <div class="fields">
                 <label class="field-wide">
                   Número de la tarjeta
@@ -200,6 +224,7 @@
               </p>
             }
 
+            @if (!payInWompi) {
             <div class="consents">
               <label class="check">
                 <input type="checkbox" name="acceptAutoRenew" [(ngModel)]="acceptAutoRenew" [disabled]="processing" />
@@ -221,26 +246,23 @@
                 </span>
               </label>
             </div>
+            }
 
             @if (error) {
               <p class="notice notice-error" role="alert">{{ error }}</p>
             }
 
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary" [disabled]="processing">{{ submitLabel }}</button>
-              @if (subscription.payment_method_label || subscription.is_paid) {
-                <button type="button" class="btn btn-ghost" [disabled]="processing" (click)="closeMethodForm()">
-                  Cancelar
-                </button>
-              }
-            </div>
-
-            @if (chargesNow) {
-              <p class="hint">
-                ¿Prefieres no guardar la tarjeta?
-                <a routerLink="/precios" [queryParams]="{ plan: selectedPlanSlug, once: 1 }">Paga una sola vez en la página de Wompi</a>
-                (tarjeta, PSE o Nequi).
-              </p>
+            @if (!payInWompi || subscription.payment_method_label || subscription.is_paid) {
+              <div class="form-actions">
+                @if (!payInWompi) {
+                  <button type="submit" class="btn btn-primary" [disabled]="processing">{{ submitLabel }}</button>
+                }
+                @if (subscription.payment_method_label || subscription.is_paid) {
+                  <button type="button" class="btn btn-ghost" [disabled]="processing" (click)="closeMethodForm()">
+                    Cancelar
+                  </button>
+                }
+              </div>
             }
           </form>
         }

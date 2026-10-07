@@ -451,7 +451,7 @@
           <div class="panel-mock-window" data-parallax="20">
             <div class="panel-mock-bar">
               <span></span><span></span><span></span>
-              <em>panel.omitel.co</em>
+              <em>app.omitel.net</em>
             </div>
             <div class="panel-mock-body">
               <aside class="panel-mock-sidebar">
@@ -523,67 +523,8 @@
       </div>
     </section>
 
-    <!-- Web solutions -->
-    <section class="web-solutions depth-chapter" data-chapter="05" data-atmosphere="web">
-      <div class="section-inner" data-scene>
-        <div class="web-solutions-head" data-parallax="-20">
-          <div>
-            <p class="section-eyebrow" data-reveal>También desarrollamos</p>
-            <h2 class="section-title" data-mask-reveal>
-              Soluciones web<br class="br-desktop" />
-              para tu negocio
-            </h2>
-            <p class="section-lead" data-reveal>
-              Además de automatizar WhatsApp, diseñamos y construimos páginas web,
-              aplicaciones y sistemas a la medida — conectados con tu operación y listos para vender.
-            </p>
-          </div>
-          <div class="web-solutions-actions" data-reveal>
-            <a routerLink="/extras" class="link-hero">Ver todos los servicios ›</a>
-            <a
-              [href]="webQuoteHref()"
-              class="btn-hero btn-hero--primary btn-hero--compact"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Cotizar por WhatsApp
-            </a>
-          </div>
-        </div>
-
-        <div class="web-grid" data-parallax="14">
-          <article
-            class="web-card depth-card"
-            *ngFor="let item of webOfferings; let i = index"
-            [style.--i]="i"
-            data-tilt
-            data-reveal
-          >
-            <span class="bento-light" aria-hidden="true"></span>
-            <span class="web-card-icon web-card-icon--{{ item.icon }}" aria-hidden="true"></span>
-            <div class="web-card-top">
-              <h3>{{ item.title }}</h3>
-              <span class="web-card-price">{{ item.price }}</span>
-            </div>
-            <p class="web-card-line">{{ item.line }}</p>
-            <ul class="web-card-list">
-              <li *ngFor="let h of item.highlights">{{ h }}</li>
-            </ul>
-            <a
-              [href]="webQuoteHref(item.title)"
-              class="web-card-link"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Cotizar ›
-            </a>
-          </article>
-        </div>
-      </div>
-    </section>
-
     <!-- How it works -->
-    <section class="how depth-chapter" data-chapter="06" data-atmosphere="how">
+    <section class="how depth-chapter" data-chapter="05" data-atmosphere="how">
       <div class="how-inner" data-scene>
         <div data-parallax="-20">
           <p class="how-label" data-reveal>Cómo funciona</p>
@@ -608,7 +549,7 @@
     </section>
 
     <!-- Compare -->
-    <section class="compare depth-chapter" data-chapter="07" data-atmosphere="compare">
+    <section class="compare depth-chapter" data-chapter="06" data-atmosphere="compare">
       <div class="section-inner" data-scene>
         <div data-parallax="-16">
           <p class="section-eyebrow" data-reveal>Antes y después</p>
@@ -629,7 +570,7 @@
     </section>
 
     <!-- FAQ -->
-    <section class="faq depth-chapter" data-chapter="08">
+    <section class="faq depth-chapter" data-chapter="07">
       <div class="section-inner faq-inner" data-scene>
         <div data-parallax="-16">
           <p class="section-eyebrow" data-reveal>Preguntas frecuentes</p>

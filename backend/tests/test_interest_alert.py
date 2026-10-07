@@ -10,7 +10,11 @@ from tests.conftest import requires_db
 from tests.test_phase1 import _register
 
 
-def _setup(db, *, threshold: int):
+OWNER = {"name": "Dueña", "phone": "+573009998877", "scope": "all"}
+DISPATCH = {"name": "Carlos", "phone": "+573005556644", "scope": "sales"}
+
+
+def _setup(db, *, threshold: int, recipients: list[dict] | None = None):
     from app.domain.entities import Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import WhatsAppStatus
 
@@ -28,7 +32,10 @@ def _setup(db, *, threshold: int):
             status=WhatsAppStatus.CONNECTED.value,
         )
     )
-    tenant.profile = TenantProfile(alert_phone="+573009998877", alert_threshold=threshold)
+    tenant.profile = TenantProfile(
+        alert_recipients=recipients if recipients is not None else [OWNER],
+        alert_threshold=threshold,
+    )
     db.flush()
     db.refresh(tenant)
     return tenant
@@ -144,6 +151,55 @@ def test_failed_send_retries_on_next_check(monkeypatch):
             db.rollback()
 
 
+@requires_db
+def test_backlog_alert_goes_to_everyone_on_all_alerts_but_not_to_dispatch(monkeypatch):
+    from app.application.conversations import interest_alert_service as svc
+    from app.infrastructure.cache.redis_client import get_redis
+    from app.infrastructure.persistence.database import SessionLocal
+
+    sent: list[str] = []
+    monkeypatch.setattr(svc, "send_alert", lambda _session, phone, _text: sent.append(phone))
+    manager = {"name": "Encargado", "phone": "+573001231234", "scope": "all"}
+
+    with SessionLocal() as db:
+        tenant = _setup(db, threshold=1, recipients=[OWNER, DISPATCH, manager])
+        key = svc._alert_key(tenant.id)
+        try:
+            _conversation(db, tenant, name="Ana", history=("contact",))
+            assert svc.check_interest_backlog(db, tenant) is True
+            assert sorted(sent) == sorted([OWNER["phone"], manager["phone"]])
+        finally:
+            get_redis().delete(key)
+            db.rollback()
+
+
+@requires_db
+def test_one_broken_number_does_not_block_the_rest(monkeypatch):
+    from app.application.conversations import interest_alert_service as svc
+    from app.infrastructure.cache.redis_client import get_redis
+    from app.infrastructure.persistence.database import SessionLocal
+
+    delivered: list[str] = []
+
+    def flaky(_session, phone, _text):
+        if phone == OWNER["phone"]:
+            raise RuntimeError("número sin WhatsApp")
+        delivered.append(phone)
+
+    monkeypatch.setattr(svc, "send_alert", flaky)
+    manager = {"name": "Encargado", "phone": "+573001231234", "scope": "all"}
+    with SessionLocal() as db:
+        tenant = _setup(db, threshold=1, recipients=[OWNER, manager])
+        key = svc._alert_key(tenant.id)
+        try:
+            _conversation(db, tenant, name="Ana", history=("contact",))
+            assert svc.check_interest_backlog(db, tenant) is True
+            assert delivered == [manager["phone"]]
+        finally:
+            get_redis().delete(key)
+            db.rollback()
+
+
 def test_alert_phone_validation():
     from app.application.conversations.interest_alert_service import InterestAlertError, normalize_alert_phone
 
@@ -153,6 +209,45 @@ def test_alert_phone_validation():
         normalize_alert_phone("123")
 
 
+def test_recipients_are_cleaned_deduplicated_and_capped():
+    from app.application.conversations.interest_alert_service import (
+        InterestAlertError,
+        normalize_alert_recipients,
+    )
+
+    cleaned = normalize_alert_recipients(
+        [
+            {"name": "  Dueña  ", "phone": "+57 300 999 8877", "scope": "all"},
+            {"name": "Fila vacía", "phone": "", "scope": "sales"},
+            {"name": "Repetido", "phone": "+57 3009998877", "scope": "sales"},
+            {"name": "Carlos", "phone": "+57 300 555 6644", "scope": "sales"},
+            {"name": "Sin tipo", "phone": "+57 300 123 1234", "scope": "raro"},
+        ]
+    )
+    assert cleaned == [
+        {"name": "Dueña", "phone": "+573009998877", "scope": "all"},
+        {"name": "Carlos", "phone": "+573005556644", "scope": "sales"},
+        {"name": "Sin tipo", "phone": "+573001231234", "scope": "all"},
+    ]
+
+    with pytest.raises(InterestAlertError, match="Pedro"):
+        normalize_alert_recipients([{"name": "Pedro", "phone": "123", "scope": "sales"}])
+    too_many = [{"name": "", "phone": f"+57300000000{i}", "scope": "sales"} for i in range(6)]
+    with pytest.raises(InterestAlertError):
+        normalize_alert_recipients(too_many)
+
+
+def test_team_numbers_never_get_ai():
+    from app.application.conversations.interest_alert_service import is_alert_phone
+    from app.domain.entities import Tenant, TenantProfile
+
+    tenant = Tenant(business_name="X", slug="x")
+    tenant.profile = TenantProfile(alert_recipients=[OWNER, DISPATCH])
+    assert is_alert_phone(tenant, "+573005556644") is True
+    assert is_alert_phone(tenant, "+573009998877") is True
+    assert is_alert_phone(tenant, "+573001112233") is False
+
+
 @requires_db
 def test_interest_alert_settings_api(client: TestClient):
     auth = _register(client)
@@ -160,20 +255,29 @@ def test_interest_alert_settings_api(client: TestClient):
 
     r = client.get("/api/v1/tenants/me/interest-alert", headers=headers)
     assert r.status_code == 200, r.text
-    assert r.json() == {"alert_phone": "", "alert_threshold": 10, "pending_count": 0}
+    assert r.json() == {"recipients": [], "alert_threshold": 10, "pending_count": 0}
 
     r = client.put(
         "/api/v1/tenants/me/interest-alert",
-        json={"alert_phone": "+57 300 999 8877", "alert_threshold": 15},
+        json={
+            "recipients": [
+                {"name": "Yo", "phone": "+57 300 999 8877", "scope": "all"},
+                {"name": "Carlos", "phone": "+57 300 555 6644", "scope": "sales"},
+            ],
+            "alert_threshold": 15,
+        },
         headers=headers,
     )
     assert r.status_code == 200, r.text
-    assert r.json()["alert_phone"] == "+573009998877"
+    assert r.json()["recipients"] == [
+        {"name": "Yo", "phone": "+573009998877", "scope": "all"},
+        {"name": "Carlos", "phone": "+573005556644", "scope": "sales"},
+    ]
     assert r.json()["alert_threshold"] == 15
 
     r = client.put(
         "/api/v1/tenants/me/interest-alert",
-        json={"alert_phone": "123", "alert_threshold": 15},
+        json={"recipients": [{"name": "Mal", "phone": "123", "scope": "all"}], "alert_threshold": 15},
         headers=headers,
     )
     assert r.status_code == 422

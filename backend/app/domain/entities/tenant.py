@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -90,7 +90,10 @@ class TenantProfile(Base):
     schedule_close_time: Mapped[str] = mapped_column(String(5), nullable=False, default="18:00")
     schedule_slot_minutes: Mapped[int] = mapped_column(nullable=False, default=60)
     ai_booking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    alert_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # [{"name": str, "phone": "+57…", "scope": "all" | "sales"}]
+    alert_recipients: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     alert_threshold: Mapped[int] = mapped_column(nullable=False, default=10)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

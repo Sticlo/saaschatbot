@@ -27,6 +27,12 @@ DEFAULT_ALERT_THRESHOLD = 10
 ALERT_REPEAT_SECONDS = 24 * 3600
 SWEEP_INTERVAL_SECONDS = 60
 MAX_NAMES_IN_ALERT = 5
+MAX_ALERT_RECIPIENTS = 5
+
+# "all": dueño/encargado — todas las alertas. "sales": quien despacha — solo ventas listas y citas.
+SCOPE_ALL = "all"
+SCOPE_SALES = "sales"
+ALERT_SCOPES = (SCOPE_ALL, SCOPE_SALES)
 
 _sweeper_thread: Optional[threading.Thread] = None
 _sweeper_stop = threading.Event()
@@ -46,9 +52,47 @@ def normalize_alert_phone(raw: str) -> str:
     return phone
 
 
+def normalize_alert_recipients(items: list[dict]) -> list[dict]:
+    """Filas sin número se descartan; números repetidos cuentan una sola vez."""
+    recipients: list[dict] = []
+    for item in items:
+        name = " ".join(str(item.get("name") or "").split())[:60]
+        raw_phone = str(item.get("phone") or "")
+        try:
+            phone = normalize_alert_phone(raw_phone)
+        except InterestAlertError:
+            who = name or raw_phone.strip()
+            raise InterestAlertError(
+                f"Número inválido ({who}) — escríbelo con indicativo, ej. +57 300 123 4567"
+            )
+        if not phone or any(phone_match_tail(r["phone"], phone) for r in recipients):
+            continue
+        scope = item.get("scope") if item.get("scope") in ALERT_SCOPES else SCOPE_ALL
+        recipients.append({"name": name, "phone": phone, "scope": scope})
+    if len(recipients) > MAX_ALERT_RECIPIENTS:
+        raise InterestAlertError(f"Máximo {MAX_ALERT_RECIPIENTS} números para alertas")
+    return recipients
+
+
+def alert_recipients(profile: Optional[TenantProfile]) -> list[dict]:
+    if profile is None:
+        return []
+    return [r for r in (profile.alert_recipients or []) if isinstance(r, dict) and r.get("phone")]
+
+
+def alert_phones(profile: Optional[TenantProfile], *, sales: bool = False) -> list[str]:
+    """sales=True: ventas listas y citas (todo el equipo). False: solo quienes reciben todo."""
+    return [
+        r["phone"]
+        for r in alert_recipients(profile)
+        if sales or r.get("scope", SCOPE_ALL) == SCOPE_ALL
+    ]
+
+
 def is_alert_phone(tenant: Tenant, phone: str) -> bool:
-    alert_phone = tenant.profile.alert_phone if tenant.profile else None
-    return bool(alert_phone and phone and phone_match_tail(alert_phone, phone))
+    if not phone:
+        return False
+    return any(phone_match_tail(p, phone) for p in alert_phones(tenant.profile, sales=True))
 
 
 def unanswered_interested_conversations(db: Session, tenant_id: uuid.UUID) -> list[Conversation]:
@@ -105,6 +149,18 @@ def send_alert(session: WhatsAppSession, alert_phone: str, text: str) -> None:
     send_text(session.instance_name, phone_to_evolution_number(alert_phone), text)
 
 
+def send_alerts(session: WhatsAppSession, phones: list[str], text: str) -> int:
+    """Un número que falle no impide avisar a los demás. Devuelve cuántos se enviaron."""
+    sent = 0
+    for phone in phones:
+        try:
+            send_alert(session, phone, text)
+            sent += 1
+        except Exception:
+            log.warning("No se pudo enviar alerta a %s", phone[-4:], exc_info=True)
+    return sent
+
+
 def _alert_key(tenant_id: uuid.UUID) -> str:
     return tenant_cache_key(str(tenant_id), "interest_alert_sent")
 
@@ -113,7 +169,8 @@ def check_interest_backlog(db: Session, tenant: Tenant) -> bool:
     """Un aviso al cruzar el umbral; se repite cada 24 h mientras siga el atraso.
     Si el atraso baja del umbral, el próximo cruce vuelve a avisar. True = aviso enviado."""
     profile = tenant.profile
-    if profile is None or not profile.alert_phone:
+    phones = alert_phones(profile)
+    if not phones:
         return False
     if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value or tenant.whatsapp_session is None:
         return False
@@ -129,15 +186,9 @@ def check_interest_backlog(db: Session, tenant: Tenant) -> bool:
     if not client.set(key, "1", nx=True, ex=ALERT_REPEAT_SECONDS):
         return False
 
-    try:
-        send_alert(
-            tenant.whatsapp_session,
-            profile.alert_phone,
-            build_alert_text(tenant.business_name, pending),
-        )
-    except Exception:
+    if not send_alerts(tenant.whatsapp_session, phones, build_alert_text(tenant.business_name, pending)):
         client.delete(key)
-        log.exception("No se pudo enviar alerta de interesados tenant=%s", tenant.id)
+        log.error("No se pudo enviar alerta de interesados tenant=%s", tenant.id)
         return False
     log.info("Alerta de interesados enviada tenant=%s pendientes=%s", tenant.id, len(pending))
     return True
@@ -152,7 +203,7 @@ def _sweep_once() -> None:
             .filter(
                 Tenant.is_active.is_(True),
                 Tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value,
-                TenantProfile.alert_phone.isnot(None),
+                TenantProfile.alert_recipients[0].isnot(None),
             )
             .all()
         )

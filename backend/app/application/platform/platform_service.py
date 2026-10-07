@@ -22,6 +22,7 @@ from app.application.billing.subscription_service import (
     trial_is_running,
 )
 from app.application.billing.tenant_service import log_audit
+from app.application.conversations.interest_alert_service import alert_recipients
 from app.application.platform.incidents import PROBLEM_ACTIONS
 from app.application.platform.tenant_overrides import (
     FEATURES,
@@ -263,7 +264,7 @@ def tenant_detail(db: Session, tenant: Tenant) -> dict[str, Any]:
         "industry": profile.industry if profile else None,
         "ai_mode": profile.ai_mode if profile else None,
         "ai_booking_enabled": bool(profile.ai_booking_enabled) if profile else False,
-        "alert_phone_set": bool(profile and profile.alert_phone),
+        "alert_phone_set": bool(alert_recipients(profile)),
         "whatsapp": {
             "status": tenant.whatsapp_status,
             "phone_number": session.phone_number if session else None,

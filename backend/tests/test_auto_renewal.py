@@ -391,6 +391,26 @@ def test_reminder_is_sent_once_per_period(client: TestClient, wompi, emails):
     assert _charges_for(wompi, tenant_id) == []
 
 
+def test_manual_payer_gets_one_renewal_reminder_and_no_charge(client: TestClient, wompi, emails):
+    _, tenant_id, email = _register(client)
+    _make_paid_with_card(tenant_id, ends_in=timedelta(days=2, hours=12))
+    with SessionLocal() as db:
+        sub = db.query(Subscription).filter(Subscription.tenant_id == uuid.UUID(tenant_id)).one()
+        sub.auto_renew = False
+        sub.payment_source_id = None
+        sub.payment_method_type = None
+        sub.payment_method_label = None
+        db.commit()
+    _run_sweep()
+    _run_sweep()
+    mails = _mails_for(emails, email)
+    reminders = [mail for mail in mails if "vence el" in mail["subject"]]
+    assert len(reminders) == 1
+    assert "PSE" in reminders[0]["paragraphs"][0]
+    assert not any("Pronto renovamos" in mail["subject"] for mail in mails)
+    assert _charges_for(wompi, tenant_id) == []
+
+
 # —— Cancelación ——
 
 

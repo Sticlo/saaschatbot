@@ -14,6 +14,7 @@
   const API = "/api/v1";
   const LEGACY_STORAGE_KEY = "saaschatbot_token";
   const THEME_STORAGE_KEY = "omitel_panel_theme";
+  const MAX_ALERT_RECIPIENTS = 5;
 
   const state = {
     token: null,
@@ -1674,10 +1675,65 @@
       if (el) el.disabled = ro;
     });
     if ($("biz-save-btn")) $("biz-save-btn").disabled = ro;
-    ["alert-phone", "alert-threshold", "alert-save-btn", "alert-test-btn"].forEach((id) => {
+    ["alert-threshold", "alert-save-btn", "alert-test-btn"].forEach((id) => {
       const el = $(id);
       if (el) el.disabled = ro;
     });
+    document.querySelectorAll("#alert-recipients input, #alert-recipients select, #alert-recipients button")
+      .forEach((el) => { el.disabled = ro; });
+    updateAlertAddButton();
+  }
+
+  function alertRecipientRow(r) {
+    const scope = r.scope === "sales" ? "sales" : "all";
+    return `
+      <div class="alert-recipient">
+        <input type="text" class="alert-name" maxlength="60" placeholder="Nombre (ej. Carlos, despachos)" value="${escapeHtml(r.name || "")}" />
+        <input type="tel" class="alert-phone" maxlength="32" placeholder="+57 300 123 4567" value="${escapeHtml(r.phone || "")}" />
+        <select class="alert-scope" aria-label="Qué alertas recibe">
+          <option value="all"${scope === "all" ? " selected" : ""}>Todas las alertas</option>
+          <option value="sales"${scope === "sales" ? " selected" : ""}>Solo ventas y citas</option>
+        </select>
+        <button type="button" class="alert-remove" aria-label="Quitar número" title="Quitar">×</button>
+      </div>`;
+  }
+
+  function renderAlertRecipients(list) {
+    const rows = list && list.length ? list : [{ name: "", phone: "", scope: "all" }];
+    $("alert-recipients").innerHTML = rows.map(alertRecipientRow).join("");
+    updateAlertAddButton();
+  }
+
+  function readAlertRecipients() {
+    return [...document.querySelectorAll("#alert-recipients .alert-recipient")].map((row) => ({
+      name: row.querySelector(".alert-name").value.trim(),
+      phone: row.querySelector(".alert-phone").value.trim(),
+      scope: row.querySelector(".alert-scope").value,
+    }));
+  }
+
+  function updateAlertAddButton() {
+    const btn = $("alert-add-btn");
+    if (!btn) return;
+    const count = document.querySelectorAll("#alert-recipients .alert-recipient").length;
+    btn.classList.toggle("hidden", count >= MAX_ALERT_RECIPIENTS);
+    btn.disabled = !state.canManageGlobal;
+  }
+
+  function addAlertRecipient() {
+    if (!state.canManageGlobal) return;
+    const current = readAlertRecipients();
+    if (current.length >= MAX_ALERT_RECIPIENTS) return;
+    renderAlertRecipients([...current, { name: "", phone: "", scope: current.length ? "sales" : "all" }]);
+    const names = document.querySelectorAll("#alert-recipients .alert-name");
+    names[names.length - 1]?.focus();
+  }
+
+  function removeAlertRecipient(button) {
+    if (!state.canManageGlobal) return;
+    button.closest(".alert-recipient")?.remove();
+    if (!document.querySelector("#alert-recipients .alert-recipient")) renderAlertRecipients([]);
+    updateAlertAddButton();
   }
 
   function setAlertStatus(text) {
@@ -1686,7 +1742,8 @@
   }
 
   function fillInterestAlert(cfg) {
-    $("alert-phone").value = cfg?.alert_phone || "";
+    renderAlertRecipients(cfg?.recipients || []);
+    updateAiSetupControls();
     $("alert-threshold").value = cfg?.alert_threshold || 10;
     const pending = $("alert-pending");
     if (pending) {
@@ -1714,14 +1771,15 @@
       const cfg = await api("/tenants/me/interest-alert", {
         method: "PUT",
         body: JSON.stringify({
-          alert_phone: $("alert-phone").value.trim(),
+          recipients: readAlertRecipients(),
           alert_threshold: Number($("alert-threshold").value) || 10,
         }),
       });
       fillInterestAlert(cfg);
+      const n = (cfg.recipients || []).length;
       setAlertStatus(
-        cfg.alert_phone
-          ? `✓ Guardado — te avisaremos a ${cfg.alert_phone} al llegar a ${cfg.alert_threshold} interesados sin responder`
+        n
+          ? `✓ Guardado — ${n === 1 ? "1 número recibirá" : `${n} números recibirán`} las alertas`
           : "✓ Alertas desactivadas"
       );
     } catch (err) {
@@ -1737,7 +1795,7 @@
     setAlertStatus("Enviando prueba…");
     try {
       await api("/tenants/me/interest-alert/test", { method: "POST" }, 20000);
-      setAlertStatus("✓ Prueba enviada — revisa ese WhatsApp");
+      setAlertStatus("✓ Prueba enviada a todos los números guardados — revisen su WhatsApp");
     } catch (err) {
       setAlertStatus(err.message);
     } finally {
@@ -2999,6 +3057,11 @@
   $("business-name-cta").addEventListener("click", openBusinessNameSetup);
   $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
   $("alert-test-btn").addEventListener("click", () => testInterestAlert());
+  $("alert-add-btn").addEventListener("click", () => addAlertRecipient());
+  $("alert-recipients").addEventListener("click", (e) => {
+    const btn = e.target.closest(".alert-remove");
+    if (btn) removeAlertRecipient(btn);
+  });
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("shortcuts-add-btn").addEventListener("click", () => {
     if (state.shortcutsDraft.length >= 12) return;

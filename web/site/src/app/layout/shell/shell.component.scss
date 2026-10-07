@@ -19,6 +19,16 @@
   border-bottom-color: var(--header-border);
 }
 
+/* En teléfonos el blur del header se recalcula en cada frame de scroll; el fondo ya es casi opaco. */
+@media (max-width: 900px), (pointer: coarse) {
+  .site-header,
+  :host.shell-home .site-header {
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 :host.shell-home .brand {
   color: var(--text);
 }

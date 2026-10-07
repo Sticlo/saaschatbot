@@ -3,6 +3,7 @@ import { Component, OnDestroy, OnInit, PLATFORM_ID, inject } from '@angular/core
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, combineLatest } from 'rxjs';
 
+import { whatsappUrl } from '../../core/contact';
 import { ShellComponent } from '../../layout/shell/shell.component';
 import { Plan } from '../../core/models/plan.model';
 import { CheckoutStatus, SubscriptionSummary } from '../../core/models/billing.model';
@@ -59,6 +60,16 @@ export class PricingComponent implements OnInit, OnDestroy {
     'La IA responde y te avisa quién quiere comprar',
     'Sin tarjeta de crédito',
   ];
+
+  readonly officialApiFeatures: string[] = [
+    'Conexión oficial de WhatsApp (Meta)',
+    'Envíos masivos con plantillas aprobadas por Meta',
+    'Implementación y precio según tu operación',
+  ];
+
+  readonly officialApiHref = whatsappUrl(
+    'Hola, me interesa Omitel con la API oficial de WhatsApp para mi empresa.',
+  );
 
   ngOnInit(): void {
     this.plans = this.fallbackPlans();

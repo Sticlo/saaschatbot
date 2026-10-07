@@ -3,6 +3,7 @@ import { AfterViewInit, Directive, ElementRef, NgZone, OnDestroy, PLATFORM_ID, i
 import type Lenis from 'lenis';
 
 import { ATMOSPHERES, AtmosphereService, AtmosphereState, presetToState } from './atmosphere.service';
+import { isLiteDevice } from './lite-mode';
 
 type Gsap = typeof import('gsap').gsap;
 type ScrollTriggerStatic = typeof import('gsap/ScrollTrigger').ScrollTrigger;
@@ -73,10 +74,12 @@ export class ScrollExperienceDirective implements AfterViewInit, OnDestroy {
   }
 
   private async boot(): Promise<void> {
-    const [{ gsap }, { ScrollTrigger }, { default: LenisCtor }] = await Promise.all([
+    const reduced = window.matchMedia(REDUCED_QUERY).matches;
+    const smoothScroll = !reduced && !isLiteDevice();
+    const [{ gsap }, { ScrollTrigger }, lenisModule] = await Promise.all([
       import('gsap'),
       import('gsap/ScrollTrigger'),
-      import('lenis'),
+      smoothScroll ? import('lenis') : Promise.resolve(null),
     ]);
     if (this.destroyed) {
       return;
@@ -84,10 +87,10 @@ export class ScrollExperienceDirective implements AfterViewInit, OnDestroy {
     gsap.registerPlugin(ScrollTrigger);
     this.gsap = gsap;
 
-    const reduced = window.matchMedia(REDUCED_QUERY).matches;
     document.documentElement.classList.add('atmos-live');
 
-    if (!reduced) {
+    if (lenisModule) {
+      const LenisCtor = lenisModule.default;
       const lenis = new LenisCtor({ lerp: LENIS_LERP, smoothWheel: true, anchors: true });
       lenis.on('scroll', ScrollTrigger.update);
       const tick = (time: number) => lenis.raf(time * 1000);

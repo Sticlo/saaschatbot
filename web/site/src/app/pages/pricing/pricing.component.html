@@ -115,6 +115,23 @@
         </div>
       </article>
 
+      <article class="trial-card enterprise-card">
+        <div class="trial-inner">
+          <div>
+            <p class="trial-eyebrow">Empresas · A medida</p>
+            <h3>Omitel con la API oficial de WhatsApp</h3>
+            <p class="trial-desc">
+              Para negocios que necesitan la conexión oficial de Meta, más seguridad para su número o envíos masivos
+              a sus clientes.
+            </p>
+          </div>
+          <ul class="trial-list">
+            <li *ngFor="let item of officialApiFeatures">{{ item }}</li>
+          </ul>
+          <a class="trial-cta" [href]="officialApiHref" target="_blank" rel="noopener noreferrer">Hablar con nosotros</a>
+        </div>
+      </article>
+
       <div class="pricing-footer" *ngIf="!loggedIn">
         <p>¿Ya tienes cuenta? <a routerLink="/login">Inicia sesión</a></p>
       </div>

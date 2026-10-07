@@ -15,6 +15,7 @@ import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectCom
 import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 import { AtmosphereService } from './atmosphere.service';
+import { isLiteDevice } from './lite-mode';
 
 const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 const BLOOM_QUERY = '(min-width: 901px)';
@@ -244,12 +245,24 @@ interface Scene3D {
         width: 100%;
         height: 100%;
       }
+      :host(.is-lite) {
+        background:
+          radial-gradient(ellipse 90% 55% at 85% 8%, rgba(255, 150, 90, 0.16) 0%, transparent 60%),
+          radial-gradient(ellipse 80% 50% at 0% 70%, rgba(255, 196, 150, 0.12) 0%, transparent 60%),
+          radial-gradient(ellipse 70% 45% at 100% 100%, rgba(37, 211, 102, 0.06) 0%, transparent 60%),
+          var(--home-bg);
+        transition: background-color 400ms ease;
+      }
+      :host(.is-lite) .data-fabric-canvas {
+        display: none;
+      }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DataFabricComponent implements AfterViewInit, OnDestroy {
   @ViewChild('canvas', { static: true }) private canvasRef!: ElementRef<HTMLCanvasElement>;
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   private readonly zone = inject(NgZone);
   private readonly atmosphere = inject(AtmosphereService);
@@ -269,6 +282,10 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     if (!this.isBrowser) {
+      return;
+    }
+    if (isLiteDevice()) {
+      this.host.nativeElement.classList.add('is-lite');
       return;
     }
     const canvas = this.canvasRef.nativeElement;

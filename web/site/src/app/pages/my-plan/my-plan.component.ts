@@ -17,7 +17,7 @@ import {
 } from '../../core/wompi-tokenizer';
 import { ShellComponent } from '../../layout/shell/shell.component';
 
-type MethodTab = 'CARD' | 'NEQUI';
+type MethodTab = 'CARD' | 'NEQUI' | 'WOMPI';
 type Phase = 'idle' | 'tokenizing' | 'nequi_waiting' | 'charging' | 'polling';
 
 const CANCEL_REASONS: { value: string; label: string }[] = [
@@ -154,6 +154,11 @@ export class MyPlanComponent implements OnInit, OnDestroy {
     return !sub.is_paid || this.selectedPlanSlug !== sub.plan.slug;
   }
 
+  /** Pagar en la página de Wompi solo aplica cuando hay un cobro ahora; cambiar de tarjeta no la ofrece. */
+  get payInWompi(): boolean {
+    return this.tab === 'WOMPI' && this.chargesNow;
+  }
+
   get priceForAuthorization(): number {
     return this.selectedPlan?.price_cop ?? this.subscription?.plan.price_cop ?? 0;
   }
@@ -237,6 +242,7 @@ export class MyPlanComponent implements OnInit, OnDestroy {
   closeMethodForm(): void {
     if (this.processing) return;
     this.showMethodForm = false;
+    if (this.tab === 'WOMPI') this.tab = 'CARD';
     this.error = '';
   }
 
@@ -270,7 +276,7 @@ export class MyPlanComponent implements OnInit, OnDestroy {
   }
 
   async submitMethod(): Promise<void> {
-    if (this.processing || !this.config?.api_base || !this.config.public_key) return;
+    if (this.tab === 'WOMPI' || this.processing || !this.config?.api_base || !this.config.public_key) return;
     const invalid = this.validateForm();
     if (invalid) {
       this.error = invalid;

@@ -94,7 +94,7 @@ def test_stage_rules():
     )
 
 
-def _seed(db, *, body: str, profile_kwargs: dict | None = None, alert_phone: str | None = None):
+def _seed(db, *, body: str, profile_kwargs: dict | None = None, alert_recipients: list | None = None):
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
     from app.domain.entities.enums import AiMode, MessageDirection, MessageSource, WhatsAppStatus
 
@@ -110,7 +110,7 @@ def _seed(db, *, body: str, profile_kwargs: dict | None = None, alert_phone: str
         TenantProfile(
             tenant_id=tenant.id,
             ai_mode=AiMode.QUALIFY.value,
-            alert_phone=alert_phone,
+            alert_recipients=alert_recipients or [],
             **(profile_kwargs or {}),
         )
     )
@@ -179,7 +179,7 @@ def test_asking_for_catalog_marks_interested_and_keeps_ai_helping(_sleep, mock_g
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_closing_hands_off_softly_and_alerts_owner(_sleep, mock_generate, mock_send, mock_alert):
+def test_closing_hands_off_softly_and_alerts_owner_and_dispatch(_sleep, mock_generate, mock_send, mock_alert):
     from app.infrastructure.persistence.database import SessionLocal
 
     mock_generate.return_value = AiGeneratedReply(
@@ -187,7 +187,12 @@ def test_closing_hands_off_softly_and_alerts_owner(_sleep, mock_generate, mock_s
     )
     with SessionLocal() as db:
         tenant, conv, msg = _seed(
-            db, body="Me llevo los blancos en talla 38", alert_phone="+573001234567"
+            db,
+            body="Me llevo los blancos en talla 38",
+            alert_recipients=[
+                {"name": "Dueña", "phone": "+573001234567", "scope": "all"},
+                {"name": "Carlos", "phone": "+573005556644", "scope": "sales"},
+            ],
         )
         assert _run(db, tenant, conv, msg) is True
 
@@ -196,8 +201,11 @@ def test_closing_hands_off_softly_and_alerts_owner(_sleep, mock_generate, mock_s
     assert conv.interest_status == "interested"
     assert conv.mode == "manual"
     assert conv.ai_active is False
-    mock_alert.assert_called_once()
-    assert "ya quiere comprar" in mock_alert.call_args.args[2]
+    assert sorted(c.args[1] for c in mock_alert.call_args_list) == ["+573001234567", "+573005556644"]
+    text = mock_alert.call_args.args[2]
+    assert "ya quiere comprar" in text
+    assert "Me llevo los blancos en talla 38" in text
+    assert "Cliente: Laura · " in text
 
 
 def _tomorrow_iso() -> str:

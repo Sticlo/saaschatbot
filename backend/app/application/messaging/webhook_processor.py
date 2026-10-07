@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from app.infrastructure.persistence.database import SessionLocal
 from app.domain.entities import Tenant, WhatsAppSession
@@ -31,6 +33,19 @@ _CHATS_SET_MAX_AGE_DAYS = 90
 # Límite máximo de conversaciones totales que se crean desde chats.set.
 # Una vez superado, chats.set solo actualiza existentes (no crea nuevas).
 _MAX_CONVERSATIONS_FROM_CHATS_SET = 300
+
+# Margen por diferencia de reloj entre el celular y el servidor.
+_PRE_CONNECTION_GRACE = timedelta(minutes=2)
+
+
+def _predates_connection(session: WhatsAppSession, sent_at: Optional[datetime]) -> bool:
+    """Mensajes de antes de escanear el QR: Omitel solo atiende chats nuevos."""
+    started = session.connection_started_at
+    if started is None or sent_at is None:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return sent_at < started - _PRE_CONNECTION_GRACE
 
 
 def _chat_record_sort_ts(record: dict) -> int:
@@ -535,6 +550,14 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 msg_id,
                             )
                             continue
+
+                    if _predates_connection(session, item.get("timestamp")):
+                        log.debug(
+                            "Mensaje anterior a la conexión ignorado tenant=%s id=%s",
+                            tenant_id,
+                            msg_id,
+                        )
+                        continue
 
                     # Capturar base64 del webhook y guardar en disco
                     b64 = item.get("base64") or ""

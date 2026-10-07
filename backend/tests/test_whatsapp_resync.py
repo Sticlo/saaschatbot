@@ -242,6 +242,41 @@ def test_timestamp_from_a_phone_with_a_wrong_clock_is_clamped_to_now(wa_offline)
         assert before.timestamp() - 1 <= message.created_at.timestamp() <= time.time() + 1
 
 
+@requires_db
+def test_chats_from_before_scanning_the_qr_are_not_imported(wa_offline):
+    """Omitel solo atiende lo que llega después de conectar: el historial del celular no
+    crea chats ni hace responder a la IA."""
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, wa = make_wa_tenant(db)
+    connected_at = int(wa.connection_started_at.timestamp())
+
+    process_evolution_webhook(
+        tenant.id,
+        upsert_payload(
+            wa.instance_name, msg_id=_msg_id(), text="chat de la semana pasada",
+            phone="573009990000", timestamp=connected_at - 7 * 86400,
+        ),
+    )
+    process_evolution_webhook(
+        tenant.id,
+        upsert_payload(
+            wa.instance_name, msg_id=_msg_id(), text="respuesta vieja del dueño",
+            phone="573009990000", from_me=True, timestamp=connected_at - 3600,
+        ),
+    )
+    process_evolution_webhook(
+        tenant.id,
+        upsert_payload(wa.instance_name, msg_id=_msg_id(), text="hola, ¿tienen domicilio?"),
+    )
+
+    with SessionLocal() as db:
+        assert [m.body for m in _messages(db, tenant.id)] == ["hola, ¿tienen domicilio?"]
+        assert db.query(Conversation).filter(Conversation.tenant_id == tenant.id).count() == 1
+    assert len(wa_offline["ai_jobs"]) == 1
+
+
 # --- Fallos a mitad de camino -------------------------------------------------------------
 
 

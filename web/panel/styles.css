@@ -1486,13 +1486,91 @@ textarea { resize: vertical; min-height: 44px; }
 
 .alert-settings-row {
   display: grid;
-  grid-template-columns: 1fr 200px;
+  grid-template-columns: minmax(0, 360px);
   gap: 1rem;
+  margin-top: 1rem;
+}
+
+.alert-recipients-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   margin-top: 0.75rem;
 }
 
-@media (max-width: 640px) {
-  .alert-settings-row { grid-template-columns: 1fr; }
+.alert-recipients-head > span:first-child {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.alert-recipients {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.alert-recipient {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 190px 38px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.alert-recipient input,
+.alert-recipient select {
+  width: 100%;
+  min-width: 0;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.92rem;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.alert-recipient input:focus,
+.alert-recipient select:focus {
+  outline: none;
+  border-color: var(--field-focus-border);
+  background: var(--field-focus-bg);
+}
+
+.alert-recipient input::placeholder {
+  color: var(--placeholder);
+}
+
+.alert-remove {
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.alert-remove:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--field-focus-border);
+}
+
+.alert-add-btn {
+  margin-top: 0.6rem;
+}
+
+@media (max-width: 760px) {
+  .alert-recipient {
+    grid-template-columns: minmax(0, 1fr) 38px;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--field-border);
+  }
+  .alert-recipient .alert-name { grid-column: 1; grid-row: 1; }
+  .alert-recipient .alert-remove { grid-column: 2; grid-row: 1; }
+  .alert-recipient .alert-phone,
+  .alert-recipient .alert-scope { grid-column: 1 / -1; }
 }
 
 .alert-actions {

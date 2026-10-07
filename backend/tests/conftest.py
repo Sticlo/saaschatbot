@@ -113,9 +113,9 @@ def wa_offline(monkeypatch):
 
 
 def make_wa_tenant(db, *, label: str = "WA", connected: bool = True, owner_phone: str = "573150000000"):
-    """Tenant con una vinculación WhatsApp activa (lo que deja un QR escaneado)."""
+    """Tenant con una vinculación WhatsApp activa (QR escaneado hace un día)."""
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     from app.domain.entities import Tenant, WhatsAppSession
     from app.domain.entities.enums import WhatsAppStatus
@@ -133,7 +133,7 @@ def make_wa_tenant(db, *, label: str = "WA", connected: bool = True, owner_phone
         instance_name=f"t_{uuid.uuid4().hex[:12]}",
         status=status,
         active_connection_id=uuid.uuid4(),
-        connection_started_at=datetime.now(timezone.utc),
+        connection_started_at=datetime.now(timezone.utc) - timedelta(days=1),
         bound_owner_jid=f"{owner_phone}@s.whatsapp.net",
         phone_number=f"+{owner_phone}",
     )

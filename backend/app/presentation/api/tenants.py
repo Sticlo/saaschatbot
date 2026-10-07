@@ -118,11 +118,12 @@ def update_profile(
 
 def _interest_alert_response(db: Session, profile: TenantProfile) -> InterestAlertResponse:
     from app.application.conversations.interest_alert_service import (
+        alert_recipients,
         unanswered_interested_conversations,
     )
 
     return InterestAlertResponse(
-        alert_phone=profile.alert_phone or "",
+        recipients=alert_recipients(profile),
         alert_threshold=profile.alert_threshold,
         pending_count=len(unanswered_interested_conversations(db, profile.tenant_id)),
     )
@@ -144,23 +145,23 @@ def update_interest_alert(
 ):
     from app.application.conversations.interest_alert_service import (
         InterestAlertError,
-        normalize_alert_phone,
+        normalize_alert_recipients,
     )
 
     try:
-        phone = normalize_alert_phone(body.alert_phone)
+        recipients = normalize_alert_recipients([r.model_dump() for r in body.recipients])
     except InterestAlertError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
     profile = get_or_create_tenant_profile(db, current.tenant_id)
-    profile.alert_phone = phone or None
+    profile.alert_recipients = recipients
     profile.alert_threshold = body.alert_threshold
     log_audit(
         db,
         tenant_id=current.tenant_id,
         user_id=current.id,
         action="tenant.interest_alert_updated",
-        details={"alert_threshold": body.alert_threshold, "enabled": bool(phone)},
+        details={"alert_threshold": body.alert_threshold, "recipients": len(recipients)},
         ip_address=request.client.host if request.client else None,
     )
     db.commit()
@@ -170,27 +171,44 @@ def update_interest_alert(
 
 @router.post("/me/interest-alert/test", status_code=status.HTTP_204_NO_CONTENT)
 def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
-    from app.application.conversations.interest_alert_service import send_alert
+    from app.application.conversations.interest_alert_service import (
+        SCOPE_SALES,
+        alert_recipients,
+        send_alert,
+    )
     from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     profile = get_or_create_tenant_profile(db, tenant.id)
-    if not profile.alert_phone:
-        raise HTTPException(status_code=400, detail="Primero guarda el número que recibirá las alertas")
+    recipients = alert_recipients(profile)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="Primero guarda los números que recibirán las alertas")
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok or tenant.whatsapp_session is None:
         raise HTTPException(status_code=400, detail=reason or "Conecta tu WhatsApp primero")
-    try:
-        send_alert(
-            tenant.whatsapp_session,
-            profile.alert_phone,
-            f"✅ Prueba de alertas de *{tenant.business_name}*: aquí te avisaremos cuando "
-            f"tengas {profile.alert_threshold} clientes interesados sin responder.",
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo enviar la prueba: {exc}")
+
+    failed: list[str] = []
+    for recipient in recipients:
+        if recipient.get("scope") == SCOPE_SALES:
+            what = "cuando un cliente ya quiera comprar o la IA agende una cita, con sus datos para atenderlo"
+        else:
+            what = (
+                f"cuando haya {profile.alert_threshold} clientes interesados sin responder, "
+                "cuando un cliente ya quiera comprar y cuando la IA agende una cita"
+            )
+        greeting = f"Hola {recipient['name']} 👋 " if recipient.get("name") else ""
+        try:
+            send_alert(
+                tenant.whatsapp_session,
+                recipient["phone"],
+                f"✅ {greeting}Prueba de alertas de *{tenant.business_name}*: por aquí te avisaremos {what}.",
+            )
+        except Exception:
+            failed.append(recipient.get("name") or recipient["phone"])
+    if failed:
+        raise HTTPException(status_code=502, detail=f"No se pudo enviar la prueba a: {', '.join(failed)}")
 
 
 @router.post("/me/accept-disclaimer", response_model=TenantResponse)

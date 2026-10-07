@@ -1,0 +1,100 @@
+<app-shell>
+  <section class="company-zone">
+    <div class="company-page">
+      <header class="company-hero">
+        <p class="eyebrow">Nosotros</p>
+        <h1>Hacemos que tu WhatsApp venda, sin que vivas en el chat.</h1>
+        <p class="lead">
+          Omitel es un producto colombiano, hecho en Bogotá, para negocios que venden por WhatsApp y no alcanzan a
+          contestar cada mensaje a tiempo.
+        </p>
+      </header>
+
+      <section class="story" aria-labelledby="story-title">
+        <h2 id="story-title">Por qué existe Omitel</h2>
+        <div class="story-text">
+          <p>
+            En Colombia, casi toda venta pequeña empieza igual: alguien escribe «¿cuánto cuesta?» por WhatsApp. Si
+            la respuesta tarda, ese cliente le escribe al siguiente negocio.
+          </p>
+          <p>
+            Los dueños lo saben, pero no pueden pasar el día pegados al celular repitiendo precios, horarios y
+            ubicación. Por eso creamos un asistente que contesta eso por ti, con el tono de tu negocio, y te avisa
+            cuando alguien está listo para comprar.
+          </p>
+          <p>
+            Tú sigues siendo quien cierra la venta. Omitel se encarga de que ningún cliente se quede esperando.
+          </p>
+        </div>
+      </section>
+
+      <section aria-labelledby="principles-title">
+        <div class="block-head">
+          <h2 id="principles-title">Lo que nos importa</h2>
+          <p>Cuatro reglas que guían cada decisión del producto.</p>
+        </div>
+        <div class="card-grid">
+          @for (item of principles; track item.title) {
+            <article class="info-card">
+              <h3>{{ item.title }}</h3>
+              <p>{{ item.text }}</p>
+            </article>
+          }
+        </div>
+      </section>
+
+      <section class="founder" aria-label="Fundador">
+        <div class="founder-photo" aria-hidden="true">
+          @if (founder.photo) {
+            <img [src]="founder.photo" [alt]="founder.name" width="240" height="240" loading="lazy" />
+          } @else {
+            {{ founderInitials }}
+          }
+        </div>
+        <div class="founder-body">
+          <blockquote>«{{ founder.quote }}»</blockquote>
+          <p class="founder-name">{{ founder.name }}</p>
+          <p class="founder-role">{{ founder.role }}</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="company-title">
+        <div class="block-head">
+          <h2 id="company-title">Dónde encontrarnos</h2>
+          <p>Escríbenos por el medio que prefieras.</p>
+        </div>
+        <dl class="facts">
+          <div>
+            <dt>Ciudad</dt>
+            <dd>Bogotá, Colombia</dd>
+          </div>
+          <div>
+            <dt>WhatsApp</dt>
+            <dd><a [href]="whatsappHref" target="_blank" rel="noopener noreferrer">{{ contact.whatsappDisplay }}</a></dd>
+          </div>
+          <div>
+            <dt>Correo de soporte</dt>
+            <dd><a [href]="'mailto:' + legal.supportEmail">{{ legal.supportEmail }}</a></dd>
+          </div>
+          <div>
+            <dt>Pagos</dt>
+            <dd>Procesados por Wompi</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="company-cta">
+        <h2>Pruébalo con tus propios clientes</h2>
+        <p>3 días gratis, sin tarjeta. Conectas tu WhatsApp en minutos.</p>
+        <div class="cta-actions">
+          @if (user$ | async) {
+            <a [href]="panelUrl" class="btn btn-primary">Ir al panel</a>
+          } @else {
+            <a routerLink="/registro" class="btn btn-primary">Probar gratis</a>
+          }
+          <a routerLink="/seguridad" class="btn btn-ghost">Cómo cuidamos tus datos</a>
+        </div>
+      </section>
+    </div>
+  </section>
+</app-shell>

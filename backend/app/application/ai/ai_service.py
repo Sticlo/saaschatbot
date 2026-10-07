@@ -447,12 +447,12 @@ def _send_holding_reply(
 
 
 def _notify_owner_of_handoff(tenant: Tenant, conversation: Conversation) -> None:
-    from app.application.conversations.interest_alert_service import send_alert
+    from app.application.conversations.interest_alert_service import alert_phones, send_alerts
     from app.shared.core.phone import resolve_display_name
 
-    profile = tenant.profile
+    phones = alert_phones(tenant.profile)
     session = tenant.whatsapp_session
-    if profile is None or not profile.alert_phone or session is None:
+    if not phones or session is None:
         return
     try:
         if not get_redis().set(
@@ -469,9 +469,7 @@ def _notify_owner_of_handoff(tenant: Tenant, conversation: Conversation) -> None
         "Te pasamos el chat para que le respondas tú.\n\n"
         f"Respóndele aquí: {settings.app_public_url.rstrip('/')}/panel"
     )
-    try:
-        send_alert(session, profile.alert_phone, text)
-    except Exception:
+    if not send_alerts(session, phones, text):
         log.warning("No se pudo avisar al dueño del traspaso tenant=%s", tenant.id)
 
 
@@ -672,22 +670,31 @@ def _contact_label(conversation: Conversation) -> str:
     )
 
 
-def _send_owner_alert(tenant: Tenant, *, key: str, ttl_seconds: int, text: str) -> None:
-    from app.application.conversations.interest_alert_service import send_alert
+def _contact_line(conversation: Conversation) -> str:
+    from app.shared.core.phone import format_display_phone, is_valid_whatsapp_phone
 
-    profile = tenant.profile
+    label = _contact_label(conversation)
+    phone = conversation.contact_phone or ""
+    if is_valid_whatsapp_phone(phone) and label != format_display_phone(phone):
+        return f"Cliente: {label} · {format_display_phone(phone)}"
+    return f"Cliente: {label}"
+
+
+def _send_sales_alert(tenant: Tenant, *, key: str, ttl_seconds: int, text: str) -> None:
+    """Ventas listas y citas: al dueño y a quienes despachan."""
+    from app.application.conversations.interest_alert_service import alert_phones, send_alerts
+
+    phones = alert_phones(tenant.profile, sales=True)
     session = tenant.whatsapp_session
-    if profile is None or not profile.alert_phone or session is None:
+    if not phones or session is None:
         return
     try:
         if not get_redis().set(key, "1", nx=True, ex=ttl_seconds):
             return
     except Exception:
         return
-    try:
-        send_alert(session, profile.alert_phone, text)
-    except Exception:
-        log.warning("No se pudo enviar aviso al dueño tenant=%s key=%s", tenant.id, key)
+    if not send_alerts(session, phones, text):
+        log.warning("No se pudo enviar aviso al equipo tenant=%s key=%s", tenant.id, key)
 
 
 def _panel_link() -> str:
@@ -741,13 +748,14 @@ def _apply_stage(
         _mark_handed_off(conversation.id)
         changed = True
         snippet = " ".join(text_for_ai(message).split())[:200]
-        _send_owner_alert(
+        _send_sales_alert(
             tenant,
             key=f"ai:closing_alert:{conversation.id}",
             ttl_seconds=CLOSING_ALERT_COOLDOWN_SECONDS,
             text=(
                 f"🔥 *{tenant.business_name}*: {_contact_label(conversation)} ya quiere comprar. "
                 "Te dejamos el chat para que cierres la venta.\n\n"
+                f"{_contact_line(conversation)}\n"
                 f"Último mensaje: «{snippet}»\n\nRespóndele aquí: {_panel_link()}"
             ),
         )
@@ -802,13 +810,14 @@ def _deliver_reply(
             details={"conversation_id": str(conversation.id), "appointment_id": str(appointment.id)},
             throttle_scope=str(appointment.id),
         )
-        _send_owner_alert(
+        _send_sales_alert(
             tenant,
             key=f"ai:booking_alert:{appointment.id}",
             ttl_seconds=24 * 3600,
             text=(
                 f"📅 *{tenant.business_name}*: la IA agendó una cita para "
                 f"{_contact_label(conversation)} — {describe_appointment(appointment)}.\n\n"
+                f"{_contact_line(conversation)}\n"
                 f"Ver agenda: {_panel_link()}"
             ),
         )

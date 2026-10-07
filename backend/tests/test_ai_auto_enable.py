@@ -75,7 +75,7 @@ def test_owner_alert_number_never_gets_ai():
     from app.domain.entities import TenantProfile
 
     tenant = _tenant(ai_global_enabled=True)
-    tenant.profile = TenantProfile(alert_phone="+573001112233")
+    tenant.profile = TenantProfile(alert_recipients=[{"name": "", "phone": "+573001112233", "scope": "all"}])
     conv = _conv(imported_legacy=False, bait_sent=True, ai_active=False)
     assert maybe_auto_enable_ai_for_inbound(tenant=tenant, conversation=conv, body="ok, ya les escribo") is False
     assert conv.ai_active is False
