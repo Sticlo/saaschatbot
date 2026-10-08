@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=45" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=46" />
 </head>
 <body>
   <div id="app">
@@ -509,7 +509,7 @@
           </label>
           <label>
             <span class="field-label">Teléfono <span class="field-optional">Opcional</span></span>
-            <input type="text" id="appointment-phone" maxlength="64" placeholder="+57…" />
+            <input type="tel" id="appointment-phone" maxlength="64" placeholder="300 123 4567" autocomplete="off" />
           </label>
           <label>
             <span class="field-label">Observaciones</span>
@@ -540,7 +540,7 @@
           </label>
           <label>
             <span class="field-label">WhatsApp para avisos <span class="field-optional">Opcional</span></span>
-            <input type="tel" id="staff-phone" maxlength="32" placeholder="+57 300 123 4567" autocomplete="off" />
+            <input type="tel" id="staff-phone" maxlength="32" placeholder="300 123 4567" autocomplete="off" />
             <span class="field-hint">Le escribimos cuando le agendan, mueven o cancelan una cita.</span>
           </label>
 
@@ -619,6 +619,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=113"></script>
+  <script src="/static/panel/app.js?v=114"></script>
 </body>
 </html>

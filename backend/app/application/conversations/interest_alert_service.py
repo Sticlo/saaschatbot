@@ -48,7 +48,7 @@ def normalize_alert_phone(raw: str) -> str:
         return ""
     phone = normalize_phone(raw)
     if not is_valid_whatsapp_phone(phone):
-        raise InterestAlertError("Número inválido — escríbelo con indicativo, ej. +57 300 123 4567")
+        raise InterestAlertError("Número inválido — revisa el país y el número de WhatsApp")
     return phone
 
 
@@ -63,7 +63,7 @@ def normalize_alert_recipients(items: list[dict]) -> list[dict]:
         except InterestAlertError:
             who = name or raw_phone.strip()
             raise InterestAlertError(
-                f"Número inválido ({who}) — escríbelo con indicativo, ej. +57 300 123 4567"
+                f"Número inválido ({who}) — revisa el país y el número de WhatsApp"
             )
         if not phone or any(phone_match_tail(r["phone"], phone) for r in recipients):
             continue

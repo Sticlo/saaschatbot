@@ -57,6 +57,147 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // Indicativos de Latinoamérica (+ EE. UU./Canadá y España). `len`: dígitos del número local de celular.
+  const PHONE_COUNTRIES = [
+    { iso: "CO", name: "Colombia", flag: "🇨🇴", dial: "57", len: 10, example: "300 123 4567" },
+    { iso: "AR", name: "Argentina", flag: "🇦🇷", dial: "54", len: 11, example: "9 11 2345 6789" },
+    { iso: "BO", name: "Bolivia", flag: "🇧🇴", dial: "591", len: 8, example: "7123 4567" },
+    { iso: "BR", name: "Brasil", flag: "🇧🇷", dial: "55", len: 11, example: "11 91234 5678" },
+    { iso: "CA", name: "Canadá", flag: "🇨🇦", dial: "1", len: 10, example: "416 555 0123" },
+    { iso: "CL", name: "Chile", flag: "🇨🇱", dial: "56", len: 9, example: "9 1234 5678" },
+    { iso: "CR", name: "Costa Rica", flag: "🇨🇷", dial: "506", len: 8, example: "8312 3456" },
+    { iso: "CU", name: "Cuba", flag: "🇨🇺", dial: "53", len: 8, example: "5123 4567" },
+    { iso: "EC", name: "Ecuador", flag: "🇪🇨", dial: "593", len: 9, example: "99 123 4567" },
+    { iso: "SV", name: "El Salvador", flag: "🇸🇻", dial: "503", len: 8, example: "7012 3456" },
+    { iso: "ES", name: "España", flag: "🇪🇸", dial: "34", len: 9, example: "612 34 56 78" },
+    { iso: "US", name: "Estados Unidos", flag: "🇺🇸", dial: "1", len: 10, example: "201 555 0123" },
+    { iso: "GT", name: "Guatemala", flag: "🇬🇹", dial: "502", len: 8, example: "5123 4567" },
+    { iso: "HN", name: "Honduras", flag: "🇭🇳", dial: "504", len: 8, example: "9123 4567" },
+    { iso: "MX", name: "México", flag: "🇲🇽", dial: "52", len: 10, example: "55 1234 5678" },
+    { iso: "NI", name: "Nicaragua", flag: "🇳🇮", dial: "505", len: 8, example: "8123 4567" },
+    { iso: "PA", name: "Panamá", flag: "🇵🇦", dial: "507", len: 8, example: "6123 4567" },
+    { iso: "PY", name: "Paraguay", flag: "🇵🇾", dial: "595", len: 9, example: "961 456 789" },
+    { iso: "PE", name: "Perú", flag: "🇵🇪", dial: "51", len: 9, example: "912 345 678" },
+    { iso: "PR", name: "Puerto Rico", flag: "🇵🇷", dial: "1", len: 10, example: "787 234 5678" },
+    { iso: "DO", name: "República Dominicana", flag: "🇩🇴", dial: "1", len: 10, example: "809 234 5678" },
+    { iso: "UY", name: "Uruguay", flag: "🇺🇾", dial: "598", len: 8, example: "94 231 234" },
+    { iso: "VE", name: "Venezuela", flag: "🇻🇪", dial: "58", len: 10, example: "412 123 4567" },
+  ];
+  const PHONE_OTHER = "OTHER";
+  const NANP_AREAS = { PR: ["787", "939"], DO: ["809", "829", "849"] };
+
+  const phoneCountry = (iso) => PHONE_COUNTRIES.find((c) => c.iso === iso) || null;
+
+  // +1 lo comparten EE. UU., Canadá, Puerto Rico y República Dominicana: decide el código de área.
+  function countryForDigits(digits) {
+    if (digits.startsWith("1")) {
+      const area = digits.slice(1, 4);
+      const nanp = Object.keys(NANP_AREAS).find((iso) => NANP_AREAS[iso].includes(area));
+      return phoneCountry(nanp || "US");
+    }
+    return PHONE_COUNTRIES
+      .filter((c) => c.dial !== "1" && digits.startsWith(c.dial))
+      .sort((a, b) => b.dial.length - a.dial.length)[0] || null;
+  }
+
+  function defaultPhoneCountry() {
+    const own = String(state.wa?.phone_number || "").replace(/\D/g, "");
+    return (own && countryForDigits(own)?.iso) || "CO";
+  }
+
+  function splitPhone(value) {
+    const raw = String(value || "").trim();
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return { iso: defaultPhoneCountry(), national: "" };
+    if (/[a-z]/i.test(raw)) return { iso: PHONE_OTHER, national: raw };
+    if (!raw.startsWith("+")) return { iso: defaultPhoneCountry(), national: raw };
+    const country = countryForDigits(digits);
+    if (!country) return { iso: PHONE_OTHER, national: raw };
+    return { iso: country.iso, national: digits.slice(country.dial.length) };
+  }
+
+  function phoneCountryOptions(selected) {
+    const options = PHONE_COUNTRIES.map(
+      (c) => `<option value="${c.iso}"${c.iso === selected ? " selected" : ""}>${c.flag} +${c.dial} ${c.name}</option>`
+    );
+    options.push(`<option value="${PHONE_OTHER}"${selected === PHONE_OTHER ? " selected" : ""}>🌐 Otro país</option>`);
+    return options.join("");
+  }
+
+  // Cerrado muestra solo «🇨🇴 +57»; al abrirlo, la lista con los nombres.
+  function showPhoneCountryNames(select, full) {
+    [...select.options].forEach((opt) => {
+      const country = phoneCountry(opt.value);
+      if (!country) return;
+      opt.textContent = full || !opt.selected
+        ? `${country.flag} +${country.dial} ${country.name}`
+        : `${country.flag} +${country.dial}`;
+    });
+  }
+
+  function syncPhonePlaceholder(input, select) {
+    const country = phoneCountry(select.value);
+    input.placeholder = country ? country.example : "+44 7700 900123";
+  }
+
+  // Envuelve un <input type="tel"> con el selector de país; el input queda solo con el número local.
+  function enhancePhoneInput(input) {
+    if (!input || input.dataset.phoneEnhanced) return;
+    input.dataset.phoneEnhanced = "1";
+    const wrap = document.createElement("div");
+    wrap.className = "phone-field";
+    const select = document.createElement("select");
+    select.className = "phone-country";
+    select.setAttribute("aria-label", "País");
+    input.parentNode.insertBefore(wrap, input);
+    wrap.append(select, input);
+    input.classList.add("phone-number");
+    setPhoneValue(input, input.value);
+    select.addEventListener("mousedown", () => showPhoneCountryNames(select, true));
+    select.addEventListener("focus", () => showPhoneCountryNames(select, true));
+    select.addEventListener("blur", () => showPhoneCountryNames(select, false));
+    select.addEventListener("change", () => {
+      syncPhonePlaceholder(input, select);
+      showPhoneCountryNames(select, false);
+      input.focus();
+    });
+    // Si pegan o escriben el número completo con +, el indicativo pasa al selector.
+    const absorbPrefix = () => {
+      if (input.value.trim().startsWith("+")) setPhoneValue(input, input.value);
+    };
+    input.addEventListener("blur", absorbPrefix);
+    input.addEventListener("paste", () => setTimeout(absorbPrefix, 0));
+  }
+
+  function setPhoneValue(input, value) {
+    const select = input.parentNode.querySelector(".phone-country");
+    if (!select) {
+      input.value = value || "";
+      return;
+    }
+    const { iso, national } = splitPhone(value);
+    select.innerHTML = phoneCountryOptions(iso);
+    showPhoneCountryNames(select, false);
+    input.value = national;
+    syncPhonePlaceholder(input, select);
+  }
+
+  function getPhoneValue(input) {
+    if (!input) return "";
+    const raw = input.value.trim();
+    let digits = raw.replace(/\D/g, "");
+    if (!digits || /[a-z]/i.test(raw)) return raw;
+    const country = phoneCountry(input.parentNode.querySelector(".phone-country")?.value);
+    if (raw.startsWith("+") || !country) return `+${digits}`;
+    digits = digits.replace(/^0+/, "");
+    if (digits.startsWith(country.dial) && digits.length === country.dial.length + country.len) {
+      digits = digits.slice(country.dial.length);
+    }
+    // WhatsApp en Argentina usa +54 9 antes del código de área.
+    if (country.iso === "AR" && digits.length === 10) digits = `9${digits}`;
+    return `+${country.dial}${digits}`;
+  }
+
   function isLocalDev() {
     const host = location.hostname;
     return host === "localhost" || host === "127.0.0.1";
@@ -1703,7 +1844,8 @@
     $("staff-modal-title").textContent = isEdit ? `Editar a ${member.name}` : "Agregar al equipo";
     $("staff-id").value = member?.id || "";
     $("staff-name").value = member?.name || "";
-    $("staff-phone").value = member?.phone || "";
+    enhancePhoneInput($("staff-phone"));
+    setPhoneValue($("staff-phone"), member?.phone || "");
     $("staff-start").value = member?.start_time || "";
     $("staff-end").value = member?.end_time || "";
     const { open, close } = businessHours();
@@ -1733,7 +1875,7 @@
     const custom = staffHoursMode() === "custom";
     const payload = {
       name: $("staff-name")?.value?.trim(),
-      phone: $("staff-phone")?.value?.trim() || null,
+      phone: getPhoneValue($("staff-phone")) || null,
       work_days: selectedStaffDays(),
       start_time: custom ? $("staff-start")?.value || null : null,
       end_time: custom ? $("staff-end")?.value || null : null,
@@ -1790,7 +1932,8 @@
     $("appointment-start").value = start || isoToTimeInput(appointment?.starts_at) || "09:00";
     $("appointment-end").value = end || isoToTimeInput(appointment?.ends_at) || "10:00";
     $("appointment-client").value = appointment?.client_name || "";
-    $("appointment-phone").value = appointment?.client_phone || "";
+    enhancePhoneInput($("appointment-phone"));
+    setPhoneValue($("appointment-phone"), appointment?.client_phone || "");
     $("appointment-notes").value = appointment?.notes || "";
     fillAppointmentStaffSelect(appointment);
     state.appointmentModalConversationId = appointment?.conversation_id || null;
@@ -1841,7 +1984,7 @@
       start_time: $("appointment-start")?.value,
       end_time: $("appointment-end")?.value,
       client_name: $("appointment-client")?.value?.trim(),
-      client_phone: $("appointment-phone")?.value?.trim() || null,
+      client_phone: getPhoneValue($("appointment-phone")) || null,
       notes: $("appointment-notes")?.value?.trim() || null,
     };
     if (!$("appointment-staff-field")?.classList.contains("hidden")) {
@@ -1985,13 +2128,14 @@
   function renderAlertRecipients(list) {
     const rows = list && list.length ? list : [{ name: "", phone: "", scope: "all" }];
     $("alert-recipients").innerHTML = rows.map(alertRecipientRow).join("");
+    document.querySelectorAll("#alert-recipients .alert-phone").forEach(enhancePhoneInput);
     updateAlertAddButton();
   }
 
   function readAlertRecipients() {
     return [...document.querySelectorAll("#alert-recipients .alert-recipient")].map((row) => ({
       name: row.querySelector(".alert-name").value.trim(),
-      phone: row.querySelector(".alert-phone").value.trim(),
+      phone: getPhoneValue(row.querySelector(".alert-phone")),
       scope: row.querySelector(".alert-scope").value,
     }));
   }

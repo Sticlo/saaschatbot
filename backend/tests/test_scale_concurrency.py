@@ -365,6 +365,7 @@ def test_ai_workers_answer_in_parallel_and_a_busy_business_does_not_block_others
 
     test_queue = f"test:ai:{uuid.uuid4().hex}"
     monkeypatch.setattr(queue, "AI_REPLY_QUEUE", test_queue)
+    monkeypatch.setattr(queue, "AI_DELAYED_QUEUE", f"{test_queue}:delayed")
     monkeypatch.setattr(queue, "TENANT_BUSY_REQUEUE_DELAY_SECONDS", 0.05)
     monkeypatch.setattr(settings, "ai_worker_threads", 4)
     monkeypatch.setattr(settings, "ai_max_parallel_per_tenant", 2)
@@ -425,7 +426,7 @@ def test_ai_workers_answer_in_parallel_and_a_busy_business_does_not_block_others
         queue.stop_ai_worker()
         for thread in list(queue._worker_threads):
             thread.join(timeout=3)
-        client.delete(test_queue)
+        client.delete(test_queue, f"{test_queue}:delayed")
     elapsed = time.monotonic() - t0
 
     assert sorted(map(str, done)) == sorted(str(j[2]) for j in jobs), "cada mensaje se responde una vez"

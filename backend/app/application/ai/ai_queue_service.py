@@ -39,6 +39,7 @@ JOB_RESCUE = "rescue"  # el chat pasó a una persona: revisar si alguien le resp
 
 _worker_threads: list[threading.Thread] = []
 _worker_stop = threading.Event()
+_worker_generation = 0
 
 
 def _ai_lock_key(conversation_id: uuid.UUID) -> str:
@@ -312,9 +313,16 @@ def _worker_loop() -> None:
 
 def recover_pending_ai_replies() -> None:
     """Al arrancar, reencola chats con mensaje entrante sin respuesta bot."""
+    generation = _worker_generation
+
+    def _cancelled() -> bool:
+        # Si el worker se apagó (o se reinició), esta recuperación ya no le toca.
+        return _worker_stop.is_set() or generation != _worker_generation
 
     def _run() -> None:
         time.sleep(3)
+        if _cancelled():
+            return
         from app.domain.entities import Conversation, Tenant
         from app.domain.entities.enums import ConversationMode, ConversationStatus, WhatsAppStatus
         from app.application.ai.ai_service import maybe_schedule_ai_for_conversation
@@ -324,6 +332,8 @@ def recover_pending_ai_replies() -> None:
             tenants = db.query(Tenant).filter(Tenant.ai_global_enabled.is_(True)).all()
             scheduled = 0
             for tenant in tenants:
+                if _cancelled():
+                    return
                 if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
                     continue
                 conversations = (
@@ -337,6 +347,8 @@ def recover_pending_ai_replies() -> None:
                     .all()
                 )
                 for conversation in conversations:
+                    if _cancelled():
+                        return
                     if maybe_schedule_ai_for_conversation(
                         db,
                         tenant_id=tenant.id,
@@ -387,8 +399,10 @@ def stop_ai_worker() -> None:
     from app.application.conversations.interest_alert_service import stop_interest_alert_sweeper
     from app.application.whatsapp.whatsapp_reconnect_service import stop_whatsapp_reconnect_watchdog
 
+    global _worker_generation
     stop_interest_alert_sweeper()
     stop_whatsapp_reconnect_watchdog()
+    _worker_generation += 1
     _worker_stop.set()
     for thread in _worker_threads:
         if thread.is_alive():

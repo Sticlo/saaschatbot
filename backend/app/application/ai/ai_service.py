@@ -58,6 +58,7 @@ from app.application.appointments.appointment_service import (
     BOGOTA,
     collect_upcoming_free_slots,
     describe_appointment,
+    relink_orphan_appointments,
     staff_label,
     upcoming_appointments_for_conversation,
 )
@@ -864,6 +865,7 @@ def _booking_context(
         return None
     today = datetime.now(BOGOTA).date()
     covered_until = today + timedelta(days=BOOKING_DAYS_AHEAD - 1)
+    relink_orphan_appointments(db, conversation=conversation)
     upcoming = upcoming_appointments_for_conversation(
         db, tenant_id=tenant.id, conversation_id=conversation.id
     )

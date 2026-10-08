@@ -18,6 +18,7 @@ from app.shared.core.phone import (
     resolve_contact_phone,
 )
 from app.domain.entities import (
+    Appointment,
     Conversation,
     Message,
     MessageDirection,
@@ -743,6 +744,9 @@ def _dedupe_conversations_by_phone(
             primary.is_archived = True
         primary.unread_count = (primary.unread_count or 0) + (secondary.unread_count or 0)
 
+        db.query(Appointment).filter(Appointment.conversation_id == secondary.id).update(
+            {Appointment.conversation_id: primary.id}, synchronize_session=False
+        )
         db.delete(secondary)
         merged += 1
 
@@ -802,7 +806,10 @@ def _prune_empty_lid_ghosts(
             .scalar()
             or 0
         )
-        if msg_count == 0:
+        has_appointment = (
+            db.query(Appointment.id).filter(Appointment.conversation_id == conv.id).first() is not None
+        )
+        if msg_count == 0 and not has_appointment:
             db.delete(conv)
             pruned += 1
     return pruned

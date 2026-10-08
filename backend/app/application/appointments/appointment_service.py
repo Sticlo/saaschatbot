@@ -558,6 +558,39 @@ def upcoming_appointments_for_conversation(
     )
 
 
+def _same_client(client_phone: str, contact_phone: str, contact_jid: str) -> bool:
+    from app.shared.core.phone import is_lid_placeholder, lid_digits_from_jid, phone_match_tail
+
+    if is_lid_placeholder(client_phone):
+        lid = lid_digits_from_jid(contact_jid)
+        return client_phone == contact_phone or bool(lid and client_phone == f"lid:{lid}")
+    return not is_lid_placeholder(contact_phone) and phone_match_tail(client_phone, contact_phone)
+
+
+def relink_orphan_appointments(db: Session, *, conversation, now: Optional[datetime] = None) -> int:
+    """Al desvincular WhatsApp o fusionar chats duplicados se borra el chat, pero la cita queda
+    (sin chat). Cuando el mismo cliente vuelve a aparecer, sus citas próximas regresan a su chat."""
+    if not (conversation.contact_phone or conversation.contact_jid):
+        return 0
+    current = now or datetime.now(timezone.utc)
+    orphans = (
+        db.query(Appointment)
+        .filter(
+            Appointment.tenant_id == conversation.tenant_id,
+            Appointment.conversation_id.is_(None),
+            Appointment.client_phone.isnot(None),
+            Appointment.ends_at > current,
+        )
+        .all()
+    )
+    linked = 0
+    for row in orphans:
+        if _same_client(row.client_phone or "", conversation.contact_phone or "", conversation.contact_jid or ""):
+            row.conversation_id = conversation.id
+            linked += 1
+    return linked
+
+
 def describe_appointment(row: Appointment, *, today: Optional[date] = None, with_staff: bool = True) -> str:
     local = row.starts_at.astimezone(BOGOTA)
     ref = today or datetime.now(BOGOTA).date()

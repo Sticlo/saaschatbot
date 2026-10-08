@@ -348,6 +348,11 @@ def merge_conversations(
     secondary_name = secondary.contact_name
     secondary_jid = secondary.contact_jid or ""
 
+    from app.domain.entities import Appointment
+
+    db.query(Appointment).filter(Appointment.conversation_id == secondary.id).update(
+        {Appointment.conversation_id: primary.id}, synchronize_session=False
+    )
     db.delete(secondary)
     db.flush()
 

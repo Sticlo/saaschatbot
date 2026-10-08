@@ -437,6 +437,10 @@ def get_or_create_conversation(
             raise
         log.info("Chat creado en paralelo; se reutiliza conv=%s", winner.id)
         return winner
+    from app.application.appointments.appointment_service import relink_orphan_appointments
+
+    if relink_orphan_appointments(db, conversation=conversation):
+        log.info("Citas del cliente reenlazadas a su chat nuevo conv=%s", conversation.id)
     return conversation
 
 
