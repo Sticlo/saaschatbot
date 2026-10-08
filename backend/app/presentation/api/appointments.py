@@ -1,24 +1,35 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.application.appointments.appointment_service import (
+    all_staff,
     build_day_view,
     create_appointment,
     delete_appointment,
     get_schedule,
     parse_slot_to_datetimes,
+    staff_to_dict,
     update_appointment,
     update_schedule,
+)
+from app.application.appointments.staff_notify import build_staff_notice, send_staff_notice
+from app.application.appointments.staff_service import (
+    StaffError,
+    create_staff,
+    delete_staff,
+    update_staff,
+    upcoming_count,
 )
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 from app.application.billing.tenant_service import log_audit
 from app.application.platform.tenant_overrides import feature_allowed
-from app.domain.entities import Tenant
+from app.domain.entities import Appointment, Tenant
 from app.infrastructure.persistence.database import get_db
 from app.presentation.schemas.appointments import (
     AppointmentCreateRequest,
@@ -27,6 +38,8 @@ from app.presentation.schemas.appointments import (
     AppointmentScheduleResponse,
     AppointmentScheduleUpdate,
     AppointmentUpdateRequest,
+    StaffMemberRequest,
+    StaffMemberResponse,
     _parse_day,
 )
 from app.shared.core.deps import RequireAgent, RequireOwner, RequireViewer
@@ -38,6 +51,8 @@ def _to_response(row) -> AppointmentResponse:
     return AppointmentResponse(
         id=str(row.id),
         conversation_id=str(row.conversation_id) if row.conversation_id else None,
+        staff_id=str(row.staff_id) if row.staff_id else None,
+        staff_name=row.staff.name if row.staff else "",
         starts_at=row.starts_at.isoformat(),
         ends_at=row.ends_at.isoformat(),
         client_name=row.client_name,
@@ -54,11 +69,18 @@ def _schedule_response(profile, *, booking_allowed: bool = True) -> AppointmentS
         slot_minutes=schedule.slot_minutes,
         ai_booking_enabled=bool(profile.ai_booking_enabled) and booking_allowed,
         ai_booking_allowed=booking_allowed,
+        staff_label=profile.staff_label or "",
     )
 
 
 def _booking_allowed(db: Session, tenant_id) -> bool:
     return feature_allowed(db.get(Tenant, tenant_id), "ai_booking")
+
+
+def _notify_staff(background: BackgroundTasks, db: Session, row: Appointment, kind: str) -> None:
+    notice = build_staff_notice(db.get(Tenant, row.tenant_id), row, kind=kind)
+    if notice is not None:
+        background.add_task(send_staff_notice, notice)
 
 
 @router.get("/schedule", response_model=AppointmentScheduleResponse)
@@ -92,6 +114,8 @@ def put_appointment_schedule(
                 status_code=403, detail="Tu plan no incluye que la IA agende citas. Escríbenos para activarlo."
             )
         profile.ai_booking_enabled = body.ai_booking_enabled
+    if body.staff_label is not None:
+        profile.staff_label = " ".join(body.staff_label.split()).lower()[:40]
     log_audit(
         db,
         tenant_id=current.tenant_id,
@@ -109,17 +133,103 @@ def put_appointment_schedule(
     return _schedule_response(profile, booking_allowed=booking_allowed)
 
 
+# --- Equipo -------------------------------------------------------------------------------
+
+
+def _staff_response(db: Session, staff) -> StaffMemberResponse:
+    return StaffMemberResponse(**staff_to_dict(staff), upcoming_count=upcoming_count(db, staff.id))
+
+
+@router.get("/staff", response_model=list[StaffMemberResponse])
+def list_staff_members(current: RequireViewer, db: Session = Depends(get_db)):
+    return [_staff_response(db, s) for s in all_staff(db, current.tenant_id)]
+
+
+@router.post("/staff", response_model=StaffMemberResponse, status_code=201)
+def post_staff_member(
+    body: StaffMemberRequest,
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    try:
+        staff = create_staff(db, tenant_id=current.tenant_id, **body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="appointments.staff_created",
+        details={"staff_id": str(staff.id), "name": staff.name},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return _staff_response(db, staff)
+
+
+@router.patch("/staff/{staff_id}", response_model=StaffMemberResponse)
+def patch_staff_member(
+    staff_id: uuid.UUID,
+    body: StaffMemberRequest,
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    try:
+        staff = update_staff(db, tenant_id=current.tenant_id, staff_id=staff_id, **body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="appointments.staff_updated",
+        details={"staff_id": str(staff.id), "name": staff.name, "is_active": staff.is_active},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return _staff_response(db, staff)
+
+
+@router.delete("/staff/{staff_id}", status_code=204)
+def remove_staff_member(
+    staff_id: uuid.UUID,
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    try:
+        delete_staff(db, tenant_id=current.tenant_id, staff_id=staff_id)
+    except StaffError as exc:
+        status = 404 if "no está en tu equipo" in str(exc) else 409
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="appointments.staff_deleted",
+        details={"staff_id": str(staff_id)},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+
+
+# --- Citas --------------------------------------------------------------------------------
+
+
 @router.get("/day", response_model=AppointmentDayResponse)
 def get_appointment_day(
     current: RequireViewer,
     db: Session = Depends(get_db),
     day: str = Query(..., description="YYYY-MM-DD"),
+    staff_id: Optional[uuid.UUID] = Query(default=None),
 ):
     try:
         parsed_day = _parse_day(day)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    payload = build_day_view(db, tenant_id=current.tenant_id, day=parsed_day)
+    payload = build_day_view(db, tenant_id=current.tenant_id, day=parsed_day, staff_id=staff_id)
     db.commit()
     return AppointmentDayResponse.model_validate(payload)
 
@@ -128,6 +238,7 @@ def get_appointment_day(
 def post_appointment(
     body: AppointmentCreateRequest,
     request: Request,
+    background: BackgroundTasks,
     current: RequireAgent,
     db: Session = Depends(get_db),
 ):
@@ -143,6 +254,7 @@ def post_appointment(
             client_phone=body.client_phone,
             notes=body.notes,
             conversation_id=body.conversation_id,
+            staff_id=body.staff_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -156,6 +268,7 @@ def post_appointment(
     )
     db.commit()
     db.refresh(row)
+    _notify_staff(background, db, row, "new")
     return _to_response(row)
 
 
@@ -164,6 +277,7 @@ def patch_appointment(
     appointment_id: uuid.UUID,
     body: AppointmentUpdateRequest,
     request: Request,
+    background: BackgroundTasks,
     current: RequireAgent,
     db: Session = Depends(get_db),
 ):
@@ -183,6 +297,15 @@ def patch_appointment(
             detail="Para cambiar horario envía date, start_time y end_time",
         )
 
+    previous = db.query(Appointment).filter(
+        Appointment.id == appointment_id, Appointment.tenant_id == current.tenant_id
+    ).first()
+    old_staff_id = previous.staff_id if previous else None
+    old_start = previous.starts_at if previous else None
+    old_notice = (
+        build_staff_notice(db.get(Tenant, current.tenant_id), previous, kind="cancelled") if previous else None
+    )
+    extra = {"staff_id": body.staff_id} if "staff_id" in body.model_fields_set else {}
     try:
         row = update_appointment(
             db,
@@ -193,6 +316,7 @@ def patch_appointment(
             notes=body.notes,
             starts_at=starts_at,
             ends_at=ends_at,
+            **extra,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -206,6 +330,12 @@ def patch_appointment(
     )
     db.commit()
     db.refresh(row)
+    if row.staff_id != old_staff_id:
+        if old_notice is not None:
+            background.add_task(send_staff_notice, old_notice)
+        _notify_staff(background, db, row, "new")
+    elif row.starts_at != old_start:
+        _notify_staff(background, db, row, "moved")
     return _to_response(row)
 
 
@@ -213,9 +343,16 @@ def patch_appointment(
 def remove_appointment(
     appointment_id: uuid.UUID,
     request: Request,
+    background: BackgroundTasks,
     current: RequireAgent,
     db: Session = Depends(get_db),
 ):
+    row = db.query(Appointment).filter(
+        Appointment.id == appointment_id, Appointment.tenant_id == current.tenant_id
+    ).first()
+    notice = None
+    if row is not None and row.ends_at > datetime.now(timezone.utc):
+        notice = build_staff_notice(db.get(Tenant, row.tenant_id), row, kind="cancelled")
     try:
         delete_appointment(db, tenant_id=current.tenant_id, appointment_id=appointment_id)
     except ValueError as exc:
@@ -229,3 +366,5 @@ def remove_appointment(
         ip_address=request.client.host if request.client else None,
     )
     db.commit()
+    if notice is not None:
+        background.add_task(send_staff_notice, notice)

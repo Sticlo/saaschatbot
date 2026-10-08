@@ -277,6 +277,70 @@ def test_chats_from_before_scanning_the_qr_are_not_imported(wa_offline):
     assert len(wa_offline["ai_jobs"]) == 1
 
 
+# --- IA en chats nuevos -------------------------------------------------------------------
+
+
+def _conversation(db, tenant_id) -> Conversation:
+    return db.query(Conversation).filter(Conversation.tenant_id == tenant_id).one()
+
+
+def _with_global_ai(tenant_id) -> None:
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        db.query(Tenant).filter(Tenant.id == tenant_id).one().ai_global_enabled = True
+        db.commit()
+
+
+@requires_db
+def test_new_contact_gets_the_ai_without_anyone_opening_the_chat(wa_offline, monkeypatch):
+    """Un cliente nuevo escribe «Primosaurio»: la IA se activa al llegar el webhook, no
+    cuando el dueño entra al chat en el panel."""
+    from app.config import settings
+    from app.infrastructure.persistence.database import SessionLocal
+
+    monkeypatch.setattr(settings, "ai_classifier_use_llm", False)
+    with SessionLocal() as db:
+        tenant, wa = make_wa_tenant(db)
+    _with_global_ai(tenant.id)
+
+    process_evolution_webhook(
+        tenant.id, upsert_payload(wa.instance_name, msg_id=_msg_id(), text="Primosaurio", push_name="Julián")
+    )
+
+    with SessionLocal() as db:
+        conversation = _conversation(db, tenant.id)
+        assert conversation.ai_active is True
+        assert conversation.mode == "auto"
+        [message] = _messages(db, tenant.id)
+    assert wa_offline["ai_jobs"] == [(tenant.id, conversation.id, message.id)]
+
+
+@requires_db
+def test_chat_the_owner_took_over_stays_manual_when_the_client_writes(wa_offline, monkeypatch):
+    from app.config import settings
+    from app.infrastructure.persistence.database import SessionLocal
+
+    monkeypatch.setattr(settings, "ai_classifier_use_llm", False)
+    with SessionLocal() as db:
+        tenant, wa = make_wa_tenant(db)
+    _with_global_ai(tenant.id)
+    process_evolution_webhook(tenant.id, upsert_payload(wa.instance_name, msg_id=_msg_id(), text="hola"))
+    with SessionLocal() as db:
+        conversation = _conversation(db, tenant.id)
+        conversation.ai_active = False
+        conversation.mode = "manual"
+        conversation.ai_set_by_agent = True
+        db.commit()
+
+    process_evolution_webhook(tenant.id, upsert_payload(wa.instance_name, msg_id=_msg_id(), text="¿precio del corte?"))
+
+    with SessionLocal() as db:
+        conversation = _conversation(db, tenant.id)
+        assert conversation.ai_active is False
+        assert conversation.mode == "manual"
+
+
 # --- Fallos a mitad de camino -------------------------------------------------------------
 
 

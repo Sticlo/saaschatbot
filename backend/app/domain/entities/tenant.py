@@ -57,6 +57,9 @@ class Tenant(Base):
     whatsapp_session: Mapped[Optional["WhatsAppSession"]] = relationship(  # noqa: F821
         back_populates="tenant", uselist=False, cascade="all, delete-orphan"
     )
+    staff_members: Mapped[list["StaffMember"]] = relationship(  # noqa: F821
+        cascade="all, delete-orphan", order_by="StaffMember.position"
+    )
 
 
 class TenantProfile(Base):
@@ -90,6 +93,8 @@ class TenantProfile(Base):
     schedule_close_time: Mapped[str] = mapped_column(String(5), nullable=False, default="18:00")
     schedule_slot_minutes: Mapped[int] = mapped_column(nullable=False, default=60)
     ai_booking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Cómo llama el negocio a quien atiende: "barbero", "estilista"… Vacío = "profesional".
+    staff_label: Mapped[str] = mapped_column(String(40), nullable=False, default="", server_default="")
     # [{"name": str, "phone": "+57…", "scope": "all" | "sales"}]
     alert_recipients: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")

@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=42" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=45" />
 </head>
 <body>
   <div id="app">
@@ -198,6 +198,18 @@
             </div>
 
             <form id="send-form" class="composer">
+              <div id="composer-attachment" class="composer-attachment hidden">
+                <img id="composer-attachment-img" alt="Foto para enviar" />
+                <div class="composer-attachment-meta">
+                  <strong>Foto lista para enviar</strong>
+                  <span>Escribe un comentario si quieres y toca Enviar.</span>
+                </div>
+                <button type="button" id="composer-attachment-remove" class="composer-attachment-remove" aria-label="Quitar foto">×</button>
+              </div>
+              <button type="button" id="attach-image-btn" class="composer-attach" title="Adjuntar foto (también puedes pegarla con Cmd+V o arrastrarla)" aria-label="Adjuntar foto">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9.2-9.2a3.7 3.7 0 015.2 5.2l-9.2 9.2a1.8 1.8 0 01-2.6-2.6l8.5-8.5"/></svg>
+              </button>
+              <input type="file" id="attach-image-input" accept="image/jpeg,image/png,image/webp" hidden />
               <textarea id="message-input" rows="2" placeholder="Escribe un mensaje…" maxlength="4096"></textarea>
               <button type="submit" class="btn primary">Enviar</button>
             </form>
@@ -362,6 +374,10 @@
                   <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
                 </label>
               </div>
+              <label class="appointments-staff-label">
+                ¿Cómo llamas a quien atiende?
+                <input type="text" id="schedule-staff-label" maxlength="40" placeholder="barbero, estilista, médico…" />
+              </label>
               <label class="appointments-ai-toggle">
                 <input type="checkbox" id="schedule-ai-booking" />
                 <span>
@@ -371,6 +387,17 @@
               </label>
               <button type="button" id="schedule-save-btn" class="btn primary small">Guardar horario</button>
               <p id="schedule-save-status" class="appointments-status muted small"></p>
+            </section>
+
+            <section class="appointments-schedule-card appointments-team-card">
+              <div class="appointments-team-head">
+                <div>
+                  <h3>Equipo</h3>
+                  <p class="muted small">Si atienden varias personas, agrégalas: cada una tiene su agenda y sus días. El cliente elige con quién o la IA lo agenda con quien esté libre, repartiendo parejo.</p>
+                </div>
+                <button type="button" id="staff-add-btn" class="btn ghost small">+ Agregar</button>
+              </div>
+              <ul id="staff-list" class="staff-list"></ul>
             </section>
 
             <section class="appointments-day-card">
@@ -386,6 +413,7 @@
                 </div>
                 <button type="button" id="appointments-add-btn" class="btn primary small">+ Nueva cita</button>
               </div>
+              <div id="appointments-staff-chips" class="appointments-staff-chips hidden" role="tablist" aria-label="Agenda de"></div>
               <ul class="appointments-slot-list" id="appointments-slot-list">
                 <li class="muted appointments-loading">Cargando agenda…</li>
               </ul>
@@ -458,37 +486,119 @@
         <form id="appointment-form" class="appointment-form">
           <input type="hidden" id="appointment-id" value="" />
           <label>
-            Fecha
+            <span class="field-label">Fecha</span>
             <input type="date" id="appointment-date" required />
           </label>
           <div class="appointment-form-row">
             <label>
-              Desde
+              <span class="field-label">Desde</span>
               <input type="time" id="appointment-start" required />
             </label>
             <label>
-              Hasta
+              <span class="field-label">Hasta</span>
               <input type="time" id="appointment-end" required />
             </label>
           </div>
+          <label id="appointment-staff-field" class="hidden">
+            <span class="field-label">Atiende</span>
+            <select id="appointment-staff"></select>
+          </label>
           <label>
-            Cliente
+            <span class="field-label">Cliente</span>
             <input type="text" id="appointment-client" maxlength="255" placeholder="Nombre del cliente" required />
           </label>
           <label>
-            Teléfono <span class="muted">(opcional)</span>
+            <span class="field-label">Teléfono <span class="field-optional">Opcional</span></span>
             <input type="text" id="appointment-phone" maxlength="64" placeholder="+57…" />
           </label>
           <label>
-            Observaciones
-            <span class="ai-field-hint">Ej: pidió corte + barba, mesa para 4, habitación con jacuzzi…</span>
-            <textarea id="appointment-notes" rows="3" maxlength="2000" placeholder="Qué pidió el cliente para esta hora"></textarea>
+            <span class="field-label">Observaciones</span>
+            <textarea id="appointment-notes" rows="3" maxlength="2000" placeholder="Ej: corte + barba, mesa para 4, habitación con jacuzzi…"></textarea>
           </label>
           <p id="appointment-form-error" class="error hidden"></p>
           <div class="appointment-form-actions">
             <button type="submit" id="appointment-save-btn" class="btn primary">Guardar cita</button>
             <button type="button" id="appointment-delete-btn" class="btn ghost danger hidden">Eliminar</button>
             <button type="button" id="appointment-open-chat-btn" class="btn ghost hidden">Abrir chat</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal empleado -->
+    <div id="staff-modal" class="modal hidden">
+      <div class="modal-backdrop" id="staff-modal-backdrop"></div>
+      <div class="modal-card appointment-modal-card staff-modal-card">
+        <button id="staff-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
+        <h3 id="staff-modal-title">Agregar al equipo</h3>
+        <p class="staff-modal-sub">Cada persona tiene su propia agenda. La IA solo le agenda en sus días y horas.</p>
+        <form id="staff-form" class="appointment-form">
+          <input type="hidden" id="staff-id" value="" />
+          <label>
+            <span class="field-label">Nombre</span>
+            <input type="text" id="staff-name" maxlength="80" placeholder="Ej: Mateo" autocomplete="off" required />
+          </label>
+          <label>
+            <span class="field-label">WhatsApp para avisos <span class="field-optional">Opcional</span></span>
+            <input type="tel" id="staff-phone" maxlength="32" placeholder="+57 300 123 4567" autocomplete="off" />
+            <span class="field-hint">Le escribimos cuando le agendan, mueven o cancelan una cita.</span>
+          </label>
+
+          <fieldset class="staff-fieldset">
+            <legend class="field-label">
+              Días que trabaja
+              <span class="staff-days-summary" id="staff-days-summary"></span>
+            </legend>
+            <div class="staff-days-row" id="staff-days">
+              <label title="Lunes"><input type="checkbox" value="0" /><span>L</span></label>
+              <label title="Martes"><input type="checkbox" value="1" /><span>M</span></label>
+              <label title="Miércoles"><input type="checkbox" value="2" /><span>X</span></label>
+              <label title="Jueves"><input type="checkbox" value="3" /><span>J</span></label>
+              <label title="Viernes"><input type="checkbox" value="4" /><span>V</span></label>
+              <label title="Sábado"><input type="checkbox" value="5" /><span>S</span></label>
+              <label title="Domingo"><input type="checkbox" value="6" /><span>D</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="staff-fieldset">
+            <legend class="field-label">Horario</legend>
+            <div class="segmented" role="radiogroup">
+              <label>
+                <input type="radio" name="staff-hours-mode" value="business" checked />
+                <span>Igual al negocio <small id="staff-business-hours"></small></span>
+              </label>
+              <label>
+                <input type="radio" name="staff-hours-mode" value="custom" />
+                <span>Otro horario</span>
+              </label>
+            </div>
+            <div class="appointment-form-row staff-custom-hours hidden" id="staff-custom-hours">
+              <label>
+                <span class="field-label">Entra</span>
+                <input type="time" id="staff-start" />
+              </label>
+              <label>
+                <span class="field-label">Sale</span>
+                <input type="time" id="staff-end" />
+              </label>
+            </div>
+          </fieldset>
+
+          <label class="switch-row">
+            <span class="switch-text">
+              <strong id="staff-active-title">Recibe citas</strong>
+              <span id="staff-active-hint">La IA y tu equipo le pueden agendar.</span>
+            </span>
+            <input type="checkbox" id="staff-active" role="switch" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+
+          <p id="staff-form-error" class="error hidden"></p>
+          <div class="appointment-form-actions staff-form-actions">
+            <button type="button" id="staff-delete-btn" class="btn ghost danger hidden">Quitar del equipo</button>
+            <span class="staff-actions-spacer"></span>
+            <button type="button" id="staff-cancel-btn" class="btn ghost">Cancelar</button>
+            <button type="submit" id="staff-save-btn" class="btn primary">Guardar</button>
           </div>
         </form>
       </div>
@@ -509,6 +619,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=108"></script>
+  <script src="/static/panel/app.js?v=113"></script>
 </body>
 </html>

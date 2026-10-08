@@ -602,6 +602,7 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 whatsapp_connection_id=connection_id,
                                 instance_name=session.instance_name,
                                 publish=False,
+                                live=True,
                                 created_at=item.get("timestamp"),
                             )
                             event_type = "message.in"

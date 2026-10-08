@@ -640,6 +640,35 @@ def send_image_message(
     caption: str = "",
     source: str,
 ) -> Message:
+    from app.application.outbound.tenant_asset_service import read_asset_base64
+
+    b64, mime = read_asset_base64(image_path, tenant_id=tenant.id)
+    return send_image_data_message(
+        db,
+        tenant=tenant,
+        session=session,
+        conversation=conversation,
+        data_b64=b64,
+        mimetype=mime,
+        filename=image_path.rsplit("/", 1)[-1],
+        caption=caption,
+        source=source,
+    )
+
+
+def send_image_data_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    data_b64: str,
+    mimetype: str,
+    filename: str,
+    caption: str = "",
+    source: str,
+) -> Message:
+    """Una foto que no está guardada en el negocio (la que el dueño pega en el chat)."""
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
@@ -647,15 +676,11 @@ def send_image_message(
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation
     )
-    from app.application.outbound.tenant_asset_service import read_asset_base64
-
-    b64, mime = read_asset_base64(image_path, tenant_id=tenant.id)
-    filename = image_path.rsplit("/", 1)[-1]
     result = gateway_send_image(
         session.instance_name,
         recipient,
-        data_b64=b64,
-        mimetype=mime,
+        data_b64=data_b64,
+        mimetype=mimetype,
         filename=filename,
         caption=caption[:1024],
     )

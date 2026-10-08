@@ -6,8 +6,9 @@ from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.domain.entities.staff import StaffMember
 from app.infrastructure.persistence.database import Base
 
 
@@ -28,6 +29,13 @@ class Appointment(Base):
         ForeignKey("conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # NULL solo en negocios sin equipo registrado (una sola agenda).
+    staff_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("staff_members.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     client_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
@@ -42,3 +50,5 @@ class Appointment(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    staff: Mapped[Optional[StaffMember]] = relationship(lazy="joined")

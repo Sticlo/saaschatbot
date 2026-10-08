@@ -4,16 +4,17 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
-from app.domain.entities import Appointment, TenantProfile
+from app.domain.entities import Appointment, StaffMember, TenantProfile
 
 BOGOTA = ZoneInfo("America/Bogota")
 _TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+DEFAULT_STAFF_LABEL = "profesional"
 
 
 @dataclass
@@ -51,6 +52,10 @@ def get_schedule(profile: TenantProfile) -> ScheduleSettings:
     )
 
 
+def staff_label(profile: Optional[TenantProfile]) -> str:
+    return ((profile.staff_label if profile else "") or "").strip() or DEFAULT_STAFF_LABEL
+
+
 def update_schedule(
     profile: TenantProfile,
     *,
@@ -81,10 +86,65 @@ def _slot_ranges(day: date, schedule: ScheduleSettings) -> list[tuple[datetime, 
     return slots
 
 
+# --- Equipo -------------------------------------------------------------------------------
+
+
+def all_staff(db: Session, tenant_id: uuid.UUID) -> list[StaffMember]:
+    return (
+        db.query(StaffMember)
+        .filter(StaffMember.tenant_id == tenant_id)
+        .order_by(StaffMember.position.asc(), StaffMember.created_at.asc())
+        .all()
+    )
+
+
+def active_staff(db: Session, tenant_id: uuid.UUID) -> list[StaffMember]:
+    return [s for s in all_staff(db, tenant_id) if s.is_active]
+
+
+def staff_window(staff: StaffMember, schedule: ScheduleSettings, day: date) -> Optional[tuple[time, time]]:
+    """Horas en que atiende ese día, dentro del horario del negocio. None = no trabaja."""
+    if day.weekday() not in (staff.work_days or []):
+        return None
+    start = _parse_hhmm(schedule.open_time)
+    end = _parse_hhmm(schedule.close_time)
+    if staff.start_time:
+        start = max(start, _parse_hhmm(staff.start_time))
+    if staff.end_time:
+        end = min(end, _parse_hhmm(staff.end_time))
+    return (start, end) if end > start else None
+
+
+def _staff_works(staff: StaffMember, schedule: ScheduleSettings, starts_at: datetime, ends_at: datetime) -> bool:
+    local_start = starts_at.astimezone(BOGOTA)
+    local_end = ends_at.astimezone(BOGOTA)
+    if local_end.date() != local_start.date():
+        return False
+    window = staff_window(staff, schedule, local_start.date())
+    return bool(window and window[0] <= local_start.time() and local_end.time() <= window[1])
+
+
+def staff_to_dict(staff: StaffMember) -> dict[str, Any]:
+    return {
+        "id": str(staff.id),
+        "name": staff.name,
+        "phone": staff.phone or "",
+        "is_active": bool(staff.is_active),
+        "work_days": sorted(int(d) for d in (staff.work_days or [])),
+        "start_time": staff.start_time or "",
+        "end_time": staff.end_time or "",
+    }
+
+
+# --- Vista del día y horarios libres ------------------------------------------------------
+
+
 def _appointment_to_dict(row: Appointment) -> dict[str, Any]:
     return {
         "id": str(row.id),
         "conversation_id": str(row.conversation_id) if row.conversation_id else None,
+        "staff_id": str(row.staff_id) if row.staff_id else None,
+        "staff_name": row.staff.name if row.staff else "",
         "starts_at": row.starts_at.isoformat(),
         "ends_at": row.ends_at.isoformat(),
         "client_name": row.client_name or "",
@@ -97,18 +157,10 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
     return a_start < b_end and b_start < a_end
 
 
-def build_day_view(
-    db: Session,
-    *,
-    tenant_id: uuid.UUID,
-    day: date,
-) -> dict[str, Any]:
-    profile = get_or_create_tenant_profile(db, tenant_id)
-    schedule = get_schedule(profile)
+def _day_appointments(db: Session, tenant_id: uuid.UUID, day: date) -> list[Appointment]:
     day_start = _combine_local(day, time.min)
     day_end = _combine_local(day, time.max)
-
-    rows = (
+    return (
         db.query(Appointment)
         .filter(
             Appointment.tenant_id == tenant_id,
@@ -119,32 +171,48 @@ def build_day_view(
         .all()
     )
 
+
+def _slot_dict(slot_start: datetime, slot_end: datetime, match: Optional[Appointment]) -> dict[str, Any]:
+    return {
+        "start": _format_hhmm(slot_start.astimezone(BOGOTA).time()),
+        "end": _format_hhmm(slot_end.astimezone(BOGOTA).time()),
+        "status": "busy" if match else "free",
+        "appointment": _appointment_to_dict(match) if match else None,
+    }
+
+
+def build_day_view(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    day: date,
+    staff_id: Optional[uuid.UUID] = None,
+) -> dict[str, Any]:
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    schedule = get_schedule(profile)
+    rows = _day_appointments(db, tenant_id, day)
+    team = all_staff(db, tenant_id)
+    selected = next((s for s in team if s.id == staff_id), None) or next(
+        (s for s in team if s.is_active), team[0] if team else None
+    )
+
     slots: list[dict[str, Any]] = []
-    for slot_start, slot_end in _slot_ranges(day, schedule):
-        match = None
-        for row in rows:
-            if _overlaps(slot_start, slot_end, row.starts_at, row.ends_at):
-                match = row
-                break
-        if match:
-            label = match.client_name.strip() or "Cliente"
-            slots.append(
-                {
-                    "start": _format_hhmm(slot_start.astimezone(BOGOTA).time()),
-                    "end": _format_hhmm(slot_end.astimezone(BOGOTA).time()),
-                    "status": "busy",
-                    "appointment": _appointment_to_dict(match),
-                }
-            )
-        else:
-            slots.append(
-                {
-                    "start": _format_hhmm(slot_start.astimezone(BOGOTA).time()),
-                    "end": _format_hhmm(slot_end.astimezone(BOGOTA).time()),
-                    "status": "free",
-                    "appointment": None,
-                }
-            )
+    off_day = False
+    if selected is None:
+        for slot_start, slot_end in _slot_ranges(day, schedule):
+            match = next((r for r in rows if _overlaps(slot_start, slot_end, r.starts_at, r.ends_at)), None)
+            slots.append(_slot_dict(slot_start, slot_end, match))
+    else:
+        own = [r for r in rows if r.staff_id == selected.id]
+        window = staff_window(selected, schedule, day)
+        off_day = window is None
+        for slot_start, slot_end in _slot_ranges(day, schedule):
+            match = next((r for r in own if _overlaps(slot_start, slot_end, r.starts_at, r.ends_at)), None)
+            local = slot_start.astimezone(BOGOTA).time()
+            local_end = slot_end.astimezone(BOGOTA).time()
+            works = bool(window and window[0] <= local and local_end <= window[1])
+            if works or match:
+                slots.append(_slot_dict(slot_start, slot_end, match))
 
     return {
         "date": day.isoformat(),
@@ -152,9 +220,182 @@ def build_day_view(
             "open_time": schedule.open_time,
             "close_time": schedule.close_time,
             "slot_minutes": schedule.slot_minutes,
+            "ai_booking_enabled": bool(profile.ai_booking_enabled),
+            "staff_label": profile.staff_label or "",
         },
+        "staff": [staff_to_dict(s) for s in team],
+        "staff_id": str(selected.id) if selected else None,
+        "off_day": off_day,
         "slots": slots,
     }
+
+
+def _ordered_free_staff(
+    staff: list[StaffMember],
+    rows: list[Appointment],
+    schedule: ScheduleSettings,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> list[StaffMember]:
+    """Libres a esa hora, primero quien tenga menos citas ese día (reparto parejo)."""
+    load = {s.id: 0 for s in staff}
+    for row in rows:
+        if row.staff_id in load:
+            load[row.staff_id] += 1
+    free = [
+        s
+        for s in staff
+        if _staff_works(s, schedule, starts_at, ends_at)
+        and not any(
+            r.staff_id == s.id and _overlaps(starts_at, ends_at, r.starts_at, r.ends_at) for r in rows
+        )
+    ]
+    order = {s.id: i for i, s in enumerate(staff)}
+    return sorted(free, key=lambda s: (load[s.id], order[s.id]))
+
+
+def free_staff_for_slot(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+    preferred_staff_id: Optional[uuid.UUID] = None,
+) -> list[StaffMember]:
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    staff = active_staff(db, tenant_id)
+    if preferred_staff_id is not None:
+        staff = [s for s in staff if s.id == preferred_staff_id]
+    rows = _day_appointments(db, tenant_id, starts_at.astimezone(BOGOTA).date())
+    return _ordered_free_staff(staff, rows, get_schedule(profile), starts_at, ends_at)
+
+
+BOOKING_LEAD_MINUTES = 30
+
+
+def collect_upcoming_free_slots(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    days: int = 4,
+    limit: Optional[int] = 12,
+    now: Optional[datetime] = None,
+    staff_id: Optional[uuid.UUID] = None,
+    extra_days: Iterable[date] = (),
+) -> list[dict[str, Any]]:
+    """Próximos bloques libres para que la IA los ofrezca. Con equipo, cada bloque trae
+    quiénes están libres (`staff`), en orden de reparto. `extra_days`: fechas que pidió el
+    cliente aunque estén más allá de `days`. limit=None no recorta."""
+    current = (now or datetime.now(BOGOTA)).astimezone(BOGOTA)
+    earliest = current + timedelta(minutes=BOOKING_LEAD_MINUTES)
+    today = current.date()
+    day_list = sorted(
+        {today + timedelta(days=offset) for offset in range(max(1, days))}
+        | {d for d in extra_days if d >= today}
+    )
+    profile = get_or_create_tenant_profile(db, tenant_id)
+    schedule = get_schedule(profile)
+    staff = active_staff(db, tenant_id)
+    team_mode = bool(all_staff(db, tenant_id))
+    if staff_id is not None:
+        staff = [s for s in staff if s.id == staff_id]
+
+    out: list[dict[str, Any]] = []
+    for day in day_list:
+        rows = _day_appointments(db, tenant_id, day)
+        human_day = _human_day_label(day, today)
+        for slot_start, slot_end in _slot_ranges(day, schedule):
+            if slot_start < earliest:
+                continue
+            start = _format_hhmm(slot_start.time())
+            end = _format_hhmm(slot_end.time())
+            entry: dict[str, Any] = {
+                "date": day.isoformat(),
+                "start": start,
+                "end": end,
+                "label": f"{human_day} {start}–{end}",
+            }
+            if team_mode:
+                free = _ordered_free_staff(staff, rows, schedule, slot_start, slot_end)
+                if not free:
+                    continue
+                entry["staff"] = [{"id": str(s.id), "name": s.name} for s in free]
+            elif any(_overlaps(slot_start, slot_end, r.starts_at, r.ends_at) for r in rows):
+                continue
+            out.append(entry)
+            if limit is not None and len(out) >= limit:
+                return out
+    return out
+
+
+# --- Crear, editar y borrar citas ---------------------------------------------------------
+
+
+def _lock_staff(db: Session, tenant_id: uuid.UUID, staff_id: uuid.UUID) -> StaffMember:
+    staff = (
+        db.query(StaffMember)
+        .filter(StaffMember.id == staff_id, StaffMember.tenant_id == tenant_id)
+        .with_for_update()
+        .first()
+    )
+    if staff is None:
+        raise ValueError("Esa persona no está en tu equipo")
+    return staff
+
+
+def _has_conflict(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+    staff_id: Optional[uuid.UUID],
+    exclude_id: Optional[uuid.UUID] = None,
+) -> bool:
+    query = db.query(Appointment.id).filter(
+        Appointment.tenant_id == tenant_id,
+        Appointment.starts_at < ends_at,
+        Appointment.ends_at > starts_at,
+    )
+    if staff_id is not None:
+        query = query.filter(Appointment.staff_id == staff_id)
+    if exclude_id is not None:
+        query = query.filter(Appointment.id != exclude_id)
+    return query.first() is not None
+
+
+def _reserve_staff(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+    staff_id: Optional[uuid.UUID],
+) -> Optional[uuid.UUID]:
+    """Devuelve el empleado que queda con la cita (None = negocio sin equipo).
+
+    Bloquea la fila del empleado (o el perfil sin equipo) hasta el commit: dos clientes
+    pidiendo la misma hora a la vez no pueden quedar los dos con ella."""
+    if not all_staff(db, tenant_id):
+        db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).with_for_update().first()
+        if _has_conflict(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=None):
+            raise ValueError("Ese horario ya está ocupado")
+        return None
+
+    if staff_id is not None:
+        staff = _lock_staff(db, tenant_id, staff_id)
+        if _has_conflict(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=staff.id):
+            raise ValueError(f"{staff.name} ya tiene una cita a esa hora")
+        return staff.id
+
+    candidates = free_staff_for_slot(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at)
+    for candidate in candidates:
+        _lock_staff(db, tenant_id, candidate.id)
+        if not _has_conflict(
+            db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=candidate.id
+        ):
+            return candidate.id
+    raise ValueError("No hay nadie libre a esa hora")
 
 
 def create_appointment(
@@ -167,27 +408,21 @@ def create_appointment(
     client_phone: Optional[str] = None,
     notes: Optional[str] = None,
     conversation_id: Optional[uuid.UUID] = None,
+    staff_id: Optional[uuid.UUID] = None,
 ) -> Appointment:
+    """Con equipo y sin staff_id, la cita va a quien esté libre (el de menos citas ese día)."""
     if ends_at <= starts_at:
         raise ValueError("La hora de fin debe ser después del inicio")
     if not client_name.strip():
         raise ValueError("Indica el nombre del cliente")
 
-    conflict = (
-        db.query(Appointment.id)
-        .filter(
-            Appointment.tenant_id == tenant_id,
-            Appointment.starts_at < ends_at,
-            Appointment.ends_at > starts_at,
-        )
-        .first()
+    assigned = _reserve_staff(
+        db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=staff_id
     )
-    if conflict:
-        raise ValueError("Ese horario ya está ocupado")
-
     row = Appointment(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
+        staff_id=assigned,
         starts_at=starts_at.astimezone(timezone.utc),
         ends_at=ends_at.astimezone(timezone.utc),
         client_name=client_name.strip()[:255],
@@ -196,7 +431,11 @@ def create_appointment(
     )
     db.add(row)
     db.flush()
+    db.refresh(row)
     return row
+
+
+_UNCHANGED: Any = object()
 
 
 def update_appointment(
@@ -209,6 +448,7 @@ def update_appointment(
     notes: Optional[str] = None,
     starts_at: Optional[datetime] = None,
     ends_at: Optional[datetime] = None,
+    staff_id: Any = _UNCHANGED,
 ) -> Appointment:
     row = (
         db.query(Appointment)
@@ -223,18 +463,21 @@ def update_appointment(
     if new_end <= new_start:
         raise ValueError("La hora de fin debe ser después del inicio")
 
-    conflict = (
-        db.query(Appointment.id)
-        .filter(
-            Appointment.tenant_id == tenant_id,
-            Appointment.id != appointment_id,
-            Appointment.starts_at < new_end,
-            Appointment.ends_at > new_start,
-        )
-        .first()
-    )
-    if conflict:
-        raise ValueError("Ese horario ya está ocupado")
+    new_staff = row.staff_id if staff_id is _UNCHANGED else staff_id
+    if all_staff(db, tenant_id):
+        if new_staff is None:
+            raise ValueError("Elige quién atiende la cita")
+        staff = _lock_staff(db, tenant_id, new_staff)
+        if _has_conflict(
+            db, tenant_id=tenant_id, starts_at=new_start, ends_at=new_end, staff_id=staff.id, exclude_id=row.id
+        ):
+            raise ValueError(f"{staff.name} ya tiene una cita a esa hora")
+    else:
+        new_staff = None
+        if _has_conflict(
+            db, tenant_id=tenant_id, starts_at=new_start, ends_at=new_end, staff_id=None, exclude_id=row.id
+        ):
+            raise ValueError("Ese horario ya está ocupado")
 
     if client_name is not None:
         if not client_name.strip():
@@ -246,7 +489,9 @@ def update_appointment(
         row.notes = notes.strip() or None
     row.starts_at = new_start
     row.ends_at = new_end
+    row.staff_id = new_staff
     db.flush()
+    db.refresh(row)
     return row
 
 
@@ -271,47 +516,6 @@ def parse_slot_to_datetimes(day: date, start_hhmm: str, end_hhmm: str) -> tuple[
     return _combine_local(day, _parse_hhmm(start_hhmm)), _combine_local(day, _parse_hhmm(end_hhmm))
 
 
-BOOKING_LEAD_MINUTES = 30
-
-
-def collect_upcoming_free_slots(
-    db: Session,
-    *,
-    tenant_id: uuid.UUID,
-    days: int = 4,
-    limit: int = 12,
-    now: Optional[datetime] = None,
-) -> list[dict[str, Any]]:
-    """Próximos bloques libres para que la IA los ofrezca."""
-    current = (now or datetime.now(BOGOTA)).astimezone(BOGOTA)
-    earliest = current + timedelta(minutes=BOOKING_LEAD_MINUTES)
-    today = current.date()
-    out: list[dict[str, Any]] = []
-    for offset in range(max(1, days)):
-        day = today + timedelta(days=offset)
-        view = build_day_view(db, tenant_id=tenant_id, day=day)
-        day_label = day.strftime("%Y-%m-%d")
-        human_day = _human_day_label(day, today)
-        for slot in view.get("slots") or []:
-            if slot.get("status") != "free":
-                continue
-            start = str(slot.get("start") or "")
-            end = str(slot.get("end") or "")
-            if _combine_local(day, _parse_hhmm(start)) < earliest:
-                continue
-            out.append(
-                {
-                    "date": day_label,
-                    "start": start,
-                    "end": end,
-                    "label": f"{human_day} {start}–{end}",
-                }
-            )
-            if len(out) >= limit:
-                return out
-    return out
-
-
 def upcoming_appointment_for_conversation(
     db: Session,
     *,
@@ -332,10 +536,35 @@ def upcoming_appointment_for_conversation(
     )
 
 
-def describe_appointment(row: Appointment, *, today: Optional[date] = None) -> str:
+def upcoming_appointments_for_conversation(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    now: Optional[datetime] = None,
+) -> list[Appointment]:
+    """Un cliente puede tener varias: la suya y la de su esposa a la misma hora."""
+    current = now or datetime.now(timezone.utc)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.tenant_id == tenant_id,
+            Appointment.conversation_id == conversation_id,
+            Appointment.ends_at > current,
+        )
+        .order_by(Appointment.starts_at.asc())
+        .limit(5)
+        .all()
+    )
+
+
+def describe_appointment(row: Appointment, *, today: Optional[date] = None, with_staff: bool = True) -> str:
     local = row.starts_at.astimezone(BOGOTA)
     ref = today or datetime.now(BOGOTA).date()
-    return f"{_human_day_label(local.date(), ref)} {local.date().isoformat()} a las {local.strftime('%H:%M')}"
+    text = f"{_human_day_label(local.date(), ref)} {local.date().isoformat()} a las {local.strftime('%H:%M')}"
+    if with_staff and row.staff is not None:
+        text += f" con {row.staff.name}"
+    return text
 
 
 def _human_day_label(day: date, today: date) -> str:
@@ -346,4 +575,3 @@ def _human_day_label(day: date, today: date) -> str:
         return "Mañana"
     names = ("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
     return names[day.weekday()]
-

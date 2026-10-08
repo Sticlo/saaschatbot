@@ -147,6 +147,7 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
                         whatsapp_connection_id=connection_id,
                         instance_name=session.instance_name,
                         publish=False,
+                        live=True,
                         created_at=item.get("timestamp"),
                     )
                     event_type = "message.in"

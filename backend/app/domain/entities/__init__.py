@@ -21,6 +21,7 @@ from app.domain.entities.bait_template import BaitTemplate
 from app.domain.entities.legal_consent import LegalConsent
 from app.domain.entities.outbound import Campaign, Exclusion, Lead, SendQueueItem
 from app.domain.entities.plan import DEFAULT_PLAN_ID, Plan
+from app.domain.entities.staff import StaffMember
 from app.domain.entities.subscription import Subscription
 from app.domain.entities.tenant import Tenant, TenantProfile
 from app.domain.entities.user import User
@@ -48,6 +49,7 @@ __all__ = [
     "MessageStatus",
     "Plan",
     "SendQueueStatus",
+    "StaffMember",
     "Subscription",
     "SubscriptionStatus",
     "Tenant",

@@ -34,6 +34,8 @@ AI_QUEUED_PREFIX = "ai:queued:"
 AI_QUEUED_TTL_SECONDS = 600
 MAX_AI_JOB_RETRIES = 8
 TENANT_BUSY_REQUEUE_DELAY_SECONDS = 0.25
+JOB_REPLY = "reply"
+JOB_RESCUE = "rescue"  # el chat pasó a una persona: revisar si alguien le respondió al cliente
 
 _worker_threads: list[threading.Thread] = []
 _worker_stop = threading.Event()
@@ -72,12 +74,30 @@ def _clear_queued_marker(message_id: uuid.UUID) -> None:
         pass
 
 
+def _job_payload(
+    tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID, kind: str
+) -> dict:
+    payload = {
+        "tenant_id": str(tenant_id),
+        "conversation_id": str(conversation_id),
+        "message_id": str(message_id),
+    }
+    if kind != JOB_REPLY:
+        payload["kind"] = kind
+    return payload
+
+
 def _process_ai_job(
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
     message_id: uuid.UUID,
+    kind: str = JOB_REPLY,
 ) -> None:
     if not _try_acquire_ai_lock(conversation_id):
+        if kind == JOB_RESCUE:
+            # Otro job tiene el chat: el rescate no se puede perder, se intenta en un rato.
+            schedule_ai_retry(tenant_id, conversation_id, message_id, delay_seconds=15, kind=kind)
+            return
         log.debug("IA job omitido: lock activo conv=%s", conversation_id)
         _clear_queued_marker(message_id)
         return
@@ -87,14 +107,7 @@ def _process_ai_job(
         log.debug("IA: negocio en su tope de respuestas simultáneas tenant=%s (reencolar)", tenant_id)
         _release_ai_lock(conversation_id)
         time.sleep(TENANT_BUSY_REQUEUE_DELAY_SECONDS)
-        _requeue_job(
-            {
-                "tenant_id": str(tenant_id),
-                "conversation_id": str(conversation_id),
-                "message_id": str(message_id),
-            },
-            retry=0,
-        )
+        _requeue_job(_job_payload(tenant_id, conversation_id, message_id, kind), retry=0)
         return
 
     slot = acquire_ai_slot(wait_seconds=settings.ai_slot_wait_seconds)
@@ -106,23 +119,16 @@ def _process_ai_job(
         )
         release_tenant_ai_slot(tenant_slot)
         _release_ai_lock(conversation_id)
-        _requeue_job(
-            {
-                "tenant_id": str(tenant_id),
-                "conversation_id": str(conversation_id),
-                "message_id": str(message_id),
-                "retry": 0,
-            },
-            retry=1,
-        )
+        _requeue_job(_job_payload(tenant_id, conversation_id, message_id, kind), retry=1)
         return
 
-    from app.application.ai.ai_service import process_ai_reply
+    from app.application.ai.ai_service import process_ai_reply, rescue_unanswered_handoff
 
+    handler = rescue_unanswered_handoff if kind == JOB_RESCUE else process_ai_reply
     db = SessionLocal()
     try:
         refresh_ai_slot(slot)
-        process_ai_reply(
+        handler(
             db,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
@@ -181,6 +187,9 @@ def enqueue_ai_reply_ids(
         if not should_ai_respond(tenant, conversation):
             reason = ai_block_reason(tenant, conversation) or "desconocido"
             log.info("IA no encolada conv=%s: %s", conversation_id, reason)
+            from app.application.ai.ai_service import schedule_rescue_if_awaiting
+
+            schedule_rescue_if_awaiting(tenant_id, conversation_id, message_id)
             return False
         if not allow_stale:
             from app.domain.entities import Message
@@ -237,17 +246,11 @@ def schedule_ai_retry(
     message_id: uuid.UUID,
     *,
     delay_seconds: float,
+    kind: str = JOB_REPLY,
 ) -> None:
-    item = json.dumps(
-        {
-            "tenant_id": str(tenant_id),
-            "conversation_id": str(conversation_id),
-            "message_id": str(message_id),
-            "retry": 0,
-        }
-    )
+    item = json.dumps({**_job_payload(tenant_id, conversation_id, message_id, kind), "retry": 0})
     get_redis().zadd(AI_DELAYED_QUEUE, {item: time.time() + delay_seconds})
-    log.info("IA reintento en %.0fs conv=%s msg=%s", delay_seconds, conversation_id, message_id)
+    log.info("IA %s en %.0fs conv=%s msg=%s", kind, delay_seconds, conversation_id, message_id)
 
 
 def promote_due_ai_retries(now: Optional[float] = None) -> int:
@@ -301,7 +304,7 @@ def _worker_loop() -> None:
             finally:
                 db.close()
 
-            _process_ai_job(tenant_id, conversation_id, message_id)
+            _process_ai_job(tenant_id, conversation_id, message_id, data.get("kind") or JOB_REPLY)
         except Exception:
             log.exception("AI worker error")
     log.info("AI worker stopped")

@@ -92,7 +92,8 @@ def alert_phones(profile: Optional[TenantProfile], *, sales: bool = False) -> li
 def is_alert_phone(tenant: Tenant, phone: str) -> bool:
     if not phone:
         return False
-    return any(phone_match_tail(p, phone) for p in alert_phones(tenant.profile, sales=True))
+    team = alert_phones(tenant.profile, sales=True) + [s.phone for s in tenant.staff_members if s.phone]
+    return any(phone_match_tail(p, phone) for p in team)
 
 
 def unanswered_interested_conversations(db: Session, tenant_id: uuid.UUID) -> list[Conversation]:
@@ -109,7 +110,7 @@ def unanswered_interested_conversations(db: Session, tenant_id: uuid.UUID) -> li
     # Mismo criterio que is_reaction_only: un ❤️ o 👍 del cliente no lo deja esperando respuesta.
     last_contact = last_from(
         MessageSource.CONTACT.value,
-        Message.body.op("~")("[[:alnum:]]"),
+        Message.body.op("~")("[[:alnum:]?¿]"),
         ~Message.body.ilike("[reaction%"),
     )
     last_agent = last_from(MessageSource.AGENT.value)

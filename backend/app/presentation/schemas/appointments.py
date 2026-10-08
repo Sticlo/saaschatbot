@@ -13,6 +13,7 @@ class AppointmentScheduleResponse(BaseModel):
     slot_minutes: int
     ai_booking_enabled: bool = False
     ai_booking_allowed: bool = True
+    staff_label: str = ""
 
 
 class AppointmentScheduleUpdate(BaseModel):
@@ -20,11 +21,14 @@ class AppointmentScheduleUpdate(BaseModel):
     close_time: str = Field(min_length=4, max_length=5)
     slot_minutes: int = Field(ge=15, le=240)
     ai_booking_enabled: Optional[bool] = None
+    staff_label: Optional[str] = Field(default=None, max_length=40)
 
 
 class AppointmentSlotAppointment(BaseModel):
     id: str
     conversation_id: Optional[str] = None
+    staff_id: Optional[str] = None
+    staff_name: str = ""
     starts_at: str
     ends_at: str
     client_name: str
@@ -39,9 +43,32 @@ class AppointmentDaySlot(BaseModel):
     appointment: Optional[AppointmentSlotAppointment] = None
 
 
+class StaffMemberResponse(BaseModel):
+    id: str
+    name: str
+    phone: str = ""
+    is_active: bool = True
+    work_days: list[int]
+    start_time: str = ""
+    end_time: str = ""
+    upcoming_count: int = 0
+
+
+class StaffMemberRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=32)
+    work_days: list[int] = Field(min_length=1, max_length=7)
+    start_time: Optional[str] = Field(default=None, max_length=5)
+    end_time: Optional[str] = Field(default=None, max_length=5)
+    is_active: bool = True
+
+
 class AppointmentDayResponse(BaseModel):
     date: str
     schedule: AppointmentScheduleResponse
+    staff: list[StaffMemberResponse] = []
+    staff_id: Optional[str] = None
+    off_day: bool = False
     slots: list[AppointmentDaySlot]
 
 
@@ -53,6 +80,7 @@ class AppointmentCreateRequest(BaseModel):
     client_phone: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = Field(default=None, max_length=2000)
     conversation_id: Optional[uuid.UUID] = None
+    staff_id: Optional[uuid.UUID] = Field(default=None, description="Vacío = quien esté libre")
 
 
 class AppointmentUpdateRequest(BaseModel):
@@ -62,11 +90,14 @@ class AppointmentUpdateRequest(BaseModel):
     client_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     client_phone: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = Field(default=None, max_length=2000)
+    staff_id: Optional[uuid.UUID] = None
 
 
 class AppointmentResponse(BaseModel):
     id: str
     conversation_id: Optional[str] = None
+    staff_id: Optional[str] = None
+    staff_name: str = ""
     starts_at: str
     ends_at: str
     client_name: str

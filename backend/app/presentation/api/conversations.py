@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import base64
 import logging
 import uuid
 
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
@@ -32,9 +33,12 @@ from app.application.realtime.realtime_service import publish_conversation_updat
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError
-from app.application.whatsapp.whatsapp_service import send_text_message
+from app.application.whatsapp.whatsapp_service import send_image_data_message, send_text_message
+from app.application.ai.ai_service import clear_awaiting_human
 from app.application.ai.ai_shortcut_service import send_shortcut_content
 from app.application.outbound.quick_shortcut_service import find_shortcut
+from app.application.outbound.tenant_asset_service import read_chat_image
+from app.shared.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 log = logging.getLogger(__name__)
@@ -493,6 +497,74 @@ def send_message(
     return message
 
 
+@router.post("/{conversation_id}/messages/image", response_model=MessageResponse, status_code=201)
+def send_image(
+    conversation_id: uuid.UUID,
+    request: Request,
+    current: RequireAgent,
+    file: UploadFile = File(...),
+    caption: str = Form("", max_length=1024),
+    db: Session = Depends(get_db),
+):
+    """Foto que el dueño pega (Cmd+V), arrastra o adjunta en el chat."""
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    session = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.tenant_id == current.tenant_id)
+        .first()
+    )
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == current.tenant_id,
+        )
+        .first()
+    )
+    if tenant is None or session is None or conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación o WhatsApp no encontrado")
+
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise HTTPException(status_code=409, detail=reason)
+
+    enforce_rate_limit(
+        f"chat:image:{current.tenant_id}",
+        limit=60,
+        window_seconds=600,
+        message="Enviaste muchas fotos seguidas. Espera un momento e intenta de nuevo.",
+    )
+    raw, mime = read_chat_image(file)
+    extension = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[mime]
+    try:
+        message = send_image_data_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            data_b64=base64.b64encode(raw).decode("ascii"),
+            mimetype=mime,
+            filename=f"foto.{extension}",
+            caption=caption.strip(),
+            source=MessageSource.AGENT.value,
+        )
+        log_audit(
+            db,
+            tenant_id=tenant.id,
+            user_id=current.id,
+            action="message.sent_image",
+            details={"conversation_id": str(conversation.id), "bytes": len(raw)},
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+        db.refresh(message)
+    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return message
+
+
 @router.post("/{conversation_id}/messages/shortcut", response_model=MessageResponse, status_code=201)
 def send_shortcut_message(
     conversation_id: uuid.UUID,
@@ -579,6 +651,7 @@ def update_conversation_mode(
         conversation.ai_active = False
         conversation.ai_set_by_agent = True
     db.commit()
+    clear_awaiting_human(conversation.id)
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     return _conversation_api_response(db, current.tenant_id, conversation)
@@ -607,6 +680,7 @@ def update_conversation_ai(
     if body.ai_active:
         conversation.mode = ConversationMode.AUTO.value
     db.commit()
+    clear_awaiting_human(conversation.id)
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     if body.ai_active:
@@ -650,6 +724,7 @@ def update_conversation_interest(
         conversation.mode = ConversationMode.MANUAL.value
         conversation.ai_set_by_agent = True
     db.commit()
+    clear_awaiting_human(conversation.id)
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     return _conversation_api_response(db, current.tenant_id, conversation)

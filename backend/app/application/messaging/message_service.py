@@ -130,11 +130,12 @@ def text_for_ai(message) -> str:
 
 
 def is_reaction_only(body: str) -> bool:
-    """Reacciones (❤️, 👍) y mensajes de solo emojis: el cliente no espera respuesta."""
+    """Reacciones (❤️, 👍) y mensajes de solo emojis: el cliente no espera respuesta.
+    «???» o «🤔?» sí la esperan: está confundido o reclamando algo."""
     text = (body or "").strip()
     if text.lower().startswith("[reaction"):
         return True
-    return not any(ch.isalnum() for ch in text)
+    return not any(ch.isalnum() or ch in "?¿" for ch in text)
 
 
 def _extract_message_body(message_obj: dict) -> str:
@@ -510,7 +511,10 @@ def save_inbound_message(
     instance_name: str = "",
     publish: bool = True,
     created_at: Optional[datetime] = None,
+    live: Optional[bool] = None,
 ) -> Optional[Message]:
+    """`live`: mensaje que acaba de llegar (puede activar la IA del chat). Por defecto sigue a
+    `publish`; el webhook y el pull en vivo publican ellos mismos pero son tráfico en vivo."""
     if not body.strip() or whatsapp_connection_id is None:
         return None
 
@@ -639,14 +643,15 @@ def save_inbound_message(
 
     from app.application.ai.ai_auto_enable_service import maybe_auto_enable_ai_for_inbound
 
-    if publish and maybe_auto_enable_ai_for_inbound(
+    if (publish if live is None else live) and maybe_auto_enable_ai_for_inbound(
         tenant=tenant,
         conversation=conversation,
         body=body,
     ):
-        from app.application.realtime.realtime_service import publish_conversation_updated
+        if publish:
+            from app.application.realtime.realtime_service import publish_conversation_updated
 
-        publish_conversation_updated(tenant.id, conversation)
+            publish_conversation_updated(tenant.id, conversation)
 
     from app.application.conversations.contact_resolver_service import repair_duplicates_for_contact
     from app.application.chatwoot.chatwoot_service import chatwoot_sync_mode

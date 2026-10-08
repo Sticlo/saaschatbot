@@ -51,6 +51,25 @@ def save_tenant_image(tenant_id: uuid.UUID, upload: UploadFile) -> str:
     return _store(tenant_id, raw, mime)
 
 
+_CHAT_IMAGE_SIGNATURES = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+)
+
+
+def read_chat_image(upload: UploadFile) -> tuple[bytes, str]:
+    """Foto que el dueño pega o adjunta en un chat: se manda tal cual, no se guarda."""
+    raw = upload.file.read(_MAX_BYTES + 1)
+    if len(raw) > _MAX_BYTES:
+        raise HTTPException(status_code=413, detail="La foto no puede superar 5 MB")
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return raw, "image/webp"
+    for signature, mime in _CHAT_IMAGE_SIGNATURES:
+        if raw.startswith(signature):
+            return raw, mime
+    raise HTTPException(status_code=400, detail="Solo se pueden enviar fotos JPG, PNG o WEBP")
+
+
 def display_file_name(raw_name: str, *, default: str = "catalogo.pdf") -> str:
     """Nombre que verá el cliente en WhatsApp, sin rutas ni caracteres raros."""
     name = Path(raw_name or "").name

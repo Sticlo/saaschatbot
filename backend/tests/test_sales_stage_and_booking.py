@@ -174,6 +174,100 @@ def test_asking_for_catalog_marks_interested_and_keeps_ai_helping(_sleep, mock_g
     assert conv.ai_active is True
 
 
+def _seed_after_bot(db, *, bot_said: str, client_says: str):
+    from datetime import timezone
+
+    from app.domain.entities import Message
+
+    tenant, conv, msg = _seed(db, body=client_says)
+    now = datetime.now(timezone.utc)
+    msg.created_at = now
+    db.add(
+        Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction="out",
+            source="bot",
+            body=bot_said,
+            status="sent",
+            created_at=now - timedelta(minutes=1),
+        )
+    )
+    db.commit()
+    return tenant, conv, msg
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_ok_after_we_promised_something_gets_an_answer(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    mock_generate.return_value = AiGeneratedReply(message="A las 2:00 están libres Sebastian y Luis. ¿Con cuál?")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed_after_bot(
+            db,
+            bot_said="Déjame revisarte si a las 2:00 hay otro profesional libre y ya te confirmo en un momentico.",
+            client_says="Ok",
+        )
+        assert _run(db, tenant, conv, msg) is True
+
+    mock_send.assert_called_once()
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_ok_to_a_goodbye_is_left_alone(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed_after_bot(db, bot_said="Listo, nos vemos el 21 👋", client_says="Ok")
+        assert _run(db, tenant, conv, msg) is True
+
+    mock_generate.assert_not_called()
+    mock_send.assert_not_called()
+
+
+MENU_IMAGE = {"id": "menu-1", "label": "menu", "type": "image", "image_path": "assets/x/menu.png"}
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_ai_that_promises_the_menu_actually_sends_it(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    mock_generate.return_value = AiGeneratedReply(message="Claro, Sebastián. Te lo envío ahora mismo.")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(
+            db, body="Si me gustaría ver el menu", profile_kwargs={"quick_shortcuts": [MENU_IMAGE]}
+        )
+        assert _run(db, tenant, conv, msg) is True
+
+    assert mock_send.call_args.kwargs["reply"].shortcut_id == "menu-1"
+    assert mock_send.call_args.kwargs["allow_resend"] is False
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_question_marks_get_an_answer_and_allow_resending(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    mock_generate.return_value = AiGeneratedReply(message="¡Perdón! Aquí tienes el menú 👇", shortcut_id="menu-1")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="???", profile_kwargs={"quick_shortcuts": [MENU_IMAGE]})
+        assert _run(db, tenant, conv, msg) is True
+
+    mock_generate.assert_called_once()
+    assert mock_send.call_args.kwargs["allow_resend"] is True
+
+
 @requires_db
 @patch("app.application.conversations.interest_alert_service.send_alert")
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
@@ -306,6 +400,84 @@ def test_past_slots_of_today_are_not_offered():
 
     assert slots
     assert slots[0]["start"] == "13:00"
+
+
+def test_dates_the_client_asks_for_are_understood():
+    from datetime import date
+
+    from app.application.ai.ai_appointment_service import requested_dates
+
+    today = date(2026, 10, 7)
+    assert requested_dates("quiero agendar para el 15 de octubre", today) == [date(2026, 10, 15)]
+    assert requested_dates("octubre 15 porfa", today) == [date(2026, 10, 15)]
+    assert requested_dates("el 15/10", today) == [date(2026, 10, 15)]
+    assert requested_dates("pero quiero para el 15", today) == [date(2026, 10, 15)]
+    assert requested_dates("el 3", today) == [date(2026, 11, 3)]
+    assert requested_dates("el 2 de noviembre a las 3", today) == [date(2026, 11, 2)]
+    assert requested_dates("el 15 de septiembre", today) == []  # sería 2027: muy lejos
+    assert requested_dates("31 de noviembre", today) == []
+    assert requested_dates("a las 3 pm", today) == []
+    assert requested_dates("talla 38, 2 pares", today) == []
+
+
+def test_prompt_says_how_far_the_list_goes_so_the_ai_never_calls_a_later_day_full():
+    slots = [{"date": "2026-10-08", "start": "09:00", "end": "10:00", "label": "Mañana 09:00–10:00"}]
+    out = append_appointment_instructions(
+        "Base", slots, covered_until="2026-10-20", extra_days=("2026-11-02",)
+    )
+    assert "todos los días hasta el 2026-10-20 y además el 2026-11-02" in out
+    assert "NO digas que está llena" in out
+    assert "Nunca inventes otros" in out
+
+
+def _spanish_date(day) -> str:
+    months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+              "septiembre", "octubre", "noviembre", "diciembre"]
+    return f"{day.day} de {months[day.month - 1]}"
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_ai_sees_the_free_slots_of_a_far_date_the_client_asks_for(_sleep, mock_generate, mock_send):
+    from app.application.appointments.appointment_service import BOGOTA
+    from app.infrastructure.persistence.database import SessionLocal
+
+    far = datetime.now(BOGOTA).date() + timedelta(days=30)
+    mock_generate.return_value = AiGeneratedReply(message="Déjame revisar 😊")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(
+            db,
+            body=f"quiero agendar para el {_spanish_date(far)}",
+            profile_kwargs={"ai_booking_enabled": True},
+        )
+        _run(db, tenant, conv, msg)
+    booking = mock_generate.call_args.kwargs["booking"]
+    assert far.isoformat() in booking.extra_days
+    assert any(s["date"] == far.isoformat() for s in booking.free_slots)
+    covered = datetime.now(BOGOTA).date() + timedelta(days=13)
+    assert booking.covered_until == covered.isoformat()
+    assert any(s["date"] == covered.isoformat() for s in booking.free_slots)
+
+
+@requires_db
+def test_short_slots_are_not_cut_off_after_a_few_days():
+    from app.application.appointments.appointment_service import BOGOTA, collect_upcoming_free_slots
+    from app.domain.entities import Tenant, TenantProfile
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant = Tenant(business_name="Uñas", slug=f"nails-{uuid.uuid4().hex[:8]}")
+        db.add(tenant)
+        db.flush()
+        db.add(TenantProfile(tenant_id=tenant.id, schedule_slot_minutes=15))
+        db.flush()
+        slots = collect_upcoming_free_slots(db, tenant_id=tenant.id, days=14, limit=None)
+        db.rollback()
+
+    last_day = (datetime.now(BOGOTA).date() + timedelta(days=13)).isoformat()
+    assert any(s["date"] == last_day for s in slots)
 
 
 @requires_db

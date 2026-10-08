@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -38,6 +39,8 @@ responde con un mensaje breve y envía ese atajo (shortcut_id).
 Si un atajo dice "ya enviado en este chat", NO lo vuelvas a enviar: responde con la
 información que conoces o recuérdale que se lo compartiste arriba. Solo reenvíalo si el
 cliente lo pide otra vez de forma explícita (por ejemplo "mándamelo de nuevo").
+- Si en message dices que envías, compartes o pasas algo ("te lo envío", "aquí tienes el menú"),
+  pon su shortcut_id en esa misma respuesta. Nunca prometas un envío sin shortcut_id.
 - Usa solo shortcut_id de la lista de arriba. No inventes ids.
 - No repitas en message el contenido completo del atajo; el atajo se envía aparte.
 - Si ningún atajo aplica, shortcut_id debe ser null.
@@ -189,6 +192,50 @@ def shortcut_ids(shortcuts: list[dict]) -> frozenset[str]:
     return frozenset(str(s.get("id") or "") for s in shortcuts if s.get("id"))
 
 
+def _plain(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return " ".join("".join(c for c in decomposed if not unicodedata.combining(c)).lower().split())
+
+
+_PROMISE_RE = re.compile(
+    r"\b(?:te\s+(?:lo|la|los|las)\s+(?:envio|mando|comparto|paso|dejo|adjunto)"
+    r"|te\s+(?:envio|mando|comparto|paso|dejo|adjunto)\s+(?:el|la|los|las|nuestr[oa]s?|mi|una|un)\b"
+    r"|aqui\s+(?:tienes|te\s+va|va|esta)"
+    r"|ahi\s+(?:te\s+va|va|tienes))"
+)
+_FILE_WORDS = ("menu", "carta", "catalogo", "precio", "servicio", "lista", "foto", "portafolio", "tarifa")
+_RESEND_RE = re.compile(
+    r"no\s+(?:me\s+)?(?:ha\s+)?(?:lleg|aparec|veo|carg|abr|sale)|de\s+nuevo|otra\s+vez|reenv|nuevamente"
+    r"|^[\s?¿!.]*\?[\s?¿!.]*$"
+)
+
+
+def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict]) -> Optional[str]:
+    """La IA a veces dice «te lo envío» y olvida el shortcut_id: el cliente se queda esperando.
+    Si promete un envío, adjuntamos el atajo del que se está hablando (si no hay duda de cuál)."""
+    if not shortcuts or not _PROMISE_RE.search(_plain(message)):
+        return None
+    text = f" {_plain(message)} {_plain(client_text)} "
+    labeled = []
+    for shortcut in shortcuts:
+        words = [w for w in re.split(r"\W+", _plain(str(shortcut.get("label") or ""))) if len(w) >= 3]
+        if shortcut.get("id") and words and any(f" {w} " in text or f" {w}s " in text for w in words):
+            labeled.append(shortcut)
+    if len(labeled) == 1:
+        return str(labeled[0]["id"])
+    if labeled:
+        return None
+    files = [s for s in shortcuts if s.get("id") and s.get("type") in ("image", "document")]
+    if len(files) == 1 and any(w in text for w in _FILE_WORDS):
+        return str(files[0]["id"])
+    return None
+
+
+def asks_to_resend(client_text: str) -> bool:
+    """«No me llegó», «mándamelo de nuevo», «???»: el cliente no tiene lo que le prometimos."""
+    return bool(_RESEND_RE.search(_plain(client_text)))
+
+
 def _strip_json_fence(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -332,6 +379,7 @@ def send_reply_with_shortcut(
     session: WhatsAppSession,
     conversation: Conversation,
     reply: AiGeneratedReply,
+    allow_resend: bool = False,
 ) -> None:
     """Envía mensaje de la IA y atajo opcional — sin cerrar venta ni agendar."""
     from app.domain.entities.enums import MessageSource
@@ -361,7 +409,7 @@ def send_reply_with_shortcut(
         return
 
     sent_at = shortcut_sent_at(conversation.id, reply.shortcut_id)
-    if sent_at is not None and time.time() - sent_at < SHORTCUT_RESEND_GUARD_SECONDS:
+    if not allow_resend and sent_at is not None and time.time() - sent_at < SHORTCUT_RESEND_GUARD_SECONDS:
         log.info(
             "Atajo ya enviado hace poco, no se reenvía conv=%s shortcut=%s",
             conversation.id,

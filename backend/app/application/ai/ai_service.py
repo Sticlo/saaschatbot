@@ -5,14 +5,33 @@ import random
 import time
 import uuid
 from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.application.ai.ai_appointment_service import (
+    BOOKING_HANDOFF_MESSAGE,
     BookingContext,
+    already_booked,
+    assigned_staff_note,
+    available_options_message,
+    claims_booking,
+    confirm_slot_message,
+    denies_own_booking,
     detect_scheduling_interest,
+    detect_slot_confirmation,
+    infer_claimed_booking,
+    nearest_slots,
+    own_booking_message,
+    pending_promise_note,
+    promises_follow_up,
+    requested_dates,
+    requested_slot_note,
+    requested_staff,
     slot_taken_message,
+    stall_correction,
+    stalls_on_agenda,
     try_create_booking,
 )
 from app.application.ai.ai_classifier_service import classify_inbound_message
@@ -31,12 +50,16 @@ from app.application.ai.ai_shortcut_service import (
     STAGE_RANK,
     AiGeneratedReply,
     annotate_sent_shortcuts,
+    asks_to_resend,
+    infer_promised_shortcut,
     send_reply_with_shortcut,
 )
 from app.application.appointments.appointment_service import (
+    BOGOTA,
     collect_upcoming_free_slots,
     describe_appointment,
-    upcoming_appointment_for_conversation,
+    staff_label,
+    upcoming_appointments_for_conversation,
 )
 from app.application.ai.ai_usage_service import (
     check_daily_classify_quota,
@@ -95,8 +118,12 @@ HOLDING_REPLY_COOLDOWN_SECONDS = 15 * 60
 OWNER_HANDOFF_ALERT_COOLDOWN_SECONDS = 30 * 60
 SEND_RETRY_DELAY_SECONDS = 30
 HANDOFF_MARKER_TTL_SECONDS = 30 * 24 * 3600
+# Chat pasado a una persona: si nadie le contesta al cliente en este tiempo, la IA lo retoma.
+HANDOFF_RESCUE_SECONDS = 5 * 60
+HANDOFF_WAIT_TTL_SECONDS = 24 * 3600
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
-BOOKING_DAYS_AHEAD = 7
+BOOKING_DAYS_AHEAD = 14
+BOOKING_DATE_LOOKBACK = 16  # últimos mensajes (cliente e IA) donde buscamos fechas de las que se habló
 HOLDING_REPLIES_FIRST_CONTACT = (
     "¡Hola! 😊 Gracias por escribirnos. Dame un momentico y ya te ayudo.",
     "¡Hola! Qué gusto saludarte 😊 Dame un momentico y te cuento.",
@@ -169,6 +196,185 @@ def _mark_handed_off(conversation_id: uuid.UUID) -> None:
         log.warning("No se pudo marcar traspaso conv=%s", conversation_id)
 
 
+def _awaiting_key(conversation_id: uuid.UUID) -> str:
+    return f"ai:awaiting_human:{conversation_id}"
+
+
+def _rescued_key(conversation_id: uuid.UUID) -> str:
+    return f"ai:rescued:{conversation_id}"
+
+
+def _schedule_rescue(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID) -> None:
+    from app.application.ai.ai_queue_service import JOB_RESCUE, schedule_ai_retry
+
+    try:
+        schedule_ai_retry(
+            tenant_id, conversation_id, message_id, delay_seconds=HANDOFF_RESCUE_SECONDS, kind=JOB_RESCUE
+        )
+    except Exception:
+        log.warning("No se pudo programar el rescate del chat conv=%s", conversation_id)
+
+
+def _await_human(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID) -> None:
+    """El chat pasó a una persona. Si nadie le responde al cliente, la IA lo retoma."""
+    try:
+        get_redis().set(_awaiting_key(conversation_id), str(time.time()), ex=HANDOFF_WAIT_TTL_SECONDS)
+    except Exception:
+        log.warning("No se pudo marcar el chat como esperando a una persona conv=%s", conversation_id)
+        return
+    _schedule_rescue(tenant_id, conversation_id, message_id)
+
+
+def _awaiting_human_since(conversation_id: uuid.UUID) -> Optional[datetime]:
+    try:
+        raw = get_redis().get(_awaiting_key(conversation_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def clear_awaiting_human(conversation_id: uuid.UUID) -> None:
+    """El dueño tomó una decisión sobre el chat: la IA no lo retoma por su cuenta."""
+    try:
+        get_redis().delete(_awaiting_key(conversation_id))
+    except Exception:
+        pass
+
+
+def schedule_rescue_if_awaiting(
+    tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID
+) -> bool:
+    """El cliente volvió a escribir en un chat que la IA pasó a una persona."""
+    if _awaiting_human_since(conversation_id) is None:
+        return False
+    _schedule_rescue(tenant_id, conversation_id, message_id)
+    return True
+
+
+def _was_rescued(conversation_id: uuid.UUID) -> bool:
+    try:
+        return bool(get_redis().exists(_rescued_key(conversation_id)))
+    except Exception:
+        return False
+
+
+def _remind_owner_of_waiting_client(tenant: Tenant, conversation: Conversation, *, resumed: bool) -> None:
+    from app.application.conversations.interest_alert_service import alert_phones, send_alerts
+
+    phones = alert_phones(tenant.profile)
+    session = tenant.whatsapp_session
+    if not phones or session is None:
+        return
+    try:
+        key = f"ai:rescue_alert:{conversation.id}:{'resumed' if resumed else 'waiting'}"
+        if not get_redis().set(key, "1", nx=True, ex=HANDOFF_WAIT_TTL_SECONDS):
+            return
+    except Exception:
+        return
+    minutes = HANDOFF_RESCUE_SECONDS // 60
+    if resumed:
+        text = (
+            f"⏰ *{tenant.business_name}*: nadie le respondió a {_contact_label(conversation)} en "
+            f"{minutes} min, así que la IA retomó el chat para que no se enfríe.\n\n"
+            f"Si prefieres atenderlo tú, apaga la IA en ese chat: {_panel_link()}"
+        )
+    else:
+        text = (
+            f"⏰ *{tenant.business_name}*: {_contact_label(conversation)} lleva {minutes} min "
+            f"esperando respuesta.\n\nRespóndele aquí: {_panel_link()}"
+        )
+    if not send_alerts(session, phones, text):
+        log.warning("No se pudo recordar al dueño el chat en espera conv=%s", conversation.id)
+
+
+def rescue_unanswered_handoff(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+) -> bool:
+    """Pasaron unos minutos desde que el chat quedó en manos de una persona. Si nadie le respondió
+    al cliente y él volvió a escribir, la IA retoma; si no escribió, solo se le recuerda al dueño."""
+    since = _awaiting_human_since(conversation_id)
+    if since is None:
+        return True
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.tenant_id == tenant_id)
+        .first()
+    )
+    if tenant is None or conversation is None:
+        return True
+    if should_ai_respond(tenant, conversation):
+        clear_awaiting_human(conversation_id)  # alguien ya reactivó la IA
+        return True
+    human_replied = (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.source == MessageSource.AGENT.value,
+            Message.created_at >= since,
+        )
+        .first()
+    )
+    if human_replied is not None:
+        clear_awaiting_human(conversation_id)
+        return True
+
+    latest_in = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.direction == MessageDirection.IN.value)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    pending = latest_in is not None and not (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.created_at > latest_in.created_at,
+        )
+        .first()
+    )
+    blocked_by_owner = (
+        not tenant.is_active
+        or not tenant.ai_global_enabled
+        or not feature_allowed(tenant, "ai_replies")
+        or conversation.status == ConversationStatus.EXCLUDED.value
+    )
+    if not pending or blocked_by_owner:
+        _remind_owner_of_waiting_client(tenant, conversation, resumed=False)
+        return True
+
+    conversation.ai_active = True
+    conversation.mode = ConversationMode.AUTO.value
+    clear_awaiting_human(conversation_id)
+    try:
+        get_redis().set(_rescued_key(conversation_id), "1", ex=HANDOFF_WAIT_TTL_SECONDS)
+    except Exception:
+        pass
+    db.commit()
+    publish_conversation_updated(tenant.id, conversation)
+    log.info("Nadie respondió al cliente: la IA retoma el chat conv=%s", conversation_id)
+    record_incident(
+        tenant.id,
+        "system.ai_rescued_handoff",
+        f"Nadie le respondió a {_contact_label(conversation)}: la IA retomó el chat",
+        details={"conversation_id": str(conversation_id)},
+        throttle_scope=str(conversation_id),
+    )
+    _remind_owner_of_waiting_client(tenant, conversation, resumed=True)
+    return process_ai_reply(db, tenant_id=tenant_id, conversation_id=conversation_id, message_id=latest_in.id)
+
+
 def _close_on_interest(
     db: Session,
     *,
@@ -194,6 +400,8 @@ def _close_on_interest(
     conversation.ai_active = False
     conversation.mode = ConversationMode.MANUAL.value
     _mark_handed_off(conversation.id)
+    if interest == ConversationInterest.INTERESTED.value:
+        _await_human(tenant.id, conversation.id, message.id)
     publish_conversation_updated(tenant.id, conversation)
 
     if not send_farewell:
@@ -478,11 +686,13 @@ def _hand_off_after_outage(
     *,
     tenant: Tenant,
     conversation: Conversation,
+    message: Message,
     session: WhatsAppSession,
 ) -> None:
     from app.application.monitoring.dev_alerts import alert_dev
 
     conversation.mode = ConversationMode.MANUAL.value
+    _await_human(tenant.id, conversation.id, message.id)
     publish_conversation_updated(tenant.id, conversation)
     try:
         send_text_message(
@@ -553,7 +763,7 @@ def _handle_ai_unavailable(
         except Exception:
             log.exception("No se pudo programar reintento IA conv=%s", conversation.id)
 
-    _hand_off_after_outage(db, tenant=tenant, conversation=conversation, session=session)
+    _hand_off_after_outage(db, tenant=tenant, conversation=conversation, message=message, session=session)
     return True
 
 
@@ -609,6 +819,7 @@ def _send_generated_reply(
             session=session,
             conversation=conversation,
             reply=reply,
+            allow_resend=asks_to_resend(text_for_ai(message)),
         )
     except Exception as exc:
         log.exception("Error enviando respuesta IA conv=%s", conversation.id)
@@ -647,18 +858,92 @@ def _booking_context(
     tenant: Tenant,
     profile: Optional[TenantProfile],
     conversation: Conversation,
+    history: list[Message],
 ) -> Optional[BookingContext]:
     if profile is None or not profile.ai_booking_enabled or not feature_allowed(tenant, "ai_booking"):
         return None
-    free_slots = collect_upcoming_free_slots(
-        db, tenant_id=tenant.id, days=BOOKING_DAYS_AHEAD, limit=200
-    )
-    existing = upcoming_appointment_for_conversation(
+    today = datetime.now(BOGOTA).date()
+    covered_until = today + timedelta(days=BOOKING_DAYS_AHEAD - 1)
+    upcoming = upcoming_appointments_for_conversation(
         db, tenant_id=tenant.id, conversation_id=conversation.id
+    )
+    # La fecha puede haberla dicho el cliente o la IA hace varios mensajes («el 21 con Juan»).
+    talked = {d for m in history[-BOOKING_DATE_LOOKBACK:] for d in requested_dates(text_for_ai(m), today)}
+    talked |= {row.starts_at.astimezone(BOGOTA).date() for row in upcoming}
+    asked = {d for d in talked if d > covered_until}
+    free_slots = collect_upcoming_free_slots(
+        db, tenant_id=tenant.id, days=BOOKING_DAYS_AHEAD, limit=None, extra_days=asked
     )
     return BookingContext(
         free_slots=free_slots,
-        existing_appointment=describe_appointment(existing) if existing else "",
+        existing_appointment="; ".join(
+            describe_appointment(row) + (f" ({row.notes})" if row.notes else "") for row in upcoming
+        ),
+        staff_label=staff_label(profile),
+        covered_until=covered_until.isoformat(),
+        extra_days=tuple(d.isoformat() for d in sorted(asked)),
+        booked=tuple(
+            (
+                row.starts_at.astimezone(BOGOTA).date().isoformat(),
+                row.starts_at.astimezone(BOGOTA).strftime("%H:%M"),
+                row.staff.name if row.staff is not None else "",
+            )
+            for row in upcoming
+        ),
+    )
+
+
+def _day_in_talk(history: list[Message]) -> Optional[str]:
+    """El último día concreto del que se habló, para ofrecer horas de ese día."""
+    today = datetime.now(BOGOTA).date()
+    for m in reversed(history[-BOOKING_DATE_LOOKBACK:]):
+        days = requested_dates(text_for_ai(m), today)
+        if days:
+            return max(days).isoformat()
+    return None
+
+
+def _generate_without_stalling(generate, *, booking: Optional[BookingContext], history: list[Message], **kwargs):
+    """Con la agenda delante, «déjame revisar y te confirmo» deja al cliente esperando a nadie."""
+    if booking is None:
+        return generate(history=history, booking=booking, **kwargs)
+    inbound = [text_for_ai(m) for m in reversed(history) if m.direction == MessageDirection.IN.value][:3]
+    previous_bot = next(
+        (m.body or "" for m in reversed(history) if m.source == MessageSource.BOT.value), ""
+    )
+    day = _day_in_talk(history)
+    # Tras un «ok», la hora que pidió está unos mensajes atrás.
+    slot_note = next(
+        (n for n in (requested_slot_note(t, booking.free_slots, day, booking.booked) for t in inbound) if n), ""
+    )
+    note = "\n".join(p for p in (slot_note, pending_promise_note(previous_bot)) if p)
+    # «Te escribo apenas tenga la confirmación» no nombra la agenda; el mensaje anterior sí.
+    context = " ".join([*(inbound[:1]), previous_bot])
+    reply = generate(history=history, booking=booking, correction=note, **kwargs)
+    if reply is None or not reply.message.strip():
+        return reply
+    if not stalls_on_agenda(reply.message, context, booking.free_slots):
+        return reply
+    log.info("IA dijo «ya te confirmo» teniendo la agenda; se le pide otra vez")
+    try:
+        retry = generate(
+            history=history,
+            booking=booking,
+            correction="\n".join(p for p in (note, stall_correction(reply.message)) if p),
+            **kwargs,
+        )
+    except DeepSeekError:
+        retry = None
+    if retry is not None and retry.message.strip() and not stalls_on_agenda(
+        retry.message, context, booking.free_slots
+    ):
+        return retry
+    return replace(
+        reply,
+        message=available_options_message(booking.free_slots, day=_day_in_talk(history)),
+        book_slot=None,
+        shortcut_id=None,
+        stage=STAGE_INTERESTED,
     )
 
 
@@ -680,11 +965,16 @@ def _contact_line(conversation: Conversation) -> str:
     return f"Cliente: {label}"
 
 
-def _send_sales_alert(tenant: Tenant, *, key: str, ttl_seconds: int, text: str) -> None:
+def _send_sales_alert(
+    tenant: Tenant, *, key: str, ttl_seconds: int, text: str, skip_phone: Optional[str] = None
+) -> None:
     """Ventas listas y citas: al dueño y a quienes despachan."""
     from app.application.conversations.interest_alert_service import alert_phones, send_alerts
+    from app.shared.core.phone import phone_match_tail
 
-    phones = alert_phones(tenant.profile, sales=True)
+    phones = [
+        p for p in alert_phones(tenant.profile, sales=True) if not (skip_phone and phone_match_tail(p, skip_phone))
+    ]
     session = tenant.whatsapp_session
     if not phones or session is None:
         return
@@ -695,6 +985,21 @@ def _send_sales_alert(tenant: Tenant, *, key: str, ttl_seconds: int, text: str) 
         return
     if not send_alerts(session, phones, text):
         log.warning("No se pudo enviar aviso al equipo tenant=%s key=%s", tenant.id, key)
+
+
+def _notify_assigned_staff(tenant: Tenant, appointment) -> Optional[str]:
+    """Avisa a quien atiende la cita. Devuelve su número si se le avisó."""
+    from app.application.appointments.staff_notify import build_staff_notice, send_staff_notice
+
+    notice = build_staff_notice(tenant, appointment)
+    if notice is None:
+        return None
+    try:
+        if not get_redis().set(f"ai:staff_notice:{appointment.id}", "1", nx=True, ex=24 * 3600):
+            return notice.phone
+    except Exception:
+        return None
+    return notice.phone if send_staff_notice(notice) else None
 
 
 def _panel_link() -> str:
@@ -711,7 +1016,12 @@ def _resolve_stage(
     """La IA lee toda la conversación; las palabras clave solo suben la etapa, nunca la bajan."""
     text = text_for_ai(message)
     stage = reply.stage
-    scheduling = booking is not None and (reply.book_slot is not None or detect_scheduling_interest(text))
+    # «Sí, confirmo» justo después de que la IA agendó es sobre esa cita, no una venta por cerrar.
+    scheduling = booking is not None and (
+        reply.book_slot is not None
+        or detect_scheduling_interest(text)
+        or (bool(booking.booked) and detect_slot_confirmation(text))
+    )
     if detect_closing_intent(text) and not scheduling:
         stage = _max_stage(stage, STAGE_CLOSING)
     elif detect_interest_signal(text):
@@ -723,6 +1033,9 @@ def _resolve_stage(
     if scheduling and stage == STAGE_CLOSING:
         # Con agenda activa, quien pide cita la agenda la IA: no hace falta pasar el chat.
         stage = STAGE_INTERESTED
+    if promises_follow_up(reply.message):
+        # Prometió escribir después y la IA no escribe sola: alguien tiene que cumplirlo.
+        stage = STAGE_CLOSING
     return stage
 
 
@@ -743,9 +1056,12 @@ def _apply_stage(
     changed = conversation.interest_status != ConversationInterest.INTERESTED.value
     conversation.interest_status = ConversationInterest.INTERESTED.value
     if stage == STAGE_CLOSING:
-        conversation.ai_active = False
-        conversation.mode = ConversationMode.MANUAL.value
-        _mark_handed_off(conversation.id)
+        # Si la IA ya retomó este chat porque nadie respondía, no lo vuelve a soltar: el aviso basta.
+        if not _was_rescued(conversation.id):
+            conversation.ai_active = False
+            conversation.mode = ConversationMode.MANUAL.value
+            _mark_handed_off(conversation.id)
+            _await_human(tenant.id, conversation.id, message.id)
         changed = True
         snippet = " ".join(text_for_ai(message).split())[:200]
         _send_sales_alert(
@@ -784,7 +1100,29 @@ def _deliver_reply(
     booking: Optional[BookingContext],
 ) -> bool:
     appointment = None
+    repeated = None
+    inferred = None
+    if booking is not None and reply.book_slot is None:
+        inferred = infer_claimed_booking(
+            reply.message, booking.free_slots, today=datetime.now(BOGOTA).date()
+        )
+        if inferred is not None:
+            log.info("IA confirmó cita sin book_slot; se agenda lo que dijo conv=%s", conversation.id)
+            reply = replace(reply, book_slot=inferred)
     if reply.book_slot is not None and booking is not None:
+        repeated = already_booked(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            slot=reply.book_slot,
+            client_text=text_for_ai(message),
+            inferred=inferred is not None,
+            reply_text=reply.message,
+        )
+    if repeated is not None:
+        log.info("IA repitió una cita que ya existe; no se agenda otra conv=%s", conversation.id)
+        reply = replace(reply, book_slot=None)
+    elif reply.book_slot is not None and booking is not None:
         appointment = try_create_booking(
             db,
             tenant=tenant,
@@ -793,8 +1131,47 @@ def _deliver_reply(
             client_name=_contact_label(conversation),
         )
         if appointment is None:
-            fresh = collect_upcoming_free_slots(db, tenant_id=tenant.id, days=BOOKING_DAYS_AHEAD, limit=3)
-            reply = replace(reply, message=slot_taken_message(fresh), shortcut_id=None, book_slot=None)
+            slot = reply.book_slot
+            preferred = requested_staff(db, tenant.id, slot.staff)
+            fresh = collect_upcoming_free_slots(
+                db,
+                tenant_id=tenant.id,
+                days=BOOKING_DAYS_AHEAD,
+                limit=None,
+                staff_id=preferred.id if preferred else None,
+                extra_days={date.fromisoformat(slot.date)},
+            )
+            options = nearest_slots(fresh, day=slot.date, start=slot.start)
+            reply = replace(reply, message=slot_taken_message(options), shortcut_id=None, book_slot=None)
+        else:
+            reply = replace(reply, message=assigned_staff_note(reply.message, appointment))
+
+    own = denies_own_booking(reply.message, booking.booked) if booking is not None and appointment is None else None
+    if own is not None:
+        log.warning("IA dijo que no había cupo en la hora de la cita del propio cliente conv=%s", conversation.id)
+        reply = replace(reply, message=own_booking_message(own), book_slot=None, shortcut_id=None)
+
+    if (
+        appointment is None
+        and repeated is None
+        and claims_booking(reply.message)
+        and not (booking is not None and booking.existing_appointment)
+    ):
+        # Nunca dejar al cliente creyendo que tiene cita si no quedó en la agenda.
+        if booking is not None:
+            log.warning("IA dijo que agendó sin horario válido; se pide el horario conv=%s", conversation.id)
+            reply = replace(
+                reply, message=confirm_slot_message(booking.free_slots), book_slot=None, shortcut_id=None
+            )
+        else:
+            log.warning("IA dijo que agendó con la agenda apagada; se pasa al equipo conv=%s", conversation.id)
+            reply = replace(reply, message=BOOKING_HANDOFF_MESSAGE, book_slot=None, stage=STAGE_CLOSING)
+
+    if reply.shortcut_id is None:
+        promised = infer_promised_shortcut(reply.message, text_for_ai(message), shortcuts)
+        if promised:
+            log.info("IA prometió un atajo sin adjuntarlo; se adjunta conv=%s", conversation.id)
+            reply = replace(reply, shortcut_id=promised)
 
     if not _send_generated_reply(
         db, tenant=tenant, conversation=conversation, message=message, session=session, reply=reply
@@ -810,6 +1187,7 @@ def _deliver_reply(
             details={"conversation_id": str(conversation.id), "appointment_id": str(appointment.id)},
             throttle_scope=str(appointment.id),
         )
+        staff_phone = _notify_assigned_staff(tenant, appointment)
         _send_sales_alert(
             tenant,
             key=f"ai:booking_alert:{appointment.id}",
@@ -820,6 +1198,7 @@ def _deliver_reply(
                 f"{_contact_line(conversation)}\n"
                 f"Ver agenda: {_panel_link()}"
             ),
+            skip_phone=staff_phone,
         )
     _apply_stage(
         db,
@@ -829,6 +1208,27 @@ def _deliver_reply(
         stage=_resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking),
     )
     return True
+
+
+def _client_is_waiting_on_us(db: Session, conversation_id: uuid.UUID, message: Message) -> bool:
+    """Un «ok» suelto no pide respuesta, salvo que conteste a una pregunta nuestra o a un
+    «ya te confirmo»: ahí el cliente se queda esperando."""
+    last_bot = (
+        db.query(Message.body)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.source == MessageSource.BOT.value,
+            Message.created_at <= message.created_at,
+            Message.id != message.id,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    if last_bot is None:
+        return False
+    body = last_bot[0] or ""
+    return "?" in body or promises_follow_up(body)
 
 
 def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
@@ -976,7 +1376,7 @@ def _process_qualify(
         category,
     )
 
-    if category == "ruido":
+    if category == "ruido" and not _client_is_waiting_on_us(db, conversation.id, message):
         return True
 
     if category == "opt_out":
@@ -1015,10 +1415,11 @@ def _process_qualify(
     inbound_count = sum(1 for m in history if m.direction == MessageDirection.IN.value)
     is_first_contact = inbound_count <= 1
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
-    booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation)
+    booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
 
     try:
-        generated_reply = generate_qualify_reply(
+        generated_reply = _generate_without_stalling(
+            generate_qualify_reply,
             tenant=tenant,
             profile=profile,
             contact_name=conversation.contact_name,
@@ -1065,7 +1466,7 @@ def _process_full_reply(
 ) -> bool:
     category = classification.get("category", "duda")
 
-    if category == "ruido":
+    if category == "ruido" and not _client_is_waiting_on_us(db, conversation.id, message):
         return True
 
     if category == "opt_out":
@@ -1101,9 +1502,10 @@ def _process_full_reply(
 
     history = _load_history(db, conversation.id)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
-    booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation)
+    booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
     try:
-        generated_reply = generate_reply(
+        generated_reply = _generate_without_stalling(
+            generate_reply,
             tenant=tenant,
             profile=profile,
             contact_name=conversation.contact_name,

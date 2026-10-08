@@ -1063,6 +1063,428 @@ textarea { resize: vertical; min-height: 44px; }
   padding: 1.25rem 1.35rem;
 }
 
+.appointments-staff-label {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  max-width: 320px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.appointments-staff-label input,
+.appointment-form select {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+}
+
+.appointments-team-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.appointments-team-head p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.staff-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.staff-empty {
+  font-size: 0.85rem;
+}
+
+.staff-item {
+  display: grid;
+  grid-template-columns: 2.1rem 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+}
+
+.staff-item[role="button"] {
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.staff-item[role="button"]:hover,
+.staff-item[role="button"]:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.staff-item-off {
+  opacity: 0.6;
+}
+
+.staff-avatar {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.staff-info {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.staff-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+
+.staff-tag {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.staff-tag-off {
+  color: #c62828;
+  border-color: color-mix(in srgb, #c62828 35%, var(--border));
+}
+
+.appointments-staff-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.25rem 0 1rem;
+}
+
+.appointments-staff-chip {
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.appointments-staff-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.appointments-staff-chip.off:not(.active) {
+  opacity: 0.55;
+}
+
+.appointment-modal-card {
+  text-align: left;
+}
+
+.appointment-modal-card h3 {
+  margin: 0 2rem 0 0;
+}
+
+.appointment-modal-card .appointment-form {
+  gap: 1.1rem;
+}
+
+.appointment-modal-card .appointment-form label {
+  margin: 0;
+}
+
+.staff-modal-card {
+  width: min(460px, 94vw);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.staff-modal-sub {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.appointment-form .field-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.field-optional {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.staff-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.staff-fieldset legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  width: 100%;
+}
+
+.staff-days-summary {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.staff-days-summary.warn {
+  color: #c62828;
+}
+
+.staff-days-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+}
+
+.appointment-form .staff-days-row label {
+  display: block;
+  position: relative;
+  cursor: pointer;
+}
+
+.staff-days-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.staff-days-row span {
+  display: grid;
+  place-items: center;
+  height: 2.4rem;
+  border-radius: 10px;
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.staff-days-row input:checked + span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.staff-days-row input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.segmented {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+
+.appointment-form .segmented label {
+  display: block;
+  flex: 1 1 0;
+  position: relative;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.segmented small {
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.segmented input:checked + span {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.staff-custom-hours {
+  margin-top: 0.15rem;
+}
+
+.appointment-form .switch-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  position: relative;
+  cursor: pointer;
+}
+
+.switch-text {
+  display: grid;
+  gap: 0.15rem;
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.switch-text strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.switch-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 2.6rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.2s;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 0.1875rem;
+  left: 0.1875rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.switch-row input:checked + .switch {
+  background: var(--accent);
+}
+
+.switch-row input:checked + .switch::after {
+  transform: translateX(1.1rem);
+}
+
+.switch-row input:focus-visible + .switch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.staff-form-actions {
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.staff-form-actions .btn {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.9rem;
+}
+
+.staff-form-actions .btn.primary {
+  min-width: 7.5rem;
+}
+
+.staff-actions-spacer {
+  flex: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after,
+  .segmented span,
+  .staff-days-row span {
+    transition: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .staff-item {
+    grid-template-columns: 2.1rem 1fr;
+  }
+  .staff-tags {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
+
 .ai-setup-panel {
   flex: 1;
   overflow-y: auto;
@@ -1444,6 +1866,72 @@ textarea { resize: vertical; min-height: 44px; }
 
 .composer textarea { flex: 1; }
 .composer .btn { width: auto; min-width: 90px; }
+.composer { flex-wrap: wrap; position: relative; }
+
+.composer-attach {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.composer-attach:hover { color: var(--text); border-color: var(--accent); }
+.composer-attach:active { transform: scale(0.96); }
+
+.composer-attachment {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+}
+.composer-attachment.hidden { display: none; }
+.composer-attachment img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: none;
+}
+.composer-attachment-meta { display: grid; gap: 0.15rem; min-width: 0; flex: 1; }
+.composer-attachment-meta strong { font-size: 0.9rem; }
+.composer-attachment-meta span { font-size: 0.8rem; color: var(--muted); }
+.composer-attachment-remove {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.composer-attachment-remove:hover { color: var(--text); }
+
+.composer.dragging::after {
+  content: "Suelta la foto para enviarla";
+  position: absolute;
+  inset: 0.35rem;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+}
 
 .composer.disabled { opacity: 0.6; pointer-events: none; }
 

@@ -43,6 +43,8 @@
     shortcutsDraft: [],
     appointmentsDate: null,
     appointmentsDay: null,
+    appointmentsStaffId: null,
+    staff: [],
     appointmentModalConversationId: null,
     aiStatus: null,
     aiNotice: null,
@@ -51,6 +53,7 @@
 
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
   const mediaCache = new Map();
+  let pendingImage = null; // foto pegada o adjunta en el chat, antes de enviarla
 
   const $ = (id) => document.getElementById(id);
 
@@ -1404,6 +1407,112 @@
       bookingBox.disabled = !allowed;
       bookingBox.title = allowed ? "" : "Tu plan no incluye que la IA agende citas. Escríbenos para activarlo.";
     }
+    if ($("schedule-staff-label") && schedule.staff_label !== undefined) {
+      $("schedule-staff-label").value = schedule.staff_label || "";
+    }
+  }
+
+  const WEEKDAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+  function describeWorkDays(days) {
+    const sorted = [...(days || [])].sort((a, b) => a - b);
+    if (sorted.length === 7) return "Todos los días";
+    const runs = [];
+    sorted.forEach((d) => {
+      const last = runs[runs.length - 1];
+      if (last && d === last[1] + 1) last[1] = d;
+      else runs.push([d, d]);
+    });
+    return runs
+      .map(([a, b]) => {
+        if (a === b) return WEEKDAY_SHORT[a];
+        if (b === a + 1) return `${WEEKDAY_SHORT[a]}, ${WEEKDAY_SHORT[b]}`;
+        return `${WEEKDAY_SHORT[a]}–${WEEKDAY_SHORT[b]}`;
+      })
+      .join(", ");
+  }
+
+  function describeStaffHours(member) {
+    if (!member.start_time && !member.end_time) return "horario del negocio";
+    return `${member.start_time || "apertura"}–${member.end_time || "cierre"}`;
+  }
+
+  function renderStaffList() {
+    const list = $("staff-list");
+    if (!list) return;
+    const canEdit = !!state.canManageGlobal;
+    $("staff-add-btn")?.classList.toggle("hidden", !canEdit);
+    if (!state.staff.length) {
+      list.innerHTML =
+        '<li class="muted staff-empty">Sin equipo: todas las citas van a una sola agenda.</li>';
+      return;
+    }
+    list.innerHTML = state.staff
+      .map((m) => {
+        const tags = [
+          !m.is_active ? '<span class="staff-tag staff-tag-off">No disponible</span>' : "",
+          m.phone ? '<span class="staff-tag" title="Recibe aviso de sus citas por WhatsApp">📲 Aviso</span>' : "",
+          m.upcoming_count
+            ? `<span class="staff-tag">${m.upcoming_count} cita${m.upcoming_count === 1 ? "" : "s"}</span>`
+            : "",
+        ].join("");
+        return `<li class="staff-item${m.is_active ? "" : " staff-item-off"}" data-staff-id="${escapeHtml(m.id)}"
+            ${canEdit ? 'role="button" tabindex="0"' : ""}>
+          <span class="staff-avatar" aria-hidden="true">${escapeHtml((m.name || "?").charAt(0).toUpperCase())}</span>
+          <span class="staff-info">
+            <strong>${escapeHtml(m.name)}</strong>
+            <span class="muted small">${escapeHtml(describeWorkDays(m.work_days))} · ${escapeHtml(describeStaffHours(m))}</span>
+          </span>
+          <span class="staff-tags">${tags}</span>
+        </li>`;
+      })
+      .join("");
+    if (!canEdit) return;
+    list.querySelectorAll(".staff-item").forEach((el) => {
+      const open = () => openStaffModal(state.staff.find((m) => m.id === el.getAttribute("data-staff-id")));
+      el.addEventListener("click", open);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      });
+    });
+  }
+
+  async function loadStaff() {
+    try {
+      state.staff = await api("/appointments/staff");
+    } catch (err) {
+      state.staff = [];
+      setScheduleStatus(err.message);
+    }
+    renderStaffList();
+  }
+
+  function renderStaffChips(dayPayload) {
+    const box = $("appointments-staff-chips");
+    if (!box) return;
+    const team = dayPayload?.staff || [];
+    box.classList.toggle("hidden", !team.length);
+    if (!team.length) {
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = team
+      .map((m) => {
+        const active = m.id === dayPayload.staff_id;
+        return `<button type="button" role="tab" aria-selected="${active}" data-staff-id="${escapeHtml(m.id)}"
+          class="appointments-staff-chip${active ? " active" : ""}${m.is_active ? "" : " off"}"
+          title="${m.is_active ? "" : "No disponible para citas nuevas"}">${escapeHtml(m.name)}</button>`;
+      })
+      .join("");
+    box.querySelectorAll(".appointments-staff-chip").forEach((el) => {
+      el.addEventListener("click", () => {
+        state.appointmentsStaffId = el.getAttribute("data-staff-id");
+        loadAppointmentsDay(state.appointmentsDate);
+      });
+    });
   }
 
   function renderAppointmentsSlots(dayPayload) {
@@ -1411,8 +1520,10 @@
     if (!list) return;
     const slots = dayPayload?.slots || [];
     if (!slots.length) {
-      list.innerHTML =
-        '<li class="muted appointments-empty">No hay bloques para este día. Ajusta el horario del negocio.</li>';
+      const who = (dayPayload?.staff || []).find((m) => m.id === dayPayload?.staff_id);
+      list.innerHTML = dayPayload?.off_day && who
+        ? `<li class="muted appointments-empty">${escapeHtml(who.name)} no trabaja este día.</li>`
+        : '<li class="muted appointments-empty">No hay bloques para este día. Ajusta el horario del negocio.</li>';
       return;
     }
     list.innerHTML = slots
@@ -1448,7 +1559,7 @@
             .map((s) => s.appointment)
             .find((a) => a && a.id === appointmentId);
           openAppointmentModal({ appointment: appt });
-          return;
+      return;
         }
         openAppointmentModal({
           start: el.getAttribute("data-slot-start"),
@@ -1474,9 +1585,13 @@
     setAppointmentsStatus("");
 
     try {
-      const day = await api(`/appointments/day?day=${encodeURIComponent(iso)}`);
+      const staffParam = state.appointmentsStaffId
+        ? `&staff_id=${encodeURIComponent(state.appointmentsStaffId)}`
+        : "";
+      const day = await api(`/appointments/day?day=${encodeURIComponent(iso)}${staffParam}`);
       state.appointmentsDay = day;
-      fillScheduleForm(day.schedule);
+      state.appointmentsStaffId = day.staff_id || null;
+      renderStaffChips(day);
       renderAppointmentsSlots(day);
     } catch (err) {
       if (list) {
@@ -1497,7 +1612,170 @@
     } catch (err) {
       setScheduleStatus(err.message);
     }
+    await Promise.all([loadStaff(), loadAppointmentsDay(state.appointmentsDate)]);
+  }
+
+  function fillAppointmentStaffSelect(appointment) {
+    const field = $("appointment-staff-field");
+    const select = $("appointment-staff");
+    if (!field || !select) return;
+    const team = state.appointmentsDay?.staff || [];
+    field.classList.toggle("hidden", !team.length);
+    if (!team.length) {
+      select.innerHTML = "";
+      return;
+    }
+    const isEdit = Boolean(appointment?.id);
+    const options = team
+      .filter((m) => m.is_active || m.id === appointment?.staff_id)
+      .map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`);
+    if (!isEdit) options.unshift('<option value="">Quien esté libre</option>');
+    select.innerHTML = options.join("");
+    select.value = isEdit ? appointment.staff_id || "" : state.appointmentsStaffId || "";
+    if (select.selectedIndex < 0) select.selectedIndex = 0;
+  }
+
+  function hideStaffModal() {
+    $("staff-modal")?.classList.add("hidden");
+    $("staff-form-error")?.classList.add("hidden");
+  }
+
+  function showStaffFormError(msg) {
+    const el = $("staff-form-error");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+
+  const WEEKDAY_LONG = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+
+  function businessHours() {
+    const schedule = state.appointmentsDay?.schedule || {};
+    return { open: schedule.open_time || "08:00", close: schedule.close_time || "18:00" };
+  }
+
+  function selectedStaffDays() {
+    return [...document.querySelectorAll("#staff-days input:checked")].map((b) => Number(b.value));
+  }
+
+  function updateStaffDaysSummary() {
+    const el = $("staff-days-summary");
+    if (!el) return;
+    const days = selectedStaffDays().sort((a, b) => a - b);
+    let text = "Ningún día";
+    if (days.length === 7) text = "Todos los días";
+    else if (days.length && days[days.length - 1] - days[0] === days.length - 1 && days.length > 2) {
+      text = `De ${WEEKDAY_LONG[days[0]]} a ${WEEKDAY_LONG[days[days.length - 1]]}`;
+    } else if (days.length) {
+      text = describeWorkDays(days);
+    }
+    el.textContent = text;
+    el.classList.toggle("warn", !days.length);
+  }
+
+  function staffHoursMode() {
+    return document.querySelector('input[name="staff-hours-mode"]:checked')?.value || "business";
+  }
+
+  function setStaffHoursMode(mode) {
+    document.querySelectorAll('input[name="staff-hours-mode"]').forEach((r) => {
+      r.checked = r.value === mode;
+    });
+    const custom = mode === "custom";
+    $("staff-custom-hours")?.classList.toggle("hidden", !custom);
+    if (custom) {
+      const { open, close } = businessHours();
+      if (!$("staff-start").value) $("staff-start").value = open;
+      if (!$("staff-end").value) $("staff-end").value = close;
+    }
+  }
+
+  function updateStaffActiveHint() {
+    const on = !!$("staff-active")?.checked;
+    $("staff-active-title").textContent = on ? "Recibe citas" : "En pausa";
+    $("staff-active-hint").textContent = on
+      ? "La IA y tu equipo le pueden agendar."
+      : "No se le agendan citas nuevas (vacaciones, incapacidad). Sus citas actuales se mantienen.";
+  }
+
+  function openStaffModal(member = null) {
+    const isEdit = Boolean(member?.id);
+    $("staff-modal-title").textContent = isEdit ? `Editar a ${member.name}` : "Agregar al equipo";
+    $("staff-id").value = member?.id || "";
+    $("staff-name").value = member?.name || "";
+    $("staff-phone").value = member?.phone || "";
+    $("staff-start").value = member?.start_time || "";
+    $("staff-end").value = member?.end_time || "";
+    const { open, close } = businessHours();
+    $("staff-business-hours").textContent = `${open}–${close}`;
+    setStaffHoursMode(member?.start_time || member?.end_time ? "custom" : "business");
+    $("staff-active").checked = member ? !!member.is_active : true;
+    updateStaffActiveHint();
+    const days = member?.work_days || [0, 1, 2, 3, 4, 5];
+    document.querySelectorAll("#staff-days input").forEach((box) => {
+      box.checked = days.includes(Number(box.value));
+    });
+    updateStaffDaysSummary();
+    $("staff-delete-btn")?.classList.toggle("hidden", !isEdit);
+    $("staff-form-error")?.classList.add("hidden");
+    $("staff-modal")?.classList.remove("hidden");
+    $("staff-name")?.focus();
+  }
+
+  async function refreshAfterStaffChange() {
+    await loadStaff();
     await loadAppointmentsDay(state.appointmentsDate);
+  }
+
+  async function submitStaffForm(event) {
+    event.preventDefault();
+    const id = $("staff-id")?.value?.trim();
+    const custom = staffHoursMode() === "custom";
+    const payload = {
+      name: $("staff-name")?.value?.trim(),
+      phone: $("staff-phone")?.value?.trim() || null,
+      work_days: selectedStaffDays(),
+      start_time: custom ? $("staff-start")?.value || null : null,
+      end_time: custom ? $("staff-end")?.value || null : null,
+      is_active: !!$("staff-active")?.checked,
+    };
+    if (!payload.work_days.length) {
+      showStaffFormError("Elige al menos un día de trabajo");
+      return;
+    }
+    if (custom && payload.start_time && payload.end_time && payload.end_time <= payload.start_time) {
+      showStaffFormError("La hora de salida debe ser después de la de entrada");
+      return;
+    }
+    const btn = $("staff-save-btn");
+    btn.disabled = true;
+    try {
+      const saved = id
+        ? await api(`/appointments/staff/${id}`, { method: "PATCH", body: JSON.stringify(payload) })
+        : await api("/appointments/staff", { method: "POST", body: JSON.stringify(payload) });
+      hideStaffModal();
+      if (!id) state.appointmentsStaffId = saved.id;
+      await refreshAfterStaffChange();
+      setScheduleStatus(id ? `✓ ${saved.name} actualizado` : `✓ ${saved.name} agregado al equipo`);
+    } catch (err) {
+      showStaffFormError(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function deleteCurrentStaff() {
+    const id = $("staff-id")?.value?.trim();
+    const member = state.staff.find((m) => m.id === id);
+    if (!id || !confirm(`¿Quitar a ${member?.name || "esta persona"} del equipo?`)) return;
+    try {
+      await api(`/appointments/staff/${id}`, { method: "DELETE" });
+      hideStaffModal();
+      if (state.appointmentsStaffId === id) state.appointmentsStaffId = null;
+      await refreshAfterStaffChange();
+    } catch (err) {
+      showStaffFormError(err.message);
+    }
   }
 
   function openAppointmentModal({ appointment = null, start = "", end = "" } = {}) {
@@ -1514,6 +1792,7 @@
     $("appointment-client").value = appointment?.client_name || "";
     $("appointment-phone").value = appointment?.client_phone || "";
     $("appointment-notes").value = appointment?.notes || "";
+    fillAppointmentStaffSelect(appointment);
     state.appointmentModalConversationId = appointment?.conversation_id || null;
 
     $("appointment-delete-btn")?.classList.toggle("hidden", !isEdit);
@@ -1541,6 +1820,7 @@
         close_time: $("schedule-close")?.value || "18:00",
         slot_minutes: Number($("schedule-slot-minutes")?.value || 60),
         ai_booking_enabled: !!$("schedule-ai-booking")?.checked,
+        staff_label: $("schedule-staff-label")?.value?.trim() || "",
       };
       const saved = await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
       fillScheduleForm(saved);
@@ -1549,7 +1829,7 @@
     } catch (err) {
       setScheduleStatus(err.message);
     } finally {
-      btn.disabled = false;
+    btn.disabled = false;
     }
   }
 
@@ -1564,6 +1844,10 @@
       client_phone: $("appointment-phone")?.value?.trim() || null,
       notes: $("appointment-notes")?.value?.trim() || null,
     };
+    if (!$("appointment-staff-field")?.classList.contains("hidden")) {
+      const staffId = $("appointment-staff")?.value || null;
+      if (staffId || !id) payload.staff_id = staffId;
+    }
     const btn = $("appointment-save-btn");
     btn.disabled = true;
     $("appointment-form-error")?.classList.add("hidden");
@@ -2067,8 +2351,8 @@
       .map((s) => {
         const type = s.type || "text";
         return {
-          id: s.id,
-          label: s.label.trim(),
+        id: s.id,
+        label: s.label.trim(),
           type,
           text: type === "text" ? (s.text || "").trim() : null,
           image_path: type === "image" ? s.image_path : null,
@@ -2246,6 +2530,7 @@
 
   async function selectConversation(id) {
     pullInFlight = false;
+    if (pendingImage && pendingImage.conversationId !== id) clearPendingImage();
     state.activeId = id;
     state.messages = [];
     state._messagesSig = "";
@@ -2305,7 +2590,7 @@
 
       if (tenant) {
         setBusinessName(tenant.business_name, !!bizProfile?.business_name_is_placeholder);
-        $("toggle-ai-global").checked = tenant.ai_global_enabled;
+      $("toggle-ai-global").checked = tenant.ai_global_enabled;
       }
 
       applyWaSession(wa);
@@ -2434,7 +2719,7 @@
               const idx = state.messages.findIndex((m) => m.id === event.message.id);
               if (idx >= 0 && event.message.status && event.message.status !== state.messages[idx].status) {
                 state.messages[idx] = event.message;
-                renderMessages();
+              renderMessages();
               }
             }
           }
@@ -2548,9 +2833,9 @@
           hintEl.classList.remove("hidden");
         }
         if (event.type === "ai.error") refreshAiStatus();
-        if (state.activeId) {
-          const conv = state.conversations.find((c) => c.id === state.activeId);
-          if (conv) syncChatToggles(conv);
+          if (state.activeId) {
+            const conv = state.conversations.find((c) => c.id === state.activeId);
+            if (conv) syncChatToggles(conv);
         }
         break;
       }
@@ -3053,6 +3338,17 @@
   $("appointment-open-chat-btn")?.addEventListener("click", () => openAppointmentChat());
   $("appointment-modal-close")?.addEventListener("click", hideAppointmentModal);
   $("appointment-modal-backdrop")?.addEventListener("click", hideAppointmentModal);
+  $("staff-add-btn")?.addEventListener("click", () => openStaffModal());
+  $("staff-form")?.addEventListener("submit", submitStaffForm);
+  $("staff-delete-btn")?.addEventListener("click", () => deleteCurrentStaff());
+  $("staff-modal-close")?.addEventListener("click", hideStaffModal);
+  $("staff-cancel-btn")?.addEventListener("click", hideStaffModal);
+  $("staff-days")?.addEventListener("change", updateStaffDaysSummary);
+  $("staff-active")?.addEventListener("change", updateStaffActiveHint);
+  document.querySelectorAll('input[name="staff-hours-mode"]').forEach((r) => {
+    r.addEventListener("change", () => setStaffHoursMode(r.value));
+  });
+  $("staff-modal-backdrop")?.addEventListener("click", hideStaffModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
   $("business-name-cta").addEventListener("click", openBusinessNameSetup);
   $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
@@ -3092,13 +3388,197 @@
     renderConversationList();
   });
 
+  const CHAT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const CHAT_IMAGE_MAX_SIDE = 2560;
+  const CHAT_IMAGE_SOFT_LIMIT = 1.5 * 1024 * 1024;
+
+  function loadImage(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => resolve({ img, url });
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("No se pudo leer la imagen. Prueba con otra foto."));
+      };
+      img.src = url;
+    });
+  }
+
+  // Capturas de pantalla en PNG pesan varios MB: se pasan a JPEG y se achican antes de subir.
+  async function prepareChatImage(file) {
+    const { img, url } = await loadImage(file);
+    const big = Math.max(img.naturalWidth, img.naturalHeight) > CHAT_IMAGE_MAX_SIDE;
+    if (CHAT_IMAGE_TYPES.includes(file.type) && file.size <= CHAT_IMAGE_SOFT_LIMIT && !big) {
+      return { blob: file, mimetype: file.type, previewUrl: url };
+    }
+    URL.revokeObjectURL(url);
+    const scale = Math.min(1, CHAT_IMAGE_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!blob) throw new Error("No se pudo preparar la foto.");
+    return { blob, mimetype: "image/jpeg", previewUrl: URL.createObjectURL(blob) };
+  }
+
+  function clearPendingImage() {
+    if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl);
+    pendingImage = null;
+    $("composer-attachment").classList.add("hidden");
+    $("composer-attachment-img").removeAttribute("src");
+    $("attach-image-input").value = "";
+    messageInput.placeholder = "Escribe un mensaje…";
+  }
+
+  async function setPendingImage(file) {
+    if (!file || !state.activeId) return;
+    if (!state.canWrite) {
+      alert("Tu usuario no puede enviar mensajes. Pide acceso de agente o dueño.");
+      return;
+    }
+    if (sendForm.classList.contains("disabled")) {
+      alert("Conecta WhatsApp para enviar fotos.");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      alert("Solo puedes enviar fotos (JPG, PNG o WEBP).");
+      return;
+    }
+    try {
+      const prepared = await prepareChatImage(file);
+      clearPendingImage();
+      pendingImage = { ...prepared, conversationId: state.activeId };
+      $("composer-attachment-img").src = prepared.previewUrl;
+      $("composer-attachment").classList.remove("hidden");
+      messageInput.placeholder = "Agrega un comentario (opcional)…";
+      messageInput.focus();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // Vista Previa de macOS copia en TIFF junto a un PNG: se prefiere lo que el navegador sabe dibujar.
+  const CLIPBOARD_IMAGE_PREFERENCE = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+  function imageFromClipboard(e) {
+    const data = e.clipboardData;
+    if (!data) return null;
+    const files = Array.from(data.items || [])
+      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+      .map((i) => i.getAsFile())
+      .concat(Array.from(data.files || []).filter((f) => f.type.startsWith("image/")))
+      .filter(Boolean);
+    const rank = (f) => {
+      const idx = CLIPBOARD_IMAGE_PREFERENCE.indexOf(f.type);
+      return idx === -1 ? CLIPBOARD_IMAGE_PREFERENCE.length : idx;
+    };
+    return files.sort((a, b) => rank(a) - rank(b))[0] || null;
+  }
+
+  const isEditable = (el) => el instanceof HTMLElement && el.matches("input, textarea, select, [contenteditable]");
+
+  // Safari solo dispara «paste» dentro de un campo editable: con Cmd/Ctrl+V fuera de la caja,
+  // se enfoca la caja del mensaje antes de que llegue el pegado.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "v" || e.altKey) return;
+    if (activeChat.classList.contains("hidden") || isEditable(document.activeElement)) return;
+    if (!state.activeId || !state.canWrite || sendForm.classList.contains("disabled")) return;
+    messageInput.focus();
+  });
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function sendPendingImage(caption) {
+    const image = pendingImage;
+    const fd = new FormData();
+    fd.append("file", image.blob, `foto.${image.mimetype.split("/")[1]}`);
+    fd.append("caption", caption);
+    const msg = await api(`/conversations/${image.conversationId}/messages/image`, { method: "POST", body: fd }, 30000);
+    try {
+      mediaCache.set(msg.id, { ok: true, base64: await blobToBase64(image.blob), media_type: "image", mimetype: image.mimetype });
+    } catch {
+      /* se descargará de WhatsApp como cualquier otra foto */
+    }
+    clearPendingImage();
+    return msg;
+  }
+
+  document.addEventListener("paste", (e) => {
+    if (activeChat.classList.contains("hidden")) return;
+    if (isEditable(e.target) && e.target !== messageInput) return;
+    const file = imageFromClipboard(e);
+    if (!file) return;
+    e.preventDefault();
+    setPendingImage(file);
+  });
+
+  $("attach-image-btn").addEventListener("click", () => $("attach-image-input").click());
+  $("attach-image-input").addEventListener("change", (e) => setPendingImage(e.target.files?.[0]));
+  $("composer-attachment-remove").addEventListener("click", () => {
+    clearPendingImage();
+    messageInput.focus();
+  });
+
+  let dragDepth = 0;
+  const hasDraggedFile = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  activeChat.addEventListener("dragenter", (e) => {
+    if (!hasDraggedFile(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    sendForm.classList.add("dragging");
+  });
+  activeChat.addEventListener("dragover", (e) => {
+    if (hasDraggedFile(e)) e.preventDefault();
+  });
+  activeChat.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) sendForm.classList.remove("dragging");
+  });
+  activeChat.addEventListener("drop", (e) => {
+    if (!hasDraggedFile(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    sendForm.classList.remove("dragging");
+    setPendingImage(e.dataTransfer.files?.[0]);
+  });
+
   sendForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.activeId || !state.canWrite) return;
     const text = messageInput.value.trim();
+    if (pendingImage) {
+      const btn = sendForm.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const msg = await sendPendingImage(text);
+        messageInput.value = "";
+        if (msg.conversation_id === state.activeId && !state.messages.some((m) => m.id === msg.id)) {
+          state.messages.push(msg);
+          state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+          renderMessages();
+        }
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
     if (!text) return;
 
-    const btn = sendForm.querySelector("button");
+    const btn = sendForm.querySelector("button[type=submit]");
     btn.disabled = true;
     try {
       const msg = await api(`/conversations/${state.activeId}/messages`, {
