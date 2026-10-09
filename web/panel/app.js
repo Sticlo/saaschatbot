@@ -461,6 +461,11 @@
     state.aiProfile = null;
     state.quickShortcuts = [];
     state.shortcutsDraft = [];
+    state.results = null;
+    document.querySelectorAll(".results-slot").forEach((slot) => {
+      slot.classList.add("hidden");
+      slot.innerHTML = "";
+    });
     state.wa = { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null };
     setWsBadge(false);
     updateWaBadge("disconnected");
@@ -1442,6 +1447,167 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  // —— Resultados: lo que la IA le generó al negocio ——
+
+  const RESULTS_REFRESH_MS = 60_000;
+  let resultsLoadedAt = 0;
+  let resultsEditingTicket = false;
+
+  function formatCop(amount) {
+    return "$" + Math.round(Number(amount) || 0).toLocaleString("es-CO");
+  }
+
+  function pluralEs(n, one, many) {
+    return `${Number(n || 0).toLocaleString("es-CO")} ${n === 1 ? one : many}`;
+  }
+
+  function formatMultiple(value) {
+    return String(value).replace(".", ",").replace(/,0$/, "");
+  }
+
+  function resultsHeadlineHtml(month, ticket, hasActivity) {
+    if (month.revenue_cop) {
+      return `<strong class="results-money">${formatCop(month.revenue_cop)}</strong>
+        <span class="results-note">en citas que agendó la IA (${pluralEs(month.ai_appointments, "cita", "citas")} × ${formatCop(ticket)})</span>`;
+    }
+    if (month.ai_appointments) {
+      return `<strong class="results-money">${pluralEs(month.ai_appointments, "cita", "citas")}</strong>
+        <span class="results-note">agendadas por la IA este mes</span>`;
+    }
+    if (hasActivity) {
+      return `<strong class="results-money">${pluralEs(month.ai_replies, "mensaje", "mensajes")}</strong>
+        <span class="results-note">respondidos por la IA este mes</span>`;
+    }
+    return `<strong class="results-money results-money-empty">Aquí verás lo que la IA hace por ti</strong>
+      <span class="results-note">Citas que agenda, mensajes que responde y cuánta plata te genera, mes a mes.</span>`;
+  }
+
+  function resultsTicketHtml(ticket) {
+    const isOwner = state.canManageGlobal;
+    if (isOwner && (!ticket || resultsEditingTicket)) {
+      return `<form class="results-ticket">
+        <label>
+          <span>¿Cuánto vale en promedio un servicio?</span>
+          <span class="results-ticket-hint">Así convertimos las citas de la IA en plata.</span>
+          <input name="ticket" inputmode="numeric" maxlength="12" placeholder="30.000" value="${ticket ? escapeHtml(Number(ticket).toLocaleString("es-CO")) : ""}" />
+        </label>
+        <button type="submit" class="btn primary small">Guardar</button>
+        ${resultsEditingTicket ? '<button type="button" class="btn ghost small" data-results-cancel>Cancelar</button>' : ""}
+        <p class="results-ticket-status"></p>
+      </form>`;
+    }
+    if (isOwner) {
+      return `<button type="button" class="results-link" data-results-edit>Valor promedio del servicio: ${formatCop(ticket)} · Cambiar</button>`;
+    }
+    if (!ticket) {
+      return '<p class="results-fine">El dueño puede poner el valor promedio del servicio para ver la plata generada.</p>';
+    }
+    return "";
+  }
+
+  function resultsCardHtml(data) {
+    const month = data.month || {};
+    const total = data.all_time || {};
+    const ticket = data.avg_ticket_cop;
+    const hasActivity = !!(month.ai_appointments || month.ai_replies || total.ai_appointments || total.ai_replies);
+    const roi = month.roi_multiple >= 1 ? `<span class="results-roi">${formatMultiple(month.roi_multiple)}× tu plan</span>` : "";
+
+    let totalLine = "";
+    const sameAsMonth =
+      (total.ai_appointments || 0) <= (month.ai_appointments || 0) && (total.ai_replies || 0) <= (month.ai_replies || 0);
+    if (sameAsMonth) {
+      totalLine = "";
+    } else if (total.revenue_cop) {
+      totalLine = `Desde que usas Omitel: <strong>${formatCop(total.revenue_cop)}</strong> en ${pluralEs(data.months_active, "mes", "meses")}`;
+      if (data.plan_price_cop && data.months_active) {
+        const perMonth = total.revenue_cop / data.months_active / data.plan_price_cop;
+        if (perMonth >= 1) totalLine += ` · ${formatMultiple(perMonth.toFixed(1))} veces lo que pagas al mes`;
+      }
+    } else if (total.ai_appointments) {
+      totalLine = `Desde que usas Omitel: <strong>${pluralEs(total.ai_appointments, "cita agendada", "citas agendadas")}</strong> por la IA`;
+    }
+    const hours = month.hours_saved >= 1 ? ` · ≈ ${pluralEs(month.hours_saved, "hora", "horas")} de trabajo ahorradas` : "";
+
+    return `<section class="results-card" aria-label="Resultados de Omitel">
+      <div class="results-head">
+        <span class="results-kicker">💰 Lo que Omitel hizo por ti en ${escapeHtml(data.month_name || "este mes")}</span>
+        ${roi}
+      </div>
+      <div class="results-headline">${resultsHeadlineHtml(month, ticket, hasActivity)}</div>
+      ${hasActivity ? `<div class="results-stats">
+        <div><strong>${Number(month.ai_appointments || 0).toLocaleString("es-CO")}</strong><span>citas agendadas por la IA</span></div>
+        <div><strong>${Number(month.after_hours_appointments || 0).toLocaleString("es-CO")}</strong><span>fuera de tu horario</span></div>
+        <div><strong>${Number(month.ai_replies || 0).toLocaleString("es-CO")}</strong><span>mensajes respondidos</span></div>
+        <div><strong>${Number(month.clients_attended || 0).toLocaleString("es-CO")}</strong><span>clientes atendidos</span></div>
+      </div>` : ""}
+      ${totalLine || hours ? `<p class="results-total">${totalLine}${totalLine ? hours : hours.replace(/^ · /, "")}</p>` : ""}
+      ${resultsTicketHtml(ticket)}
+      ${hasActivity ? '<p class="results-fine">Solo contamos las citas que agendó la IA y siguen en tu agenda.</p>' : ""}
+    </section>`;
+  }
+
+  function renderResults() {
+    const data = state.results;
+    document.querySelectorAll(".results-slot").forEach((slot) => {
+      slot.classList.toggle("hidden", !data);
+      slot.innerHTML = data ? resultsCardHtml(data) : "";
+    });
+  }
+
+  async function loadResults(force = false) {
+    if (!force && state.results && Date.now() - resultsLoadedAt < RESULTS_REFRESH_MS) {
+      renderResults();
+      return;
+    }
+    try {
+      state.results = await api("/results");
+      resultsLoadedAt = Date.now();
+    } catch (err) {
+      console.warn("No se pudieron cargar los resultados", err);
+    }
+    renderResults();
+  }
+
+  async function saveResultsTicket(form) {
+    const status = form.querySelector(".results-ticket-status");
+    const digits = String(form.querySelector("input[name=ticket]")?.value || "").replace(/\D/g, "");
+    if (!digits) {
+      status.textContent = "Escribe el valor, por ejemplo 30.000";
+      return;
+    }
+    status.textContent = "Guardando…";
+    try {
+      state.results = await api("/results/settings", {
+        method: "PUT",
+        body: JSON.stringify({ avg_ticket_cop: Number(digits) }),
+      });
+      resultsLoadedAt = Date.now();
+      resultsEditingTicket = false;
+      renderResults();
+    } catch (err) {
+      status.textContent = err.message || "No se pudo guardar";
+    }
+  }
+
+  document.addEventListener("submit", (e) => {
+    const form = e.target.closest?.(".results-ticket");
+    if (!form) return;
+    e.preventDefault();
+    saveResultsTicket(form);
+  });
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest?.("[data-results-edit]")) {
+      const slot = e.target.closest(".results-slot");
+      resultsEditingTicket = true;
+      renderResults();
+      slot?.querySelector(".results-ticket input")?.focus();
+    } else if (e.target.closest?.("[data-results-cancel]")) {
+      resultsEditingTicket = false;
+      renderResults();
+    }
+  });
+
   function switchPanelMode(mode) {
     state.panelMode = mode;
     const isChats = mode === "chats";
@@ -1464,12 +1630,16 @@
       } else {
         emptyChat.classList.remove("hidden");
         activeChat.classList.add("hidden");
+        loadResults();
       }
     } else {
       emptyChat.classList.add("hidden");
       activeChat.classList.add("hidden");
       if (isAi) loadAiSetupPanel();
-      if (isAppointments) loadAppointmentsPanel();
+      if (isAppointments) {
+        loadAppointmentsPanel();
+        loadResults();
+      }
     }
     renderQuickShortcuts();
   }
@@ -2726,6 +2896,7 @@
         api("/subscriptions/me").catch(() => null),
       ]);
       await loadQuickShortcuts().catch(() => {});
+      loadResults(true);
 
       state.tenant = tenant;
       state.aiStatus = aiStatus;

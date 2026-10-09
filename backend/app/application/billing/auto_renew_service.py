@@ -98,6 +98,21 @@ def _owner(db: Session, tenant_id: Any) -> Optional[User]:
     )
 
 
+def _value_lines(db: Session, tenant_id: Any, now: datetime, **kwargs: Any) -> list[str]:
+    """Lo que la IA le generó, para que el dueño vea el cobro junto a la ganancia."""
+    from app.application.results.results_service import value_paragraph
+
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        return []
+    try:
+        line = value_paragraph(db, tenant, now, **kwargs)
+    except Exception:
+        log.exception("No se pudo calcular el valor generado tenant=%s", tenant_id)
+        return []
+    return [line] if line else []
+
+
 def _notify(db: Session, tenant_id: Any, *, subject: str, title: str, paragraphs: list[str], cta: str) -> None:
     owner = _owner(db, tenant_id)
     if owner is None:
@@ -460,6 +475,7 @@ def _send_reminders(db: Session, now: datetime) -> int:
             subject="Pronto renovamos tu plan de Omitel",
             title="Aviso de cobro automático",
             paragraphs=[
+                *_value_lines(db, subscription.tenant_id, now),
                 f"El {format_date(end - CHARGE_LEAD)} cobraremos {format_cop(plan.price_cop)} a "
                 f"{subscription.payment_method_label or 'tu medio de pago'} para renovar tu {plan.name} por 30 días más.",
                 "No tienes que hacer nada. Si prefieres no renovar, puedes cancelar desde Mi plan antes de esa fecha.",
@@ -499,6 +515,7 @@ def _send_manual_renewal_reminders(db: Session, now: datetime) -> int:
             subject=f"Tu plan de Omitel vence el {format_date(end)}",
             title="Renueva tu plan",
             paragraphs=[
+                *_value_lines(db, subscription.tenant_id, now),
                 f"Tu {plan.name} está activo hasta el {format_date(end)}. Para que la IA siga respondiendo a tus "
                 f"clientes, renueva por {format_cop(plan.price_cop)} desde Mi plan: puedes pagar con PSE, "
                 "Bancolombia, Daviplata, Nequi o tarjeta en la página de Wompi.",
@@ -674,6 +691,7 @@ def _end_expired_trials(db: Session, now: datetime) -> int:
             title="Tu prueba gratis terminó",
             paragraphs=[
                 "Tu asistente dejó de responder los chats de WhatsApp porque terminaron tus días de prueba.",
+                *_value_lines(db, subscription.tenant_id, now, period="Durante tu prueba"),
                 f"Activa el {plan.name} por {format_cop(plan.price_cop)} al mes y sigue vendiendo donde lo dejaste: "
                 "tus chats, atajos y configuración siguen guardados.",
             ],

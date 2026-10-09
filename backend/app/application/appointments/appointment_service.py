@@ -409,6 +409,7 @@ def create_appointment(
     notes: Optional[str] = None,
     conversation_id: Optional[uuid.UUID] = None,
     staff_id: Optional[uuid.UUID] = None,
+    source: str = "panel",
 ) -> Appointment:
     """Con equipo y sin staff_id, la cita va a quien esté libre (el de menos citas ese día)."""
     if ends_at <= starts_at:
@@ -428,6 +429,7 @@ def create_appointment(
         client_name=client_name.strip()[:255],
         client_phone=(client_phone or "").strip()[:64] or None,
         notes=(notes or "").strip() or None,
+        source=source,
     )
     db.add(row)
     db.flush()

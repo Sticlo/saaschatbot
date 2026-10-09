@@ -4,7 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, combineLatest, filter, take } from 'rxjs';
 
-import { BillingConfig, CheckoutStatus, PaymentMethodResult, SubscriptionSummary, WompiTerms } from '../../core/models/billing.model';
+import {
+  BillingConfig,
+  BusinessResults,
+  CheckoutStatus,
+  PaymentMethodResult,
+  SubscriptionSummary,
+  WompiTerms,
+} from '../../core/models/billing.model';
 import { Plan } from '../../core/models/plan.model';
 import { BillingService } from '../../core/services/billing.service';
 import { PlansService } from '../../core/services/plans.service';
@@ -52,6 +59,7 @@ export class MyPlanComponent implements OnInit, OnDestroy {
   config: BillingConfig | null = null;
   plans: Plan[] = [];
   wompiTerms: WompiTerms | null = null;
+  results: BusinessResults | null = null;
 
   showMethodForm = false;
   selectedPlanSlug = '';
@@ -100,6 +108,7 @@ export class MyPlanComponent implements OnInit, OnDestroy {
 
   private load(requestedPlan: string | null): void {
     this.billing.getConfig().subscribe((cfg) => (this.config = cfg));
+    this.billing.getResults().subscribe((results) => (this.results = results));
     this.plansService.listPublicPlans().subscribe((plans) => {
       this.plans = plans;
       this.applyRequestedPlan(requestedPlan);
@@ -182,6 +191,16 @@ export class MyPlanComponent implements OnInit, OnDestroy {
     if (sub.cancel_at_period_end || sub.renewal_failing || sub.needs_payment) return 'warn';
     if (sub.is_paid || sub.is_trial) return 'ok';
     return 'off';
+  }
+
+  /** Lo que la IA generó en los últimos 30 días, para ver el cobro junto a la ganancia. */
+  get recentResults() {
+    const recent = this.results?.last_30_days;
+    return recent && (recent.ai_appointments || recent.ai_replies) ? recent : null;
+  }
+
+  formatMultiple(value: number | null | undefined): string {
+    return (value ?? 0).toFixed(1).replace('.', ',').replace(/,0$/, '');
   }
 
   get canCancel(): boolean {

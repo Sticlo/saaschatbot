@@ -100,6 +100,10 @@ class TenantProfile(Base):
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     alert_threshold: Mapped[int] = mapped_column(nullable=False, default=10)
+    # Lo que vale en promedio un servicio o venta: convierte las citas de la IA en plata.
+    avg_ticket_cop: Mapped[Optional[int]] = mapped_column(nullable=True)
+    # Mes ("2026-09") del último resumen de resultados enviado al dueño.
+    results_report_sent_for: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

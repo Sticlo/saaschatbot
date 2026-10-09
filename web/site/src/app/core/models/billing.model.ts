@@ -54,6 +54,25 @@ export interface SubscriptionSummary {
   cancelled_at?: string | null;
 }
 
+/** Lo que la IA hizo por el negocio en un periodo (GET /results). */
+export interface ResultsPeriod {
+  ai_appointments: number;
+  after_hours_appointments: number;
+  ai_replies: number;
+  clients_attended: number;
+  revenue_cop: number | null;
+  roi_multiple: number | null;
+}
+
+export interface BusinessResults {
+  month: ResultsPeriod;
+  last_30_days: ResultsPeriod;
+  all_time: ResultsPeriod;
+  months_active: number;
+  avg_ticket_cop: number | null;
+  plan_price_cop: number | null;
+}
+
 export interface WompiTerms {
   acceptance_permalink: string;
   personal_data_permalink: string;

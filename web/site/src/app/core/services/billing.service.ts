@@ -5,6 +5,7 @@ import { Observable, catchError, of, timeout } from 'rxjs';
 import { API_BASE_URL } from '../tokens';
 import {
   BillingConfig,
+  BusinessResults,
   CheckoutSession,
   CheckoutStatus,
   PaymentMethodRequest,
@@ -34,6 +35,12 @@ export class BillingService {
       .get<SubscriptionSummary>(`${this.apiBase}/api/v1/subscriptions/me`, {
         withCredentials: true,
       })
+      .pipe(timeout(API_TIMEOUT_MS), catchError(() => of(null)));
+  }
+
+  getResults(): Observable<BusinessResults | null> {
+    return this.http
+      .get<BusinessResults>(`${this.apiBase}/api/v1/results`, { withCredentials: true })
       .pipe(timeout(API_TIMEOUT_MS), catchError(() => of(null)));
   }
 

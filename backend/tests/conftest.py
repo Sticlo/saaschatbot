@@ -199,6 +199,10 @@ def _disable_rate_limits_in_tests(monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_enabled", False)
     # Los tests nunca deben mandar alertas reales a Telegram/correo.
     monkeypatch.setattr(settings, "ops_alerts_enabled", False)
+    # Ni resúmenes mensuales a los miles de negocios de prueba si la suite corre a inicio de mes.
+    from app.application.billing import subscription_sweeper
+
+    monkeypatch.setattr(subscription_sweeper, "send_monthly_reports", lambda db, now=None: 0)
 
 
 @pytest.fixture()

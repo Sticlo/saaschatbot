@@ -69,6 +69,7 @@ def send_billing_email(
     paragraphs: list[str],
     cta_label: str,
     cta_url: str,
+    footer: str = "Omitel · Este es un aviso sobre tu suscripción.",
 ) -> None:
     """Avisos de facturación: recordatorio de cobro, recibo, cobro fallido, cancelación."""
     body = "".join(
@@ -83,7 +84,7 @@ def send_billing_email(
       {cta_label}
     </a>
   </p>
-  <p style="font-size:0.82rem;color:#9aa0ae">Omitel · Este es un aviso sobre tu suscripción.</p>
+  <p style="font-size:0.82rem;color:#9aa0ae">{footer}</p>
 </div>
 """
     _send_html_email(to_email=to_email, subject=subject, html=html, log_label=subject, url=cta_url)

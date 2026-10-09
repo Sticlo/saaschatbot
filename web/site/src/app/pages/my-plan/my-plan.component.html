@@ -28,6 +28,27 @@
           </span>
         </div>
 
+        @if (recentResults; as recent) {
+          <div class="plan-value">
+            <p class="plan-value-kicker">En los últimos 30 días tu asistente</p>
+            <p class="plan-value-main">
+              @if (recent.revenue_cop) {
+                agendó {{ recent.ai_appointments }} {{ recent.ai_appointments === 1 ? 'cita' : 'citas' }}: unos
+                <strong>{{ formatCop(recent.revenue_cop) }}</strong> en ventas
+              } @else if (recent.ai_appointments) {
+                agendó <strong>{{ recent.ai_appointments }} {{ recent.ai_appointments === 1 ? 'cita' : 'citas' }}</strong>
+                por WhatsApp
+              } @else {
+                respondió <strong>{{ recent.ai_replies }} mensajes</strong> a {{ recent.clients_attended }}
+                {{ recent.clients_attended === 1 ? 'cliente' : 'clientes' }}
+              }
+            </p>
+            @if (recent.roi_multiple && recent.roi_multiple >= 1) {
+              <p class="plan-value-roi">{{ formatMultiple(recent.roi_multiple) }} veces lo que cuesta tu plan</p>
+            }
+          </div>
+        }
+
         <dl class="plan-facts">
           @if (subscription.is_trial) {
             <div>
@@ -298,6 +319,16 @@
         Tu suscripción terminará ahora y no se hará ningún cobro.
       }
     </p>
+
+    @if (recentResults?.ai_appointments; as booked) {
+      <p class="notice notice-info cancel-value">
+        En los últimos 30 días tu asistente agendó <strong>{{ booked }} {{ booked === 1 ? 'cita' : 'citas' }}</strong>
+        @if (recentResults?.revenue_cop) {
+          (unos {{ formatCop(recentResults?.revenue_cop) }})
+        }
+        por WhatsApp. Si cancelas, esos clientes tendrán que esperar a que alguien les conteste.
+      </p>
+    }
 
     <fieldset class="reasons" [disabled]="busy">
       <legend>¿Por qué te vas? Nos ayuda a mejorar.</legend>

@@ -76,6 +76,44 @@
   color: #c2410c;
 }
 
+.plan-value {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: var(--primary-soft);
+
+  p {
+    margin: 0;
+  }
+}
+
+.plan-value-kicker {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.plan-value-main {
+  margin-top: 0.15rem !important;
+  font-size: 1.05rem;
+  line-height: 1.45;
+
+  strong {
+    color: var(--primary);
+    font-size: 1.2rem;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.plan-value-roi {
+  margin-top: 0.3rem !important;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.cancel-value {
+  margin-bottom: 1rem;
+}
+
 .plan-facts {
   display: grid;
   gap: 0.75rem;

@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.application.billing.auto_renew_service import process_auto_renewals
 from app.application.billing.subscription_service import expire_lapsed_subscriptions
+from app.application.results.monthly_report import send_monthly_reports
 from app.infrastructure.persistence.database import SessionLocal
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,13 @@ def _loop() -> None:
                 log.info("Suscripciones vencidas marcadas: %s", expired)
         except Exception:
             log.exception("Error revisando suscripciones vencidas")
+        try:
+            with SessionLocal() as db:
+                reports = send_monthly_reports(db)
+            if reports:
+                log.info("Resúmenes mensuales de resultados enviados: %s", reports)
+        except Exception:
+            log.exception("Error enviando los resúmenes mensuales de resultados")
         _stop.wait(SWEEP_INTERVAL_SECONDS)
 
 

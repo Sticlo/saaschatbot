@@ -723,6 +723,175 @@ textarea { resize: vertical; min-height: 44px; }
 
 .wa-setup h3 { color: var(--text); margin: 0 0 0.5rem; }
 
+/* —— Resultados: lo que la IA le generó al negocio —— */
+.results-slot {
+  width: 100%;
+  max-width: 560px;
+}
+
+.empty-state .results-slot { margin-top: 1.5rem; }
+.empty-state .wa-setup.hidden + .results-slot { margin-top: 0; }
+.appointments-panel .results-slot { max-width: none; margin-bottom: 1rem; }
+
+.results-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem 1.35rem 1.1rem;
+  text-align: left;
+}
+
+.results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.results-kicker {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.results-roi {
+  flex-shrink: 0;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--badge-online-bg);
+  color: var(--accent-hover);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.results-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 1rem;
+}
+
+.results-money {
+  font-size: 2.1rem;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.results-money-empty {
+  font-size: 1.25rem;
+  letter-spacing: 0;
+}
+
+.results-note {
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.results-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.results-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  background: var(--surface2);
+}
+
+.results-stats strong {
+  font-size: 1.25rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.results-stats span {
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.results-total {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.results-ticket {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  margin-bottom: 0.6rem;
+  border: 1px dashed var(--accent);
+  border-radius: 12px;
+}
+
+.results-ticket label {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.results-ticket-hint {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.results-ticket input {
+  margin-top: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.results-ticket-status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.results-ticket-status:empty { display: none; }
+
+.results-link {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.results-link:hover { text-decoration: underline; }
+
+.results-fine {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .results-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .results-money { font-size: 1.75rem; }
+}
+
 .modal {
   position: fixed;
   inset: 0;

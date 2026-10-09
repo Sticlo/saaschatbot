@@ -13,6 +13,7 @@ from app.presentation.api import (
     plans,
     platform,
     quick_shortcuts,
+    results,
     subscriptions,
     tenants,
     users,
@@ -30,6 +31,7 @@ api_router.include_router(conversations.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
 api_router.include_router(appointments.router)
+api_router.include_router(results.router)
 api_router.include_router(ai.router)
 api_router.include_router(users.router)
 api_router.include_router(audit_logs.router)

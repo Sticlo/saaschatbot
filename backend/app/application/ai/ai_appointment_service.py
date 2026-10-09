@@ -692,6 +692,7 @@ def try_create_booking(
             notes=merged_notes,
             conversation_id=conversation.id,
             staff_id=preferred.id if preferred else None,
+            source="ai",
         )
     except (ValueError, TypeError) as exc:
         log.warning("No se pudo crear cita IA tenant=%s: %s", tenant.id, exc)
