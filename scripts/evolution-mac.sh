@@ -19,7 +19,11 @@ setup() {
   cd "$EVO_DIR"
 
   if [ ! -f .env ]; then
-    echo "❌ Falta $EVO_DIR/.env — ejecuta setup desde el repo o copia la config del README."
+    cp "$ROOT/deploy/evolution.env.example" .env
+    echo "→ Creado $EVO_DIR/.env desde deploy/evolution.env.example"
+  fi
+  if grep -q '<' .env; then
+    echo "❌ Completa los valores <...> de $EVO_DIR/.env (ver README, sección Evolution) y vuelve a correr."
     exit 1
   fi
 

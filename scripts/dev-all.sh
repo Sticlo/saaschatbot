@@ -15,7 +15,7 @@ trap cleanup EXIT INT TERM
 PIDS=()
 
 if command -v docker >/dev/null 2>&1; then
-  docker compose -f "$ROOT/deploy/docker-compose.yml" up -d
+  docker compose -f "$ROOT/deploy/docker-compose.yml" up -d postgres redis
 else
   echo "→ Docker no encontrado — Postgres/Redis: brew services start postgresql@16 redis"
   if ! curl -sf http://127.0.0.1:8080/ >/dev/null 2>&1; then
@@ -26,6 +26,17 @@ else
   else
     echo "→ Evolution ya responde en http://localhost:8080"
   fi
+fi
+
+if lsof -ti:8000 >/dev/null 2>&1; then
+  echo "⚠ Puerto 8000 ocupado. Deteniendo uvicorn anterior…"
+  lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+  sleep 1
+fi
+if lsof -ti:8000 >/dev/null 2>&1; then
+  echo "❌ No se pudo liberar :8000. Ejecuta manualmente:"
+  echo "    kill -9 \$(lsof -ti:8000)"
+  exit 1
 fi
 
 export EMBED_WORKERS_IN_API=true
@@ -41,16 +52,6 @@ export PYTHONPATH="$BACKEND"
 PIDS+=($!)
 
 echo "→ Esperando API en :8000…"
-if lsof -ti:8000 >/dev/null 2>&1; then
-  echo "⚠ Puerto 8000 ocupado. Deteniendo uvicorn anterior…"
-  lsof -ti:8000 | xargs kill -9 2>/dev/null || true
-  sleep 1
-fi
-if lsof -ti:8000 >/dev/null 2>&1; then
-  echo "❌ No se pudo liberar :8000. Ejecuta manualmente:"
-  echo "    kill -9 \$(lsof -ti:8000)"
-  exit 1
-fi
 for _ in $(seq 1 40); do
   if curl -sf "http://127.0.0.1:8000/health" >/dev/null 2>&1; then
     break
@@ -61,6 +62,6 @@ done
 "$ROOT/scripts/dev-site.sh" &
 PIDS+=($!)
 
-echo "→ Landing: http://localhost:4200"
-echo "→ Panel:   http://localhost:4200/panel (proxy al backend)"
+echo "→ Landing: http://localhost:${SITE_PORT:-4200}"
+echo "→ Panel:   http://localhost:${SITE_PORT:-4200}/panel (proxy al backend)"
 wait

@@ -13,6 +13,8 @@ fi
 # Evita SSR cacheado de builds anteriores
 rm -rf "$SITE/.angular/cache" "$SITE/dist"
 
-echo "→ Site Angular: http://localhost:4200"
+# SITE_PORT=4300 si el 4200 está ocupado (el backend en DEBUG también acepta ese origen).
+PORT="${SITE_PORT:-4200}"
+echo "→ Site Angular: http://localhost:$PORT"
 echo "→ Backend API esperado en http://127.0.0.1:8000 (./scripts/dev.sh en otra terminal)"
-exec npm --prefix "$SITE" run start -- --host 0.0.0.0 --port 4200
+exec npm --prefix "$SITE" run start -- --host 0.0.0.0 --port "$PORT"
