@@ -35,6 +35,8 @@ x-app: &app
   <<: *app-env
   volumes:
     - tenant_assets:/app/app/static/assets
+    # Fotos, audios y documentos de los chats.
+    - chat_media:/app/app/static/media
   depends_on:
     migrate:
       condition: service_completed_successfully
@@ -76,6 +78,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Copia diaria de las bases en deploy/backups/ del servidor (se conservan 14 días).
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-saaschatbot}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-saaschatbot}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
@@ -177,5 +197,6 @@ volumes:
   redis_data:
   evolution_instances:
   tenant_assets:
+  chat_media:
   caddy_data:
   caddy_config:

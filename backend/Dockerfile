@@ -16,7 +16,7 @@ COPY backend/app ./app
 COPY web/panel ./web/panel
 
 RUN useradd --create-home --uid 1000 omitel \
-    && mkdir -p /app/app/static/assets \
+    && mkdir -p /app/app/static/assets /app/app/static/media \
     && chown -R omitel:omitel /app
 USER omitel
 

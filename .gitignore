@@ -13,6 +13,7 @@ node_modules/
 *.db-shm
 *.db-wal
 logs/
+deploy/backups/
 media_files/
 /services/
 whatsapp/evolution-api/

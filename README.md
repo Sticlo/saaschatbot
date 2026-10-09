@@ -230,3 +230,24 @@ scripts/                 Scripts de desarrollo y configuración
   Las migraciones corren solas antes de arrancar la API, y Caddy saca el certificado HTTPS.
   Con `APP_ENV=production` la API se niega a arrancar si faltan secretos obligatorios
   (`SECRET_KEY`, `RESEND_API_KEY`, secretos de webhooks).
+
+### Respaldos
+
+El servicio `backup` guarda cada 24 horas una copia de las bases `saaschatbot` y `evolution` en
+`deploy/backups/` del servidor y borra las de más de 14 días (`BACKUP_KEEP_DAYS`). Las fotos de los chats y
+los logos viven en los volúmenes `chat_media` y `tenant_assets`.
+
+Esas copias están en el mismo servidor: si se pierde el servidor, se pierden con él. Bájalas de vez en cuando
+a otro lugar:
+
+```bash
+scp -r usuario@servidor:saaschatbot/deploy/backups ./respaldos-omitel
+```
+
+Para restaurar una copia:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec -T postgres \
+  sh -c 'pg_restore --clean --if-exists -U "$POSTGRES_USER" -d saaschatbot' \
+  < deploy/backups/saaschatbot-AAAA-MM-DD_HHMM.dump
+```
