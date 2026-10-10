@@ -490,7 +490,7 @@ def send_message(
         )
         db.commit()
         db.refresh(message)
-    except EvolutionAPIError as exc:
+    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

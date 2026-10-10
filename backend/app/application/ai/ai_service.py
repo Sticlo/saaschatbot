@@ -460,6 +460,11 @@ def maybe_schedule_ai_for_conversation(
     if not classify_mode and _bot_already_replied(db, conversation_id, latest_in):
         return False
 
+    # El panel abierto refresca cada pocos segundos: sin esto, un envío que falla siempre
+    # (contacto inalcanzable) gasta una respuesta de la IA en cada refresco.
+    if not allow_stale and _send_failed_recently(latest_in.id):
+        return False
+
     return enqueue_ai_reply_ids(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -615,6 +620,13 @@ def _bump_counter(key: str) -> Optional[int]:
         return count
     except Exception:
         return None
+
+
+def _send_failed_recently(message_id: uuid.UUID) -> bool:
+    try:
+        return bool(get_redis().exists(f"ai:sendfail:{message_id}"))
+    except Exception:
+        return False
 
 
 def _clear_outage_state(message_id: uuid.UUID) -> None:

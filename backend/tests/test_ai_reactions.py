@@ -109,6 +109,38 @@ def test_reaction_to_bot_reply_schedules_nothing(monkeypatch):
 
 
 @requires_db
+def test_failed_send_is_not_requeued_by_panel_refresh(monkeypatch):
+    from app.application.ai import ai_queue_service, ai_service
+    from app.infrastructure.cache.redis_client import get_redis
+    from app.infrastructure.persistence.database import SessionLocal
+
+    enqueued: list[uuid.UUID] = []
+    monkeypatch.setattr(
+        ai_queue_service, "enqueue_ai_reply_ids", lambda **kw: enqueued.append(kw["message_id"]) or True
+    )
+
+    with SessionLocal() as db:
+        tenant, conversation = _setup(db)
+        (question,) = _add(db, conversation, [("contact", "¿Hacen domicilios?")])
+        key = f"ai:sendfail:{question.id}"
+        get_redis().set(key, 1, ex=60)
+        try:
+            assert ai_service.maybe_schedule_ai_for_conversation(
+                db, tenant_id=tenant.id, conversation_id=conversation.id
+            ) is False
+            assert enqueued == []
+
+            # El dueño puede pedir la respuesta a mano desde el panel.
+            assert ai_service.maybe_schedule_ai_for_conversation(
+                db, tenant_id=tenant.id, conversation_id=conversation.id, allow_stale=True
+            ) is True
+            assert enqueued == [question.id]
+        finally:
+            get_redis().delete(key)
+            db.rollback()
+
+
+@requires_db
 def test_reaction_does_not_reopen_answered_interested_chat():
     from app.application.conversations.interest_alert_service import unanswered_interested_conversations
     from app.infrastructure.persistence.database import SessionLocal
