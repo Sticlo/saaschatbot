@@ -723,6 +723,134 @@ textarea { resize: vertical; min-height: 44px; }
 
 .wa-setup h3 { color: var(--text); margin: 0 0 0.5rem; }
 
+.empty-state {
+  overflow-y: auto;
+  justify-content: safe center;
+}
+
+/* —— Guía de primeros pasos —— */
+.onboarding-card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem 1.35rem 1.1rem;
+  text-align: left;
+}
+
+.empty-state .wa-setup:not(.hidden) + .onboarding-card:not(.hidden) { margin-top: 1.5rem; }
+
+.onboarding-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.onboarding-head h3 { margin: 0; color: var(--text); font-size: 1.05rem; }
+.onboarding-head p { margin: 0.15rem 0 0; }
+
+.onboarding-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  border-radius: 8px;
+}
+
+.onboarding-close:hover { color: var(--text); background: var(--surface2); }
+
+.onboarding-progress {
+  height: 6px;
+  margin: 0.75rem 0 1rem;
+  border-radius: 999px;
+  background: var(--surface2);
+  overflow: hidden;
+}
+
+.onboarding-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 0.4s ease;
+}
+
+.onboarding-how {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: var(--surface2);
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.onboarding-how li { display: flex; gap: 0.55rem; align-items: baseline; }
+.onboarding-how li span:first-child { flex-shrink: 0; }
+
+.onboarding-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+.onboarding-step.next {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.onboarding-check {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1.5px solid var(--border);
+  color: var(--muted);
+}
+
+.onboarding-step.next .onboarding-check { border-color: var(--accent); color: var(--accent); }
+
+.onboarding-step.done .onboarding-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.onboarding-step-body { flex: 1; min-width: 0; }
+.onboarding-step-body strong { color: var(--text); font-size: 0.9rem; font-weight: 600; }
+.onboarding-step-body em { font-style: normal; font-weight: 400; font-size: 0.8rem; }
+.onboarding-step-body p { margin: 0.15rem 0 0; }
+.onboarding-step.done .onboarding-step-body strong { color: var(--muted); font-weight: 500; }
+.onboarding-step .btn { flex-shrink: 0; white-space: nowrap; width: auto; }
+.onboarding-done-btn { margin-top: 0.75rem; }
+
+@media (max-width: 520px) {
+  .onboarding-step { flex-wrap: wrap; }
+  .onboarding-step .btn { margin-left: 2.35rem; }
+}
+
 /* —— Resultados: lo que la IA le generó al negocio —— */
 .results-slot {
   width: 100%;
@@ -730,7 +858,7 @@ textarea { resize: vertical; min-height: 44px; }
 }
 
 .empty-state .results-slot { margin-top: 1.5rem; }
-.empty-state .wa-setup.hidden + .results-slot { margin-top: 0; }
+.empty-state .wa-setup.hidden + .onboarding-card.hidden + .results-slot { margin-top: 0; }
 .appointments-panel .results-slot { max-width: none; margin-bottom: 1rem; }
 
 .results-card {

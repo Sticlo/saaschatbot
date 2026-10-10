@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=47" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=48" />
 </head>
 <body>
   <div id="app">
@@ -106,6 +106,7 @@
           <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
         </div>
         <div class="topbar-right">
+          <button type="button" id="guide-btn" class="btn ghost small hidden" title="Ver la guía de primeros pasos">Guía</button>
           <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
             <span id="plan-status-label" class="plan-status-label"></span>
             <a href="/mi-plan" data-site-path="/mi-plan" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
@@ -145,8 +146,8 @@
               <input type="search" id="chat-search" placeholder="🔍 Buscar chat…" autocomplete="off" />
             </div>
             <div class="chat-tabs">
-              <button type="button" id="tab-chats-all" class="chat-tab">Todos</button>
-              <button type="button" id="tab-chats-interested" class="chat-tab active">
+              <button type="button" id="tab-chats-all" class="chat-tab active">Todos</button>
+              <button type="button" id="tab-chats-interested" class="chat-tab">
                 Interesados <span id="interested-count-badge" class="tab-count-badge hidden">0</span>
               </button>
               <button type="button" id="tab-chats-not-interested" class="chat-tab">No interesados</button>
@@ -159,10 +160,11 @@
             <div id="empty-chat" class="empty-state">
             <div id="wa-setup" class="wa-setup">
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
-              <p id="wa-setup-text" class="muted">Escanea el código QR con WhatsApp en tu celular. Cuando lleguen mensajes, la IA los clasifica y los verás en <strong>Interesados</strong>.</p>
+              <p id="wa-setup-text" class="muted">Escanea el código QR con WhatsApp en tu celular. Tus chats aparecerán aquí y la IA marcará como <strong>Interesados</strong> a los que quieren comprar.</p>
               <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
               <p id="wa-setup-error" class="error hidden"></p>
             </div>
+            <section id="onboarding-card" class="onboarding-card hidden" aria-label="Primeros pasos"></section>
             <div class="results-slot hidden"></div>
           </div>
 
@@ -622,6 +624,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=115"></script>
+  <script src="/static/panel/app.js?v=116"></script>
 </body>
 </html>

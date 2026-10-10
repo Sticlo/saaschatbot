@@ -28,8 +28,9 @@
     canManageGlobal: false,
     canConnectWa: false,
     wa: { status: "disconnected", qr_base64: null, phone_number: null, chatwoot_inbox_url: null },
-    chatListTab: "interested",
+    chatListTab: "all",
     interestedCount: 0,
+    onboarding: { alertCount: null, bookingEnabled: null, totalChats: 0 },
     subscription: null,
     syncInProgress: false,
     autoSyncRequested: false,
@@ -454,8 +455,9 @@
     state.canWrite = false;
     state.canManageGlobal = false;
     state.canConnectWa = false;
-    state.chatListTab = "interested";
+    state.chatListTab = "all";
     state.interestedCount = 0;
+    state.onboarding = { alertCount: null, bookingEnabled: null, totalChats: 0 };
     state.subscription = null;
     state.panelMode = "chats";
     state.aiProfile = null;
@@ -482,8 +484,9 @@
     $("chat-area").classList.remove("ai-setup-mode", "appointments-mode");
     $("business-name").textContent = "—";
     $("user-label").textContent = "";
-    setChatListTab("interested");
+    setChatListTab("all");
     updateInterestedBadge();
+    renderOnboarding();
   }
 
   function resetLoginForm() {
@@ -884,14 +887,14 @@
     const needsConnect = !connected;
 
     $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect);
-    $("wa-setup")?.classList.toggle("hidden", !needsConnect);
+    syncWaSetupVisibility();
     const dropped = needsConnect && state.conversations.length > 0;
     const setupTitle = $("wa-setup-title");
     if (setupTitle) {
       setupTitle.textContent = dropped ? "WhatsApp se desconectó" : "Conecta tu WhatsApp";
       $("wa-setup-text").innerHTML = dropped
         ? "Estamos intentando reconectar solos y tus chats se conservan. Si en un par de minutos no vuelve, escanea el código QR otra vez."
-        : "Escanea el código QR con WhatsApp en tu celular. Cuando lleguen mensajes, la IA los clasifica y los verás en <strong>Interesados</strong>.";
+        : "Escanea el código QR con WhatsApp en tu celular. Tus chats aparecerán aquí y la IA marcará como <strong>Interesados</strong> a los que quieren comprar.";
     }
     $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
@@ -1067,6 +1070,7 @@
   function recalculateInterestedCount(rows) {
     const list = rows || state.conversations;
     state.interestedCount = list.filter((c) => getConversationInterest(c) === "interested").length;
+    if (rows) state.onboarding.totalChats = rows.length;
     updateInterestedBadge();
   }
 
@@ -1085,7 +1089,160 @@
     setTimeout(() => tab.classList.remove("tab-pulse"), 2400);
   }
 
-  function renderOnboarding() {}
+  function guideStorageKey() {
+    return `omitel_guide_hidden:${state.tenant?.id || state.user?.tenant_id || ""}`;
+  }
+
+  function canSeeGuide() {
+    return !!state.user && state.canManageGlobal && state.onboarding.alertCount !== null;
+  }
+
+  function isGuideVisible() {
+    return canSeeGuide() && localStorage.getItem(guideStorageKey()) !== "1";
+  }
+
+  function syncWaSetupVisibility() {
+    const needsConnect = state.wa.status !== "connected";
+    const dropped = needsConnect && (state.onboarding.totalChats || state.conversations.length) > 0;
+    $("wa-setup")?.classList.toggle("hidden", !needsConnect || (isGuideVisible() && !dropped));
+  }
+
+  function openAlertSettings() {
+    switchPanelMode("ai");
+    setTimeout(() => $("alert-recipients")?.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
+  }
+
+  function onboardingSteps() {
+    const p = state.aiProfile || {};
+    const o = state.onboarding;
+    const steps = [
+      {
+        title: "Conecta tu WhatsApp",
+        text: "En tu celular abre WhatsApp › Dispositivos vinculados y escanea el código QR.",
+        done: state.wa.status === "connected",
+        action: state.canConnectWa ? "Mostrar código QR" : null,
+        run: connectWhatsApp,
+      },
+      {
+        title: "Cuéntale a la IA de tu negocio",
+        text: "Qué vendes, precios y horario. Así responde como tú y no se inventa nada.",
+        done: !p.business_name_is_placeholder && !!p.industry?.trim() && !!p.products_services?.trim(),
+        action: "Completar",
+        run: () => switchPanelMode("ai"),
+      },
+      {
+        title: "Pon tu número para las alertas",
+        text: "Te escribimos a tu WhatsApp personal cuando alguien quiere comprar, para que cierres tú la venta.",
+        done: o.alertCount > 0,
+        action: "Agregar mi número",
+        run: openAlertSettings,
+      },
+    ];
+    if (o.bookingAllowed !== false) {
+      steps.push({
+        title: "¿Das citas? Deja que la IA agende",
+        text: "Pon tu horario y activa «La IA agenda citas sola». Si no manejas citas, sáltate este paso.",
+        done: !!o.bookingEnabled,
+        optional: true,
+        action: "Configurar citas",
+        run: () => switchPanelMode("appointments"),
+      });
+    }
+    steps.push({
+      title: "Haz una prueba",
+      text: "Pídele a alguien que le escriba a tu WhatsApp como si fuera un cliente y mira aquí cómo responde la IA.",
+      done: o.totalChats > 0,
+    });
+    return steps;
+  }
+
+  function renderOnboarding() {
+    const card = $("onboarding-card");
+    const guideBtn = $("guide-btn");
+    if (!card) return;
+    guideBtn?.classList.toggle("hidden", !canSeeGuide());
+    const visible = isGuideVisible();
+    card.classList.toggle("hidden", !visible);
+    syncWaSetupVisibility();
+    if (!visible) {
+      card.innerHTML = "";
+      return;
+    }
+
+    const steps = onboardingSteps();
+    const required = steps.filter((s) => !s.optional);
+    const doneCount = required.filter((s) => s.done).length;
+    const allDone = doneCount === required.length;
+    const nextIndex = steps.findIndex((s) => !s.done && !s.optional);
+
+    card.innerHTML = `
+      <div class="onboarding-head">
+        <div>
+          <h3>${allDone ? "¡Listo! Tu IA ya está atendiendo" : "Primeros pasos"}</h3>
+          <p class="muted small">${doneCount} de ${required.length} listos</p>
+        </div>
+        <button type="button" class="onboarding-close" data-guide-hide title="Ocultar guía" aria-label="Ocultar guía">×</button>
+      </div>
+      <div class="onboarding-progress" aria-hidden="true"><span style="width:${Math.round((doneCount / required.length) * 100)}%"></span></div>
+      <ul class="onboarding-how">
+        <li><span>💬</span><span>La IA le responde sola a tus clientes, a cualquier hora.</span></li>
+        <li><span>🔥</span><span>Cuando alguien quiere comprar o agendar, te avisa y lo marca como <strong>Interesado</strong>.</span></li>
+        <li><span>🙋</span><span>Apenas le escribes a ese cliente, la IA se aparta para que cierres tú.</span></li>
+      </ul>
+      <ol class="onboarding-steps">
+        ${steps
+          .map(
+            (s, i) => `
+          <li class="onboarding-step${s.done ? " done" : ""}${i === nextIndex ? " next" : ""}">
+            <span class="onboarding-check" aria-hidden="true">${s.done ? "✓" : i + 1}</span>
+            <div class="onboarding-step-body">
+              <strong>${escapeHtml(s.title)}${s.optional ? ' <em class="muted">· opcional</em>' : ""}</strong>
+              ${s.done ? "" : `<p class="muted small">${escapeHtml(s.text)}</p>`}
+            </div>
+            ${!s.done && s.action ? `<button type="button" class="btn ${i === nextIndex ? "primary" : "ghost"} small" data-guide-step="${i}">${escapeHtml(s.action)}</button>` : ""}
+          </li>`
+          )
+          .join("")}
+      </ol>
+      ${allDone ? '<button type="button" class="btn ghost small onboarding-done-btn" data-guide-hide>Ocultar guía</button>' : ""}
+    `;
+    card.querySelectorAll("[data-guide-step]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        steps[Number(btn.dataset.guideStep)]?.run?.();
+      });
+    });
+    card.querySelectorAll("[data-guide-hide]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        localStorage.setItem(guideStorageKey(), "1");
+        renderOnboarding();
+      });
+    });
+  }
+
+  function showGuide() {
+    localStorage.removeItem(guideStorageKey());
+    if (state.activeId) {
+      state.activeId = null;
+      renderConversationList();
+    }
+    switchPanelMode("chats");
+    renderOnboarding();
+    $("onboarding-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function loadOnboardingStatus() {
+    const [alerts, schedule] = await Promise.all([
+      api("/tenants/me/interest-alert").catch(() => null),
+      api("/appointments/schedule").catch(() => null),
+    ]);
+    state.onboarding.alertCount = alerts ? (alerts.recipients || []).length : 0;
+    if (schedule) {
+      state.onboarding.bookingEnabled = !!schedule.ai_booking_enabled;
+      state.onboarding.bookingAllowed = schedule.ai_booking_allowed !== false;
+    }
+    renderOnboarding();
+  }
 
   function formatPlanDate(iso) {
     const date = new Date(iso);
@@ -1711,6 +1868,9 @@
     if ($("schedule-slot-minutes")) {
       $("schedule-slot-minutes").value = String(schedule.slot_minutes || 60);
     }
+    state.onboarding.bookingEnabled = !!schedule.ai_booking_enabled;
+    state.onboarding.bookingAllowed = schedule.ai_booking_allowed !== false;
+    renderOnboarding();
     const bookingBox = $("schedule-ai-booking");
     if (bookingBox) {
       const allowed = schedule.ai_booking_allowed !== false;
@@ -2341,6 +2501,10 @@
 
   function fillInterestAlert(cfg) {
     renderAlertRecipients(cfg?.recipients || []);
+    if (cfg) {
+      state.onboarding.alertCount = (cfg.recipients || []).length;
+      renderOnboarding();
+    }
     updateAiSetupControls();
     $("alert-threshold").value = cfg?.alert_threshold || 10;
     const pending = $("alert-pending");
@@ -2897,6 +3061,7 @@
       ]);
       await loadQuickShortcuts().catch(() => {});
       loadResults(true);
+      loadOnboardingStatus();
 
       state.tenant = tenant;
       state.aiStatus = aiStatus;
@@ -3375,6 +3540,10 @@
   $("wa-setup-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     connectWhatsApp();
+  });
+  $("guide-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showGuide();
   });
   $("wa-disconnect-btn").addEventListener("click", async () => {
     if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel.")) return;
