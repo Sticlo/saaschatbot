@@ -899,8 +899,9 @@
       setupTitle.textContent = dropped ? "WhatsApp se desconectó" : "Conecta tu WhatsApp";
       $("wa-setup-text").innerHTML = dropped
         ? "Estamos intentando reconectar solos y tus chats se conservan. Si en un par de minutos no vuelve, escanea el código QR otra vez."
-        : "Escanea el código QR con WhatsApp en tu celular. Tus chats aparecerán aquí y la IA marcará como <strong>Interesados</strong> a los que quieren comprar.";
+        : "Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.";
     }
+    $("empty-ready")?.classList.toggle("hidden", !connected);
     $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     const cwLink = $("wa-chatwoot-link");
@@ -1135,24 +1136,13 @@
     }, 700);
   }
 
-  function fieldStep(id, title, text) {
-    return {
-      key: id,
-      mode: "ai",
-      target: () => $(id)?.closest(".ai-step"),
-      focus: () => $(id),
-      title,
-      text,
-      done: () => !!$(id)?.value?.trim(),
-    };
-  }
-
   function buildTourSteps() {
+    const p = state.aiProfile || {};
     const steps = [
       {
         key: "hello",
-        title: "¡Hola! Soy Omi, tu guía 👋",
-        text: "En un par de minutos dejamos tu IA lista para atender y venderle a tus clientes. Yo te voy marcando qué tocar y qué llenar.",
+        title: "¡Hola! Soy Omi 👋",
+        text: "Solo tres cosas: conectar WhatsApp, decirle a la IA qué vendes y poner tu número para que te avise cuando alguien quiera comprar.",
         next: "Empezar",
       },
     ];
@@ -1160,89 +1150,57 @@
       steps.push({
         key: "wa",
         mode: "chats",
-        target: () => $("wa-connect-btn"),
-        title: "Primero, conecta tu WhatsApp",
-        text: "Toca «Conectar WhatsApp». En tu celular abre WhatsApp › Dispositivos vinculados › Vincular dispositivo y escanea el código que aparece.",
-        hint: "Cuando quede conectado sigo solo. Si prefieres hacerlo después, toca Siguiente.",
+        target: () => $("wa-setup-btn") || $("wa-connect-btn"),
+        title: "Conecta tu WhatsApp",
+        text: "Toca el botón verde. En el celular: WhatsApp › Dispositivos vinculados › Vincular dispositivo, y escanea el código.",
+        hint: "Cuando quede conectado, sigo solo.",
       });
     }
-    steps.push(
-      {
-        key: "mode-ai",
-        mode: "chats",
-        target: () => $("mode-ai"),
-        title: "Ahora, cuéntale de tu negocio",
-        text: "La IA solo sabe lo que tú le cuentes. Toca «Personalizar IA».",
-        advanceOnClick: true,
-      },
-      fieldStep("biz-name", "¿Cómo se llama tu negocio?", "Escríbelo tal cual lo conocen tus clientes. Así se va a presentar la IA."),
-      fieldStep("biz-industry", "¿A qué te dedicas?", "Una frase corta. Por ejemplo: «peluquería», «restaurante de comida rápida» o «tienda de ropa»."),
-      fieldStep("biz-products", "¿Qué vendes?", "Lo que más te piden, con detalles. Entre más le cuentes, mejor responde."),
-      fieldStep("biz-prices", "¿Cuánto cuesta?", "Precios o rangos. Si no los pones, la IA dice que te confirma, pero nunca inventa un valor."),
-      fieldStep("biz-hours", "¿Dónde estás y cuándo atiendes?", "Ciudad o barrio y tu horario. Por ejemplo: «Laureles, lun a sáb 9am-7pm»."),
-      {
-        key: "biz-save",
-        mode: "ai",
-        target: () => $("biz-save-btn"),
-        title: "Guarda tu negocio",
-        text: "Las demás preguntas son opcionales. Toca «Guardar mi negocio» y la IA empieza a responder con esto.",
-        advanceOnClick: true,
-      },
-      {
-        key: "alerts",
-        mode: "ai",
-        target: () => $("alert-recipients"),
-        focus: () => $("alert-recipients")?.querySelector("input[type=tel], input[type=text], input"),
-        title: "Tu WhatsApp para las alertas",
-        text: "Escribe tu número personal, no el del negocio. Cuando un cliente quiera comprar te escribimos ahí para que cierres tú la venta.",
-        done: () => state.onboarding.alertCount > 0,
-      },
-      {
-        key: "alerts-save",
-        mode: "ai",
-        target: () => $("alert-save-btn"),
-        title: "Guarda las alertas",
-        text: "Toca «Guardar alertas». Con «Enviar prueba» puedes ver cómo te llegan.",
-        advanceOnClick: true,
-      }
-    );
+    steps.push({
+      key: "biz",
+      mode: "ai",
+      target: () => document.querySelector(".ai-setup-form-card"),
+      focus: () => $("biz-name"),
+      title: "Cuéntale de tu negocio",
+      text: "Con el nombre, a qué te dedicas y qué vendes alcanza. Luego toca «Guardar mi negocio». Lo demás es opcional.",
+      done: () => !p.business_name_is_placeholder && !!$("biz-industry")?.value?.trim() && !!$("biz-products")?.value?.trim(),
+    });
+    steps.push({
+      key: "alerts",
+      mode: "ai",
+      target: () => $("alerts-card"),
+      focus: () => $("alert-recipients")?.querySelector("input[type=tel], input[type=text], input"),
+      title: "Tu WhatsApp personal",
+      text: "Pon el número donde quieres que te avisen — no el del negocio — y toca «Guardar alertas». Así no se te enfría un cliente.",
+      done: () => state.onboarding.alertCount > 0,
+    });
     if (state.onboarding.bookingAllowed !== false) {
-      steps.push(
-        {
-          key: "citas-ask",
-          mode: "ai",
-          target: () => $("mode-appointments"),
-          title: "¿Trabajas con citas?",
-          text: "Peluquería, consultorio, spa, clases… Si das citas, la IA puede agendarlas sola, sin preguntarte.",
-          next: "Sí, doy citas",
-          secondary: { label: "No, vendo productos", goTo: "tabs" },
-          advanceOnClick: true,
-        },
-        {
-          key: "citas",
-          mode: "appointments",
-          target: () => document.querySelector(".appointments-schedule-card"),
-          title: "Tu horario y la agenda automática",
-          text: "Pon a qué hora abres, a qué hora cierras y cuánto dura cada cita. Activa «La IA agenda citas sola» y toca «Guardar horario».",
-          done: () => !!state.onboarding.bookingEnabled,
-        }
-      );
+      steps.push({
+        key: "citas-ask",
+        mode: "ai",
+        target: () => $("mode-appointments"),
+        title: "¿Das citas?",
+        text: "Si das turnos o reservas, la IA puede agendarlas sola. Si vendes productos, sáltate esto.",
+        next: "Sí, doy citas",
+        secondary: { label: "No, vendo productos", goTo: "bye" },
+        advanceOnClick: true,
+      });
+      steps.push({
+        key: "citas",
+        mode: "appointments",
+        target: () => document.querySelector(".appointments-schedule-card"),
+        title: "Horario y agenda",
+        text: "Pon a qué hora abres y cierras. Activa «La IA agenda citas sola» y guarda. Listo.",
+        done: () => !!state.onboarding.bookingEnabled,
+      });
     }
-    steps.push(
-      {
-        key: "tabs",
-        mode: "chats",
-        target: () => document.querySelector(".chat-tabs"),
-        title: "Aquí llegan tus clientes",
-        text: "En «Todos» ves cada chat. En «Interesados» solo los que quieren comprar: atiéndelos primero. Apenas les escribes, la IA se aparta.",
-      },
-      {
-        key: "bye",
-        title: "¡Listo! 🎉",
-        text: "Pídele a un amigo que le escriba a tu WhatsApp como si fuera un cliente y mira aquí cómo responde la IA. Para repetir este recorrido, toca «Guía» arriba.",
-        next: "Terminar",
-      }
-    );
+    steps.push({
+      key: "bye",
+      mode: "chats",
+      title: "Ya está 🎉",
+      text: "Pídele a alguien que le escriba a tu WhatsApp. Aquí ves los chats; en «Interesados», a los que quieren comprar. Si te pierdes, toca «Guía».",
+      next: "Entendido",
+    });
     return steps;
   }
 
@@ -1868,8 +1826,15 @@
       <span class="results-note">Citas que agenda, mensajes que responde y cuánta plata te genera, mes a mes.</span>`;
   }
 
-  function resultsTicketHtml(ticket) {
+  function resultsHasActivity(data) {
+    const month = data?.month || {};
+    const total = data?.all_time || {};
+    return !!(month.ai_appointments || month.ai_replies || total.ai_appointments || total.ai_replies);
+  }
+
+  function resultsTicketHtml(ticket, hasAppointments) {
     const isOwner = state.canManageGlobal;
+    if (!hasAppointments && !ticket) return "";
     if (isOwner && (!ticket || resultsEditingTicket)) {
       return `<form class="results-ticket">
         <label>
@@ -1895,7 +1860,8 @@
     const month = data.month || {};
     const total = data.all_time || {};
     const ticket = data.avg_ticket_cop;
-    const hasActivity = !!(month.ai_appointments || month.ai_replies || total.ai_appointments || total.ai_replies);
+    const hasActivity = resultsHasActivity(data);
+    const hasAppointments = !!(month.ai_appointments || total.ai_appointments);
     const roi = month.roi_multiple >= 1 ? `<span class="results-roi">${formatMultiple(month.roi_multiple)}× tu plan</span>` : "";
 
     let totalLine = "";
@@ -1927,16 +1893,17 @@
         <div><strong>${Number(month.clients_attended || 0).toLocaleString("es-CO")}</strong><span>clientes atendidos</span></div>
       </div>` : ""}
       ${totalLine || hours ? `<p class="results-total">${totalLine}${totalLine ? hours : hours.replace(/^ · /, "")}</p>` : ""}
-      ${resultsTicketHtml(ticket)}
+      ${resultsTicketHtml(ticket, hasAppointments)}
       ${hasActivity ? '<p class="results-fine">Solo contamos las citas que agendó la IA y siguen en tu agenda.</p>' : ""}
     </section>`;
   }
 
   function renderResults() {
     const data = state.results;
-    document.querySelectorAll(".results-slot").forEach((slot) => {
-      slot.classList.toggle("hidden", !data);
-      slot.innerHTML = data ? resultsCardHtml(data) : "";
+    const show = !!(data && resultsHasActivity(data));
+    document.querySelectorAll("#appointments-panel .results-slot").forEach((slot) => {
+      slot.classList.toggle("hidden", !show);
+      slot.innerHTML = show ? resultsCardHtml(data) : "";
     });
   }
 
@@ -2016,7 +1983,6 @@
       } else {
         emptyChat.classList.remove("hidden");
         activeChat.classList.add("hidden");
-        loadResults();
       }
     } else {
       emptyChat.classList.add("hidden");
@@ -3289,7 +3255,6 @@
         api("/subscriptions/me").catch(() => null),
       ]);
       await loadQuickShortcuts().catch(() => {});
-      loadResults(true);
       loadOnboardingStatus();
 
       state.tenant = tenant;

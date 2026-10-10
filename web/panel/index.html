@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=49" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=50" />
 </head>
 <body>
   <div id="app">
@@ -160,11 +160,14 @@
             <div id="empty-chat" class="empty-state">
             <div id="wa-setup" class="wa-setup">
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
-              <p id="wa-setup-text" class="muted">Escanea el código QR con WhatsApp en tu celular. Tus chats aparecerán aquí y la IA marcará como <strong>Interesados</strong> a los que quieren comprar.</p>
+              <p id="wa-setup-text" class="muted">Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.</p>
               <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
               <p id="wa-setup-error" class="error hidden"></p>
             </div>
-            <div class="results-slot hidden"></div>
+            <div id="empty-ready" class="empty-ready hidden">
+              <h3>Elige un chat</h3>
+              <p class="muted">La IA le responde sola. Cuando alguien quiera comprar, te avisa.</p>
+            </div>
           </div>
 
           <div id="active-chat" class="hidden">
@@ -325,7 +328,7 @@
               <button type="button" id="ai-shortcuts-config-btn" class="btn ghost small">Configurar atajos</button>
             </section>
 
-            <section class="ai-shortcuts-card">
+            <section id="alerts-card" class="ai-shortcuts-card">
               <div class="ai-shortcuts-card-head">
                 <h3>Alertas por WhatsApp</h3>
                 <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando un cliente <strong>ya quiere comprar</strong> o agenda una cita, con sus datos.</p>
@@ -623,6 +626,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=118"></script>
+  <script src="/static/panel/app.js?v=119"></script>
 </body>
 </html>

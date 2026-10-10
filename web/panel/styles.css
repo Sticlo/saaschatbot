@@ -723,6 +723,13 @@ textarea { resize: vertical; min-height: 44px; }
 
 .wa-setup h3 { color: var(--text); margin: 0 0 0.5rem; }
 
+.empty-ready {
+  max-width: 320px;
+  text-align: center;
+}
+
+.empty-ready h3 { color: var(--text); margin: 0 0 0.5rem; }
+
 .empty-state {
   overflow-y: auto;
   justify-content: safe center;
@@ -867,8 +874,6 @@ textarea { resize: vertical; min-height: 44px; }
   max-width: 560px;
 }
 
-.empty-state .results-slot { margin-top: 1.5rem; }
-.empty-state .wa-setup.hidden + .results-slot { margin-top: 0; }
 .appointments-panel .results-slot { max-width: none; margin-bottom: 1rem; }
 
 .results-card {
