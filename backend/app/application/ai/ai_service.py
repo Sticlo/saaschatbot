@@ -123,6 +123,10 @@ HANDOFF_MARKER_TTL_SECONDS = 30 * 24 * 3600
 HANDOFF_RESCUE_SECONDS = 5 * 60
 HANDOFF_WAIT_TTL_SECONDS = 24 * 3600
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
+BOOKING_TIP = (
+    "\n\n💡 Te pidió una cita. Si activas «La IA agenda citas sola» en la sección Citas del panel, "
+    "la IA revisa tus horarios libres y agenda sin preguntarte."
+)
 BOOKING_DAYS_AHEAD = 14
 BOOKING_DATE_LOOKBACK = 16  # últimos mensajes (cliente e IA) donde buscamos fechas de las que se habló
 HOLDING_REPLIES_FIRST_CONTACT = (
@@ -201,10 +205,6 @@ def _awaiting_key(conversation_id: uuid.UUID) -> str:
     return f"ai:awaiting_human:{conversation_id}"
 
 
-def _rescued_key(conversation_id: uuid.UUID) -> str:
-    return f"ai:rescued:{conversation_id}"
-
-
 def _schedule_rescue(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID) -> None:
     from app.application.ai.ai_queue_service import JOB_RESCUE, schedule_ai_retry
 
@@ -224,6 +224,44 @@ def _await_human(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: u
         log.warning("No se pudo marcar el chat como esperando a una persona conv=%s", conversation_id)
         return
     _schedule_rescue(tenant_id, conversation_id, message_id)
+
+
+def _mark_awaiting_owner(conversation_id: uuid.UUID) -> None:
+    """Venta lista y la IA sigue atendiendo: desde ahora, si el dueño escribe, la IA se aparta."""
+    try:
+        get_redis().set(
+            _awaiting_key(conversation_id), str(time.time()), ex=HANDOFF_WAIT_TTL_SECONDS, nx=True
+        )
+    except Exception:
+        log.warning("No se pudo marcar el chat como esperando al dueño conv=%s", conversation_id)
+
+
+def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
+    """El dueño ya le escribió al cliente (panel o celular) después del aviso: el chat es suyo."""
+    if not conversation.ai_active or conversation.mode != ConversationMode.AUTO.value:
+        return False
+    since = _awaiting_human_since(conversation.id)
+    if since is None:
+        return False
+    replied = (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.source == MessageSource.AGENT.value,
+            Message.created_at >= since,
+        )
+        .first()
+    )
+    if replied is None:
+        return False
+    conversation.ai_active = False
+    conversation.mode = ConversationMode.MANUAL.value
+    clear_awaiting_human(conversation.id)
+    db.flush()
+    publish_conversation_updated(tenant.id, conversation)
+    log.info("El dueño tomó el chat: la IA se aparta conv=%s", conversation.id)
+    return True
 
 
 def _awaiting_human_since(conversation_id: uuid.UUID) -> Optional[datetime]:
@@ -255,13 +293,6 @@ def schedule_rescue_if_awaiting(
         return False
     _schedule_rescue(tenant_id, conversation_id, message_id)
     return True
-
-
-def _was_rescued(conversation_id: uuid.UUID) -> bool:
-    try:
-        return bool(get_redis().exists(_rescued_key(conversation_id)))
-    except Exception:
-        return False
 
 
 def _remind_owner_of_waiting_client(tenant: Tenant, conversation: Conversation, *, resumed: bool) -> None:
@@ -358,10 +389,6 @@ def rescue_unanswered_handoff(
     conversation.ai_active = True
     conversation.mode = ConversationMode.AUTO.value
     clear_awaiting_human(conversation_id)
-    try:
-        get_redis().set(_rescued_key(conversation_id), "1", ex=HANDOFF_WAIT_TTL_SECONDS)
-    except Exception:
-        pass
     db.commit()
     publish_conversation_updated(tenant.id, conversation)
     log.info("Nadie respondió al cliente: la IA retoma el chat conv=%s", conversation_id)
@@ -1064,18 +1091,18 @@ def _apply_stage(
     conversation: Conversation,
     message: Message,
     stage: str,
+    booking_tip: bool = False,
 ) -> None:
     if stage == STAGE_CHATTING:
         return
     changed = conversation.interest_status != ConversationInterest.INTERESTED.value
     conversation.interest_status = ConversationInterest.INTERESTED.value
     if stage == STAGE_CLOSING:
-        # Si la IA ya retomó este chat porque nadie respondía, no lo vuelve a soltar: el aviso basta.
-        if not _was_rescued(conversation.id):
-            conversation.ai_active = False
-            conversation.mode = ConversationMode.MANUAL.value
-            _mark_handed_off(conversation.id)
-            _await_human(tenant.id, conversation.id, message.id)
+        # La IA no suelta el chat: un cliente listo para comprar no puede quedar hablándole al vacío
+        # (a veces la última respuesta le acaba de hacer una pregunta). Se aparta cuando el dueño
+        # le escribe; ver _owner_took_over.
+        _mark_handed_off(conversation.id)
+        _mark_awaiting_owner(conversation.id)
         changed = True
         snippet = " ".join(text_for_ai(message).split())[:200]
         _send_sales_alert(
@@ -1084,16 +1111,17 @@ def _apply_stage(
             ttl_seconds=CLOSING_ALERT_COOLDOWN_SECONDS,
             text=(
                 f"🔥 *{tenant.business_name}*: {_contact_label(conversation)} ya quiere comprar. "
-                "Te dejamos el chat para que cierres la venta.\n\n"
+                "La IA lo sigue atendiendo; apenas le escribas, se aparta para que cierres tú la venta.\n\n"
                 f"{_contact_line(conversation)}\n"
                 f"Último mensaje: «{snippet}»\n\nRespóndele aquí: {_panel_link()}"
+                + (BOOKING_TIP if booking_tip else "")
             ),
         )
         log.info("IA entrega chat listo para cerrar conv=%s", conversation.id)
         record_incident(
             tenant.id,
             "system.ai_handoff_closing",
-            f"{_contact_label(conversation)} quiere comprar: la IA pasó el chat al dueño",
+            f"{_contact_label(conversation)} quiere comprar: se avisó al dueño para que cierre la venta",
             details={"conversation_id": str(conversation.id)},
             throttle_seconds=CLOSING_ALERT_COOLDOWN_SECONDS,
             throttle_scope=str(conversation.id),
@@ -1220,8 +1248,20 @@ def _deliver_reply(
         conversation=conversation,
         message=message,
         stage=_resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking),
+        booking_tip=_could_have_booked(tenant, message),
     )
     return True
+
+
+def _could_have_booked(tenant: Tenant, message: Message) -> bool:
+    """El cliente pidió cita y la agenda de la IA está apagada: el dueño debe saber que puede encenderla."""
+    profile = tenant.profile
+    return (
+        profile is not None
+        and not profile.ai_booking_enabled
+        and feature_allowed(tenant, "ai_booking")
+        and detect_scheduling_interest(text_for_ai(message))
+    )
 
 
 def _client_is_waiting_on_us(db: Session, conversation_id: uuid.UUID, message: Message) -> bool:
@@ -1605,6 +1645,8 @@ def process_ai_reply(
         reason = ai_block_reason(tenant, conversation) or "desconocido"
         log.info("IA skip conv=%s: %s", conversation_id, reason)
         return True
+    if _owner_took_over(db, tenant=tenant, conversation=conversation):
+        return True
 
     if can_transcribe(message):
         ensure_transcript(db, tenant=tenant, conversation=conversation, message=message)
@@ -1643,6 +1685,8 @@ def process_ai_reply(
     db.refresh(conversation)
     db.refresh(tenant)
     if not should_ai_respond(tenant, conversation):
+        return True
+    if _owner_took_over(db, tenant=tenant, conversation=conversation):
         return True
     if not is_target():
         return True

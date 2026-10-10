@@ -273,7 +273,7 @@ def test_question_marks_get_an_answer_and_allow_resending(_sleep, mock_generate,
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_closing_hands_off_softly_and_alerts_owner_and_dispatch(_sleep, mock_generate, mock_send, mock_alert):
+def test_closing_alerts_owner_and_dispatch_and_keeps_attending(_sleep, mock_generate, mock_send, mock_alert):
     from app.infrastructure.persistence.database import SessionLocal
 
     mock_generate.return_value = AiGeneratedReply(
@@ -293,13 +293,56 @@ def test_closing_hands_off_softly_and_alerts_owner_and_dispatch(_sleep, mock_gen
     sent_reply = mock_send.call_args.kwargs["reply"]
     assert "asesor" not in sent_reply.message.lower()
     assert conv.interest_status == "interested"
-    assert conv.mode == "manual"
-    assert conv.ai_active is False
+    assert conv.mode == "auto"
+    assert conv.ai_active is True
     assert sorted(c.args[1] for c in mock_alert.call_args_list) == ["+573001234567", "+573005556644"]
     text = mock_alert.call_args.args[2]
     assert "ya quiere comprar" in text
+    assert "apenas le escribas, se aparta" in text
     assert "Me llevo los blancos en talla 38" in text
     assert "Cliente: Laura · " in text
+
+
+@requires_db
+@patch("app.application.conversations.interest_alert_service.send_alert")
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_client_asks_for_an_appointment_with_agenda_off_so_owner_learns_to_turn_it_on(
+    _sleep, mock_generate, _send, mock_alert
+):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    mock_generate.return_value = AiGeneratedReply(
+        message="¡Qué bueno, Juan! ¿Qué día te queda bien? Te confirmo con el equipo 🙌", stage="cierre"
+    )
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(
+            db, body="Me siento interesado, cómo puedo agendar o contratarte", alert_recipients=OWNER_ONLY
+        )
+        assert _run(db, tenant, conv, msg) is True
+
+    assert "La IA agenda citas sola" in mock_alert.call_args.args[2]
+
+
+@requires_db
+@patch("app.application.conversations.interest_alert_service.send_alert")
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_no_agenda_tip_when_the_client_is_buying_a_product(_sleep, mock_generate, _send, mock_alert):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    mock_generate.return_value = AiGeneratedReply(message="¡De una! Dame un momentico y te confirmo 🙌", stage="cierre")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="Me llevo los blancos en talla 38", alert_recipients=OWNER_ONLY)
+        assert _run(db, tenant, conv, msg) is True
+
+    assert "ya quiere comprar" in mock_alert.call_args.args[2]
+    assert "La IA agenda citas sola" not in mock_alert.call_args.args[2]
+
+
+OWNER_ONLY = [{"name": "Dueña", "phone": "+573001234567", "scope": "all"}]
 
 
 def _tomorrow_iso() -> str:

@@ -67,48 +67,84 @@ def _rescue(db, tenant, conv, msg):
 
 @requires_db
 @patch("app.application.ai.ai_queue_service.schedule_ai_retry")
-@patch("app.application.conversations.interest_alert_service.send_alert")
-@patch("app.application.ai.ai_service.send_reply_with_shortcut")
-@patch("app.application.ai.ai_service.generate_qualify_reply")
-@patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_handing_the_chat_to_a_person_schedules_a_rescue(_sleep, mock_generate, _send, _alert, mock_schedule):
-    from app.application.ai.ai_service import HANDOFF_RESCUE_SECONDS, _awaiting_human_since
-    from app.infrastructure.persistence.database import SessionLocal
-    from tests.test_sales_stage_and_booking import _run, _seed
-
-    mock_generate.return_value = AiGeneratedReply(message="¡De una! Dame un momentico 🙌", stage="cierre")
-    with SessionLocal() as db:
-        tenant, conv, msg = _seed(db, body="Me llevo los blancos en talla 38", alert_recipients=OWNER)
-        assert _run(db, tenant, conv, msg) is True
-        expected = (tenant.id, conv.id, msg.id)
-
-    assert conv.mode == "manual"
-    assert _awaiting_human_since(conv.id) is not None
-    args, kwargs = mock_schedule.call_args
-    assert args == expected
-    assert kwargs == {"delay_seconds": HANDOFF_RESCUE_SECONDS, "kind": "rescue"}
-
-
-@requires_db
-@patch("app.application.ai.ai_queue_service.schedule_ai_retry")
 @patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_a_promise_to_get_back_hands_the_chat_to_a_person(_sleep, mock_generate, _send, mock_alert, mock_schedule):
+def test_ready_to_buy_alerts_the_owner_but_the_ai_keeps_attending(
+    _sleep, mock_generate, _send, mock_alert, mock_schedule
+):
     from app.application.ai.ai_service import _awaiting_human_since
     from app.infrastructure.persistence.database import SessionLocal
     from tests.test_sales_stage_and_booking import _run, _seed
 
-    mock_generate.return_value = AiGeneratedReply(message="Déjame revisar si lo hay en talla 38 y ya te confirmo 🙌")
+    # Como el chat de Juan: la IA pregunta «¿qué día tienes en mente?» y el cliente responde.
+    mock_generate.return_value = AiGeneratedReply(
+        message="¡Qué bueno! Te confirmo los detalles con el equipo. ¿Qué día tienes en mente?", stage="cierre"
+    )
     with SessionLocal() as db:
-        tenant, conv, msg = _seed(db, body="¿Lo tienes en talla 38?", alert_recipients=OWNER)
+        tenant, conv, msg = _seed(db, body="Me siento interesado, cómo puedo contratarte", alert_recipients=OWNER)
         assert _run(db, tenant, conv, msg) is True
 
-    assert conv.mode == "manual" and conv.ai_active is False
+    assert conv.mode == "auto" and conv.ai_active is True
+    assert conv.interest_status == "interested"
     assert _awaiting_human_since(conv.id) is not None
     mock_alert.assert_called()
-    assert mock_schedule.call_args.kwargs["kind"] == "rescue"
+    mock_schedule.assert_not_called()
+
+
+def _alerted_chat(db, *, owner_wrote: bool):
+    """El dueño recibió el aviso de venta hace 2 min y el cliente siguió escribiendo."""
+    from app.application.ai.ai_service import _awaiting_key
+    from app.infrastructure.cache.redis_client import get_redis
+    from tests.test_sales_stage_and_booking import _seed
+
+    tenant, conv, first = _seed(db, body="Me siento interesado", alert_recipients=OWNER)
+    alerted_at = _now() - timedelta(minutes=2)
+    first.created_at = alerted_at - timedelta(seconds=10)
+    _add(db, conv, direction="out", source="bot", body="¿Qué día tienes en mente?", at=alerted_at)
+    if owner_wrote:
+        _add(db, conv, direction="out", source="agent", body="Hola Juan, soy Jair 👋", at=alerted_at + timedelta(minutes=1))
+    latest = _add(db, conv, direction="in", source="contact", body="Se puede?", at=_now())
+    db.commit()
+    get_redis().set(_awaiting_key(conv.id), str(alerted_at.timestamp()), ex=3600)
+    return tenant, conv, latest
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_client_keeps_writing_after_the_alert_and_gets_an_answer(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _run
+
+    mock_generate.return_value = AiGeneratedReply(message="¡Claro que se puede! ¿Para qué red lo quieres?")
+    with SessionLocal() as db:
+        tenant, conv, latest = _alerted_chat(db, owner_wrote=False)
+        assert _run(db, tenant, conv, latest) is True
+
+    mock_send.assert_called_once()
+    assert conv.mode == "auto" and conv.ai_active is True
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_owner_writes_after_the_alert_so_the_ai_steps_aside(_sleep, mock_generate, mock_send):
+    from app.application.ai.ai_service import _awaiting_human_since
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _run
+
+    with SessionLocal() as db:
+        tenant, conv, latest = _alerted_chat(db, owner_wrote=True)
+        assert _run(db, tenant, conv, latest) is True
+
+    mock_generate.assert_not_called()
+    mock_send.assert_not_called()
+    assert conv.mode == "manual" and conv.ai_active is False
+    assert _awaiting_human_since(conv.id) is None
 
 
 @requires_db
@@ -198,23 +234,3 @@ def test_owner_decision_in_the_panel_cancels_the_rescue(mock_schedule):
 
     mock_schedule.assert_not_called()
 
-
-@requires_db
-@patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
-@patch("app.application.ai.ai_service.send_reply_with_shortcut")
-@patch("app.application.ai.ai_service.generate_qualify_reply")
-@patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_after_a_rescue_the_ai_does_not_drop_the_chat_again(_sleep, mock_generate, _send, _alert):
-    from app.application.ai.ai_service import _rescued_key
-    from app.infrastructure.cache.redis_client import get_redis
-    from app.infrastructure.persistence.database import SessionLocal
-    from tests.test_sales_stage_and_booking import _run, _seed
-
-    mock_generate.return_value = AiGeneratedReply(message="¡De una! Te cuento cómo pagar 🙌", stage="cierre")
-    with SessionLocal() as db:
-        tenant, conv, msg = _seed(db, body="Listo, ¿cómo pago?", alert_recipients=OWNER)
-        get_redis().set(_rescued_key(conv.id), "1", ex=60)
-        assert _run(db, tenant, conv, msg) is True
-
-    assert conv.mode == "auto" and conv.ai_active is True
-    assert conv.interest_status == "interested"
