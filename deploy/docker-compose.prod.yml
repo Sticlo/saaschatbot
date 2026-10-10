@@ -110,7 +110,9 @@ services:
       retries: 5
 
   evolution:
-    image: evoapicloud/evolution-api:v2.2.3
+    build:
+      context: ./evolution
+    image: omitel/evolution-api:2.2.3-omitel
     restart: unless-stopped
     environment:
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Define EVOLUTION_API_KEY en .env}

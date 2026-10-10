@@ -1,0 +1,216 @@
+diff --git a/src/api/controllers/chat.controller.ts b/src/api/controllers/chat.controller.ts
+index 207d8ba..43ddfad 100644
+--- a/src/api/controllers/chat.controller.ts
++++ b/src/api/controllers/chat.controller.ts
+@@ -70,6 +70,10 @@ export class ChatController {
+     return await this.waMonitor.waInstances[instanceName].fetchChats(query);
+   }
+ 
++  public async fetchChatStates({ instanceName }: InstanceDto) {
++    return await this.waMonitor.waInstances[instanceName].fetchChatStates();
++  }
++
+   public async sendPresence({ instanceName }: InstanceDto, data: SendPresenceDto) {
+     return await this.waMonitor.waInstances[instanceName].sendPresence(data);
+   }
+diff --git a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
+index 10feb7c..10a33c4 100644
+--- a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
++++ b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
+@@ -227,6 +227,7 @@ export class BaileysStartupService extends ChannelStartupService {
+   private authStateProvider: AuthStateProvider;
+   private readonly msgRetryCounterCache: CacheStore = new NodeCache();
+   private readonly userDevicesCache: CacheStore = new NodeCache();
++  private readonly chatStateCache = new Map<string, { archived: boolean; name?: string }>();
+   private endSession = false;
+   private logBaileys = this.configService.get<Log>('LOG').BAILEYS;
+ 
+@@ -238,6 +239,26 @@ export class BaileysStartupService extends ChannelStartupService {
+     return this.stateConnection;
+   }
+ 
++  private rememberChatState(chat: { id?: string; name?: string; archived?: boolean }) {
++    const remoteJid = chat?.id;
++    if (!remoteJid) {
++      return;
++    }
++    const prev = this.chatStateCache.get(remoteJid) || { archived: false };
++    this.chatStateCache.set(remoteJid, {
++      archived: chat.archived ?? prev.archived ?? false,
++      name: chat.name ?? prev.name,
++    });
++  }
++
++  public fetchChatStates() {
++    return Array.from(this.chatStateCache.entries()).map(([remoteJid, state]) => ({
++      remoteJid,
++      archived: !!state.archived,
++      name: state.name,
++    }));
++  }
++
+   public async logoutInstance() {
+     await this.client?.logout('Log out instance: ' + this.instanceName);
+ 
+@@ -757,19 +778,28 @@ export class BaileysStartupService extends ChannelStartupService {
+ 
+       const chatsToInsert = chats
+         .filter((chat) => !existingChatIdSet?.has(chat.id))
+-        .map((chat) => ({
+-          remoteJid: chat.id,
+-          instanceId: this.instanceId,
+-          name: chat.name,
+-          unreadMessages: chat.unreadCount !== undefined ? chat.unreadCount : 0,
+-        }));
++        .map((chat) => {
++          this.rememberChatState(chat);
++          return {
++            remoteJid: chat.id,
++            instanceId: this.instanceId,
++            name: chat.name,
++            unreadMessages: chat.unreadCount !== undefined ? chat.unreadCount : 0,
++            archived: !!chat.archived,
++          };
++        });
+ 
+       this.sendDataWebhook(Events.CHATS_UPSERT, chatsToInsert);
+ 
+       if (chatsToInsert.length > 0) {
+         if (this.configService.get<Database>('DATABASE').SAVE_DATA.CHATS)
+           await this.prismaRepository.chat.createMany({
+-            data: chatsToInsert,
++            data: chatsToInsert.map(({ remoteJid, instanceId, name, unreadMessages }) => ({
++              remoteJid,
++              instanceId,
++              name,
++              unreadMessages,
++            })),
+             skipDuplicates: true,
+           });
+       }
+@@ -785,7 +815,13 @@ export class BaileysStartupService extends ChannelStartupService {
+       >[],
+     ) => {
+       const chatsRaw = chats.map((chat) => {
+-        return { remoteJid: chat.id, instanceId: this.instanceId };
++        this.rememberChatState(chat);
++        return {
++          remoteJid: chat.id,
++          instanceId: this.instanceId,
++          archived: !!chat.archived,
++          name: chat.name,
++        };
+       });
+ 
+       this.sendDataWebhook(Events.CHATS_UPDATE, chatsRaw);
+@@ -985,24 +1021,20 @@ export class BaileysStartupService extends ChannelStartupService {
+           }
+         }
+ 
+-        const chatsRaw: { remoteJid: string; instanceId: string; name?: string }[] = [];
+-        const chatsRepository = new Set(
+-          (
+-            await this.prismaRepository.chat.findMany({
+-              where: { instanceId: this.instanceId },
+-            })
+-          ).map((chat) => chat.remoteJid),
+-        );
++        const chatsRaw: {
++          remoteJid: string;
++          instanceId: string;
++          name?: string;
++          archived?: boolean;
++        }[] = [];
+ 
+         for (const chat of chats) {
+-          if (chatsRepository?.has(chat.id)) {
+-            continue;
+-          }
+-
++          this.rememberChatState(chat);
+           chatsRaw.push({
+             remoteJid: chat.id,
+             instanceId: this.instanceId,
+             name: chat.name,
++            archived: !!chat.archived,
+           });
+         }
+ 
+@@ -1010,7 +1042,11 @@ export class BaileysStartupService extends ChannelStartupService {
+ 
+         if (this.configService.get<Database>('DATABASE').SAVE_DATA.HISTORIC) {
+           await this.prismaRepository.chat.createMany({
+-            data: chatsRaw,
++            data: chatsRaw.map(({ remoteJid, instanceId, name }) => ({
++              remoteJid,
++              instanceId,
++              name,
++            })),
+             skipDuplicates: true,
+           });
+         }
+@@ -2096,7 +2132,12 @@ export class BaileysStartupService extends ChannelStartupService {
+   ) {
+     const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
+ 
+-    if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast')) {
++    if (
++      !isWA.exists &&
++      !isJidGroup(isWA.jid) &&
++      !isWA.jid.includes('@broadcast') &&
++      !isWA.jid.toLowerCase().endsWith('@lid')
++    ) {
+       throw new BadRequestException(isWA);
+     }
+ 
+@@ -3350,6 +3391,16 @@ export class BaileysStartupService extends ChannelStartupService {
+     const verify = await this.client.onWhatsApp(...filteredNumbers);
+     const users: OnWhatsAppDto[] = await Promise.all(
+       jids.users.map(async (user) => {
++        if (user.jid.endsWith('@lid')) {
++          const contact = contacts.find((c) => c.remoteJid === user.jid);
++          return {
++            exists: true,
++            jid: user.jid,
++            name: contact?.pushName,
++            number: user.number,
++          };
++        }
++
+         let numberVerified: (typeof verify)[0] | null = null;
+ 
+         const cached = cachedNumbers.find((cached) => cached.jidOptions.includes(user.jid.replace('+', '')));
+diff --git a/src/api/routes/chat.router.ts b/src/api/routes/chat.router.ts
+index 20126c1..630687a 100644
+--- a/src/api/routes/chat.router.ts
++++ b/src/api/routes/chat.router.ts
+@@ -186,6 +186,16 @@ export class ChatRouter extends RouterBroker {
+ 
+         return res.status(HttpStatus.OK).json(response);
+       })
++      .get(this.routerPath('chatStates'), ...guards, async (req, res) => {
++        const response = await this.dataValidate<InstanceDto>({
++          request: req,
++          schema: null,
++          ClassRef: InstanceDto,
++          execute: (instance) => chatController.fetchChatStates(instance),
++        });
++
++        return res.status(HttpStatus.OK).json(response);
++      })
+       // Profile routes
+       .post(this.routerPath('fetchBusinessProfile'), ...guards, async (req, res) => {
+         const response = await this.dataValidate<ProfilePictureDto>({
+diff --git a/src/api/services/channel.service.ts b/src/api/services/channel.service.ts
+index 0f30f0c..912a42e 100644
+--- a/src/api/services/channel.service.ts
++++ b/src/api/services/channel.service.ts
+@@ -772,4 +772,8 @@ export class ChannelStartupService {
+ 
+     return [];
+   }
++
++  public fetchChatStates() {
++    return [];
++  }
+ }
