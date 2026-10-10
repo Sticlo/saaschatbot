@@ -26,6 +26,7 @@ from app.application.ai.ai_appointment_service import (
     own_booking_message,
     pending_promise_note,
     promises_follow_up,
+    without_wait_promise,
     requested_dates,
     requested_slot_note,
     requested_staff,
@@ -122,6 +123,8 @@ HANDOFF_MARKER_TTL_SECONDS = 30 * 24 * 3600
 # Chat pasado a una persona: si nadie le contesta al cliente en este tiempo, la IA lo retoma.
 HANDOFF_RESCUE_SECONDS = 5 * 60
 HANDOFF_WAIT_TTL_SECONDS = 24 * 3600
+# La IA le dijo al cliente que el negocio le confirma: si el dueño no le escribe, se le recuerda.
+OWNER_CONFIRM_REMINDER_SECONDS = (5 * 60, 30 * 60)
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
 BOOKING_TIP = (
     "\n\n💡 Te pidió una cita. Si activas «La IA agenda citas sola» en la sección Citas del panel, "
@@ -205,13 +208,17 @@ def _awaiting_key(conversation_id: uuid.UUID) -> str:
     return f"ai:awaiting_human:{conversation_id}"
 
 
-def _schedule_rescue(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID) -> None:
+def _schedule_rescue(
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    *,
+    delay_seconds: float = HANDOFF_RESCUE_SECONDS,
+) -> None:
     from app.application.ai.ai_queue_service import JOB_RESCUE, schedule_ai_retry
 
     try:
-        schedule_ai_retry(
-            tenant_id, conversation_id, message_id, delay_seconds=HANDOFF_RESCUE_SECONDS, kind=JOB_RESCUE
-        )
+        schedule_ai_retry(tenant_id, conversation_id, message_id, delay_seconds=delay_seconds, kind=JOB_RESCUE)
     except Exception:
         log.warning("No se pudo programar el rescate del chat conv=%s", conversation_id)
 
@@ -226,14 +233,19 @@ def _await_human(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: u
     _schedule_rescue(tenant_id, conversation_id, message_id)
 
 
-def _mark_awaiting_owner(conversation_id: uuid.UUID) -> None:
-    """Venta lista y la IA sigue atendiendo: desde ahora, si el dueño escribe, la IA se aparta."""
+def _mark_awaiting_owner(tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID) -> None:
+    """Venta lista y la IA sigue atendiendo: desde ahora, si el dueño escribe, la IA se aparta.
+    Al cliente se le dijo que el negocio le confirma: si el dueño no aparece, se le insiste."""
     try:
-        get_redis().set(
+        marked = get_redis().set(
             _awaiting_key(conversation_id), str(time.time()), ex=HANDOFF_WAIT_TTL_SECONDS, nx=True
         )
     except Exception:
         log.warning("No se pudo marcar el chat como esperando al dueño conv=%s", conversation_id)
+        return
+    if marked:
+        for delay in OWNER_CONFIRM_REMINDER_SECONDS:
+            _schedule_rescue(tenant_id, conversation_id, message_id, delay_seconds=delay)
 
 
 def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
@@ -324,6 +336,31 @@ def _remind_owner_of_waiting_client(tenant: Tenant, conversation: Conversation, 
         log.warning("No se pudo recordar al dueño el chat en espera conv=%s", conversation.id)
 
 
+def _remind_owner_to_confirm(tenant: Tenant, conversation: Conversation, *, since: datetime) -> None:
+    from app.application.conversations.interest_alert_service import alert_phones, send_alerts
+
+    phones = alert_phones(tenant.profile)
+    session = tenant.whatsapp_session
+    if not phones or session is None:
+        return
+    minutes = max(1, int((datetime.now(timezone.utc) - since).total_seconds() // 60))
+    bucket = "late" if minutes >= OWNER_CONFIRM_REMINDER_SECONDS[-1] // 60 else "early"
+    try:
+        key = f"ai:confirm_reminder:{conversation.id}:{bucket}"
+        if not get_redis().set(key, "1", nx=True, ex=HANDOFF_WAIT_TTL_SECONDS):
+            return
+    except Exception:
+        return
+    text = (
+        f"⏰ *{tenant.business_name}*: {_contact_label(conversation)} lleva {minutes} min esperando "
+        "que le confirmes. La IA le dijo que por ese chat le confirmabas los detalles; "
+        "si nadie le escribe, se enfría.\n\n"
+        f"Respóndele aquí: {_panel_link()}"
+    )
+    if not send_alerts(session, phones, text):
+        log.warning("No se pudo recordar al dueño que confirme conv=%s", conversation.id)
+
+
 def rescue_unanswered_handoff(
     db: Session,
     *,
@@ -344,9 +381,6 @@ def rescue_unanswered_handoff(
     )
     if tenant is None or conversation is None:
         return True
-    if should_ai_respond(tenant, conversation):
-        clear_awaiting_human(conversation_id)  # alguien ya reactivó la IA
-        return True
     human_replied = (
         db.query(Message.id)
         .filter(
@@ -359,6 +393,10 @@ def rescue_unanswered_handoff(
     )
     if human_replied is not None:
         clear_awaiting_human(conversation_id)
+        return True
+    if should_ai_respond(tenant, conversation):
+        # La IA sigue atendiendo, pero le dijo al cliente que el negocio le confirma.
+        _remind_owner_to_confirm(tenant, conversation, since=since)
         return True
 
     latest_in = (
@@ -1102,7 +1140,7 @@ def _apply_stage(
         # (a veces la última respuesta le acaba de hacer una pregunta). Se aparta cuando el dueño
         # le escribe; ver _owner_took_over.
         _mark_handed_off(conversation.id)
-        _mark_awaiting_owner(conversation.id)
+        _mark_awaiting_owner(tenant.id, conversation.id, message.id)
         changed = True
         snippet = " ".join(text_for_ai(message).split())[:200]
         _send_sales_alert(
@@ -1215,8 +1253,13 @@ def _deliver_reply(
             log.info("IA prometió un atajo sin adjuntarlo; se adjunta conv=%s", conversation.id)
             reply = replace(reply, shortcut_id=promised)
 
+    # Solo cambia lo que lee el cliente: la etapa se decide con la promesa original (avisa al dueño).
+    outgoing = replace(reply, message=without_wait_promise(reply.message))
+    if outgoing.message != reply.message:
+        log.info("IA prometió responder en minutos; se quita la promesa conv=%s", conversation.id)
+
     if not _send_generated_reply(
-        db, tenant=tenant, conversation=conversation, message=message, session=session, reply=reply
+        db, tenant=tenant, conversation=conversation, message=message, session=session, reply=outgoing
     ):
         return False
 

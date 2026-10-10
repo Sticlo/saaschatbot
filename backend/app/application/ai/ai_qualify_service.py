@@ -135,10 +135,11 @@ def build_qualify_system_prompt(
     return append_shortcuts_instructions(base, shortcuts or [])
 
 
+# Sin «momentico»: quien confirma es una persona y puede tardar; el cliente no debe quedar esperando.
 CLOSING_HOLD_REPLIES = (
-    "¡De una! 😊 Dame un momentico y ya te confirmo.",
-    "¡Listo! Dame un momentico y te confirmo 🙌",
-    "¡Claro que sí! Ya te confirmo, dame un momentico 😊",
+    "¡De una! 😊 Ya quedó anotado; por aquí mismo te confirmo los detalles.",
+    "¡Listo! Te dejo anotado 🙌 Por este chat te confirmo lo que falte.",
+    "¡Claro que sí! Quedó anotado 😊 Por aquí te confirmo los detalles.",
 )
 
 

@@ -257,7 +257,7 @@ def test_qualify_replies_without_marking_interested(
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.classify_inbound_message")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
-def test_qualify_purchase_intent_hands_off_to_human(_sleep, mock_classify, mock_generate, mock_send):
+def test_qualify_purchase_intent_alerts_owner_and_keeps_attending(_sleep, mock_classify, mock_generate, mock_send):
     from app.application.ai.ai_shortcut_service import AiGeneratedReply
     from app.infrastructure.persistence.database import SessionLocal
     from app.domain.entities import Conversation, Message, Tenant, TenantProfile, WhatsAppSession
@@ -320,7 +320,8 @@ def test_qualify_purchase_intent_hands_off_to_human(_sleep, mock_classify, mock_
     assert ok is True
     mock_send.assert_called_once()
     assert conv.interest_status == "interested"
-    assert conv.mode == ConversationMode.MANUAL.value
+    assert conv.mode == ConversationMode.AUTO.value and conv.ai_active is True
+    assert "momentico" not in mock_send.call_args.kwargs["reply"].message
 
 
 @requires_db

@@ -454,6 +454,41 @@ def promises_follow_up(message: str) -> bool:
     return bool(_STALL_RE.search(name_key(message)))
 
 
+_WAIT_WORDS = r"(?:momentico|momentito|momento|segundo|segundito|ratico|ratito|minuto|minutico)"
+_WAIT_PROMISE_SUBS = (
+    (
+        re.compile(
+            rf"\b(?:dame|deme|regalame|regálame|dejame|déjame)\s+un\s+{_WAIT_WORDS}\s+y\s+(?:ya\s+)?te\s+"
+            r"(confirmo|cuento|aviso|digo)",
+            re.IGNORECASE,
+        ),
+        r"por aquí mismo te \1",
+    ),
+    (
+        re.compile(rf"\b(?:ya\s+)?te\s+(confirmo|cuento|aviso|digo)\s+en\s+un\s+{_WAIT_WORDS}", re.IGNORECASE),
+        r"te \1 por aquí mismo",
+    ),
+    (re.compile(r"\bya\s+te\s+(confirmo|cuento|aviso|digo)\b", re.IGNORECASE), r"te \1 por aquí mismo"),
+)
+_SENTENCE_END_RE = re.compile(r"(?:^|[.!?¡]\s*)$")
+
+
+def without_wait_promise(message: str) -> str:
+    """«Dame un momentico y te confirmo»: la IA no escribe sola y el dueño puede tardar horas, así
+    que el cliente se queda esperando. Se dice lo mismo sin prometer minutos."""
+    text = message or ""
+    for pattern, template in _WAIT_PROMISE_SUBS:
+
+        def repl(m: re.Match, template: str = template) -> str:
+            out = m.expand(template)
+            if _SENTENCE_END_RE.search(m.string[: m.start()]):
+                out = out[0].upper() + out[1:]
+            return out
+
+        text = pattern.sub(repl, text)
+    return text
+
+
 def stalls_on_agenda(message: str, client_text: str, free_slots: list[dict[str, Any]]) -> bool:
     """«Déjame revisar si hay otro profesional y te confirmo»: con la agenda delante, eso deja al
     cliente esperando una respuesta que nadie va a dar. Un «ya te confirmo» al cerrar una venta sí vale."""

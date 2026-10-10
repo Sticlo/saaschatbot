@@ -90,7 +90,38 @@ def test_ready_to_buy_alerts_the_owner_but_the_ai_keeps_attending(
     assert conv.interest_status == "interested"
     assert _awaiting_human_since(conv.id) is not None
     mock_alert.assert_called()
-    mock_schedule.assert_not_called()
+    # Al cliente se le dijo que el negocio le confirma: el dueño recibe recordatorios.
+    assert [c.kwargs["delay_seconds"] for c in mock_schedule.call_args_list] == [300, 1800]
+    assert all(c.kwargs["kind"] == "rescue" for c in mock_schedule.call_args_list)
+
+
+@requires_db
+@patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+def test_owner_who_has_not_confirmed_gets_reminded(mock_generate, mock_alert):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, conv, latest = _alerted_chat(db, owner_wrote=False)
+        assert _rescue(db, tenant, conv, latest) is True
+
+    mock_generate.assert_not_called()
+    assert conv.mode == "auto" and conv.ai_active is True
+    assert "esperando que le confirmes" in mock_alert.call_args.args[2]
+
+
+@requires_db
+@patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
+def test_owner_who_already_wrote_is_not_reminded(mock_alert):
+    from app.application.ai.ai_service import _awaiting_human_since
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, conv, latest = _alerted_chat(db, owner_wrote=True)
+        assert _rescue(db, tenant, conv, latest) is True
+
+    mock_alert.assert_not_called()
+    assert _awaiting_human_since(conv.id) is None
 
 
 def _alerted_chat(db, *, owner_wrote: bool):

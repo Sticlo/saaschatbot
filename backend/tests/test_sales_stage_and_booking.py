@@ -292,6 +292,7 @@ def test_closing_alerts_owner_and_dispatch_and_keeps_attending(_sleep, mock_gene
 
     sent_reply = mock_send.call_args.kwargs["reply"]
     assert "asesor" not in sent_reply.message.lower()
+    assert sent_reply.message == "¡De una! Por aquí mismo te confirmo 🙌"
     assert conv.interest_status == "interested"
     assert conv.mode == "auto"
     assert conv.ai_active is True

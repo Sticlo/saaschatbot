@@ -371,6 +371,20 @@ def test_promise_to_write_later_is_a_stall_when_the_chat_is_about_the_agenda():
     assert pending_promise_note("¿Te lo dejo agendado así?") == ""
 
 
+def test_promises_of_minutes_are_rewritten_so_the_client_does_not_wait_for_nothing():
+    from app.application.ai.ai_appointment_service import without_wait_promise
+
+    assert without_wait_promise(
+        "¡Listo, Juan! El lunes 12 de octubre de 2026. Dame un momentico y te confirmo los detalles con el equipo 🙌"
+    ) == "¡Listo, Juan! El lunes 12 de octubre de 2026. Por aquí mismo te confirmo los detalles con el equipo 🙌"
+    assert without_wait_promise("Quedó anotado y te confirmo en un momentico 😊") == (
+        "Quedó anotado y te confirmo por aquí mismo 😊"
+    )
+    assert without_wait_promise("¡De una! Ya te confirmo.") == "¡De una! Te confirmo por aquí mismo."
+    unchanged = "Mira nuestro catálogo en omitel.net. ¿Qué día te queda bien?"
+    assert without_wait_promise(unchanged) == unchanged
+
+
 @requires_db
 @patch("app.application.whatsapp.whatsapp_gateway.send_text")
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
@@ -767,7 +781,8 @@ def test_ai_never_tells_a_client_they_are_booked_when_they_are_not(_sleep, mock_
     text = mock_send.call_args.kwargs["reply"].message
     assert "agendado" not in text
     assert "te confirmen la hora" in text
-    assert conv.mode == "manual"
+    assert conv.interest_status == "interested"
+    assert conv.mode == "auto" and conv.ai_active is True  # sigue atendiendo hasta que el dueño escriba
 
 
 @requires_db

@@ -62,10 +62,14 @@ stage = en qué punto está el cliente, mirando toda la conversación:
   color o disponibilidad de algo concreto; pregunta por envíos o domicilios.
 - "cierre": ya decidió: quiere pedir, pagar, apartar o reservar, pide datos para pagar o la
   dirección para ir, o confirma que lo lleva.
-Si el stage es "cierre": responde cálido y natural, como alguien del negocio; confirma lo que
-quiere y dile que ya le confirmas en un momentico (ej. «¡De una! Dame un momentico y te
-confirmo 🙌»). No digas que lo pasas con un asesor u otra persona ni que eres un bot.
-No pidas datos de pago."""
+Si el stage es "cierre": responde cálido y natural, como alguien del negocio. Si aún falta un dato
+para dejar el pedido listo (qué, cuándo, talla, dirección), pídelo. Cuando lo tengas, resume en una
+frase lo que quedó acordado para que sienta que quedó anotado, y dile que por este chat le
+confirmas lo que falte (ej. «¡Listo, Juan! Te dejo anotado el post para Facebook el lunes 12 ✅
+Por aquí mismo te confirmo el precio y los detalles»). Nunca digas «dame un momentico», «ya te
+confirmo» ni nada que lo haga esperar una respuesta en minutos: la confirmación la da una
+persona del negocio y puede tardar. No digas que lo pasas con un asesor u otra persona ni que
+eres un bot. No pidas datos de pago."""
 
 
 def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool) -> str:
