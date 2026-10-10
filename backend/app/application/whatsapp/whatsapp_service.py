@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from sqlalchemy.orm import Session
 
@@ -51,9 +53,52 @@ from app.application.whatsapp.whatsapp_gateway import (
     uses_waha,
 )
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
+from app.infrastructure.cache.redis_client import get_redis
 
 # Alias para compatibilidad con handlers que capturan EvolutionAPIError
 EvolutionAPIError = WhatsAppGatewayError
+
+CONNECT_LOCK_TTL_SECONDS = 120
+CONNECT_LOCK_WAIT_SECONDS = 60
+
+
+@contextmanager
+def whatsapp_connect_lock(tenant_id: uuid.UUID) -> Iterator[bool]:
+    """Una sola vinculación a la vez por negocio.
+
+    Entrega False si otra petición ya estaba generando el QR: se espera a que termine y
+    se usa su resultado, en vez de borrar y recrear la instancia dos veces en paralelo.
+    """
+    key = f"wa:connect_lock:{tenant_id}"
+    token = uuid.uuid4().hex
+    try:
+        redis = get_redis()
+        acquired = bool(redis.set(key, token, nx=True, ex=CONNECT_LOCK_TTL_SECONDS))
+    except Exception:
+        log.warning("Sin Redis para el candado de conexión tenant=%s", tenant_id, exc_info=True)
+        yield True
+        return
+
+    if not acquired:
+        deadline = time.monotonic() + CONNECT_LOCK_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                if not redis.exists(key):
+                    break
+            except Exception:
+                break
+            time.sleep(0.5)
+        yield False
+        return
+
+    try:
+        yield True
+    finally:
+        try:
+            if redis.get(key) in (token, token.encode()):
+                redis.delete(key)
+        except Exception:
+            pass
 
 
 def _trusted_lid_alt_phone(
@@ -359,6 +404,9 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
         pass
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         return session
+    # Lo que sigue son varios segundos de llamadas a Evolution: sin soltar las filas del
+    # negocio y la sesión, el webhook y el sondeo de estado se cruzan con esta transacción.
+    db.commit()
 
     try:
         if not gateway_instance_exists(session.instance_name):

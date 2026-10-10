@@ -243,6 +243,39 @@ def test_connect_whatsapp_returns_qr(
     assert body["qr_base64"] is not None
 
 
+@requires_db
+def test_second_connect_waits_for_the_first_instead_of_recreating_the_instance(
+    client: TestClient, monkeypatch
+):
+    from app.infrastructure.cache.redis_client import get_redis
+
+    auth = client.post(
+        "/api/v1/auth/register",
+        json={
+            "business_name": "Doble clic",
+            "owner_name": "Owner",
+            "email": f"dbl-{uuid.uuid4().hex[:8]}@test.com",
+            "password": "password123",
+            "accept_legal": True,
+        },
+    )
+    if auth.status_code == 503:
+        pytest.skip("Plan no disponible")
+    headers = {"Authorization": f"Bearer {auth.json()['access_token']}"}
+    tenant_id = client.get("/api/v1/tenants/me", headers=headers).json()["id"]
+
+    get_redis().set(f"wa:connect_lock:{tenant_id}", "otra-peticion", ex=1)
+
+    def _must_not_run(*_args, **_kwargs):
+        raise AssertionError("la segunda petición no debe recrear la instancia")
+
+    monkeypatch.setattr("app.presentation.api.whatsapp.start_connection", _must_not_run)
+
+    response = client.post("/api/v1/whatsapp/connect", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["instance_name"]
+
+
 def test_evolution_webhook_base_url_native_evolution_uses_127():
     from app.config import Settings
 

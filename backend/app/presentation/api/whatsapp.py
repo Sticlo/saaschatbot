@@ -29,6 +29,7 @@ from app.application.whatsapp.whatsapp_service import (
     reconnect_session,
     refresh_session_status,
     start_connection,
+    whatsapp_connect_lock,
 )
 
 log = logging.getLogger(__name__)
@@ -77,12 +78,38 @@ def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
     )
 
 
+def _connect_response(session: WhatsAppSession) -> WhatsAppConnectResponse:
+    return WhatsAppConnectResponse(
+        instance_name=session.instance_name,
+        status=session.status,
+        qr_base64=session.qr_base64,
+        qr_updated_at=session.qr_updated_at,
+        phone_number=session.phone_number,
+    )
+
+
+def _result_of_concurrent_connect(db: Session, tenant_id: uuid.UUID) -> WhatsAppConnectResponse:
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    session = get_or_create_session(db, tenant)
+    db.commit()
+    return _connect_response(session)
+
+
 @router.post("/connect", response_model=WhatsAppConnectResponse)
 def connect_whatsapp(
     request: Request,
     current: RequireViewer,
     db: Session = Depends(get_db),
 ):
+    with whatsapp_connect_lock(current.tenant_id) as owns_connect:
+        if not owns_connect:
+            return _result_of_concurrent_connect(db, current.tenant_id)
+        return _connect_whatsapp(request, current, db)
+
+
+def _connect_whatsapp(request: Request, current, db: Session) -> WhatsAppConnectResponse:
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
@@ -109,13 +136,7 @@ def connect_whatsapp(
 
         ensure_evolution_webhook(session, tenant.id, force=True)
 
-    return WhatsAppConnectResponse(
-        instance_name=session.instance_name,
-        status=session.status,
-        qr_base64=session.qr_base64,
-        qr_updated_at=session.qr_updated_at,
-        phone_number=session.phone_number,
-    )
+    return _connect_response(session)
 
 
 @router.post("/reconnect", response_model=WhatsAppConnectResponse)
@@ -125,6 +146,13 @@ def reconnect_whatsapp(
     db: Session = Depends(get_db),
 ):
     """Regenera QR cuando la sesión cayó (desconectado, restringido o baneado)."""
+    with whatsapp_connect_lock(current.tenant_id) as owns_connect:
+        if not owns_connect:
+            return _result_of_concurrent_connect(db, current.tenant_id)
+        return _reconnect_whatsapp(request, current, db)
+
+
+def _reconnect_whatsapp(request: Request, current, db: Session) -> WhatsAppConnectResponse:
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
@@ -144,13 +172,7 @@ def reconnect_whatsapp(
         db.rollback()
         raise _gateway_http_error(exc) from exc
 
-    return WhatsAppConnectResponse(
-        instance_name=session.instance_name,
-        status=session.status,
-        qr_base64=session.qr_base64,
-        qr_updated_at=session.qr_updated_at,
-        phone_number=session.phone_number,
-    )
+    return _connect_response(session)
 
 
 @router.get("/status", response_model=WhatsAppStatusResponse)

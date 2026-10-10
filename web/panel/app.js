@@ -934,7 +934,20 @@
     err.classList.remove("hidden");
   }
 
-  async function connectWhatsApp() {
+  let waConnectInFlight = null;
+
+  function connectWhatsApp() {
+    if (waConnectInFlight) {
+      $("qr-modal").classList.remove("hidden");
+      return waConnectInFlight;
+    }
+    waConnectInFlight = requestWhatsAppQr().finally(() => {
+      waConnectInFlight = null;
+    });
+    return waConnectInFlight;
+  }
+
+  async function requestWhatsAppQr() {
     if (!state.user) {
       const check = await probeSession(5000);
       if (check.user) {
