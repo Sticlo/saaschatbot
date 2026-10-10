@@ -52,6 +52,8 @@
     aiNoticeTimer: null,
   };
 
+  const tour = { active: false, autoChecked: false, steps: [], index: 0, root: null, target: null, cleanup: null, raf: 0 };
+
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
   const mediaCache = new Map();
   let pendingImage = null; // foto pegada o adjunta en el chat, antes de enviarla
@@ -486,6 +488,8 @@
     $("user-label").textContent = "";
     setChatListTab("all");
     updateInterestedBadge();
+    endTour({ remember: false });
+    tour.autoChecked = false;
     renderOnboarding();
   }
 
@@ -887,7 +891,8 @@
     const needsConnect = !connected;
 
     $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect);
-    syncWaSetupVisibility();
+    $("wa-setup")?.classList.toggle("hidden", !needsConnect);
+    if (connected && currentTourStep()?.key === "wa") tourGo(tour.index + 1);
     const dropped = needsConnect && state.conversations.length > 0;
     const setupTitle = $("wa-setup-title");
     if (setupTitle) {
@@ -1102,146 +1107,357 @@
     setTimeout(() => tab.classList.remove("tab-pulse"), 2400);
   }
 
-  function guideStorageKey() {
-    return `omitel_guide_hidden:${state.tenant?.id || state.user?.tenant_id || ""}`;
+  function tourStorageKey() {
+    return `omitel_tour_done:${state.tenant?.id || state.user?.tenant_id || ""}`;
   }
 
   function canSeeGuide() {
     return !!state.user && state.canManageGlobal && state.onboarding.alertCount !== null;
   }
 
-  function isGuideVisible() {
-    return canSeeGuide() && localStorage.getItem(guideStorageKey()) !== "1";
-  }
-
-  function syncWaSetupVisibility() {
-    const needsConnect = state.wa.status !== "connected";
-    const dropped = needsConnect && (state.onboarding.totalChats || state.conversations.length) > 0;
-    $("wa-setup")?.classList.toggle("hidden", !needsConnect || (isGuideVisible() && !dropped));
-  }
-
-  function openAlertSettings() {
-    switchPanelMode("ai");
-    setTimeout(() => $("alert-recipients")?.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
-  }
-
-  function onboardingSteps() {
+  function setupIncomplete() {
     const p = state.aiProfile || {};
-    const o = state.onboarding;
-    const steps = [
-      {
-        title: "Conecta tu WhatsApp",
-        text: "En tu celular abre WhatsApp › Dispositivos vinculados y escanea el código QR.",
-        done: state.wa.status === "connected",
-        action: state.canConnectWa ? "Mostrar código QR" : null,
-        run: connectWhatsApp,
-      },
-      {
-        title: "Cuéntale a la IA de tu negocio",
-        text: "Qué vendes, precios y horario. Así responde como tú y no se inventa nada.",
-        done: !p.business_name_is_placeholder && !!p.industry?.trim() && !!p.products_services?.trim(),
-        action: "Completar",
-        run: () => switchPanelMode("ai"),
-      },
-      {
-        title: "Pon tu número para las alertas",
-        text: "Te escribimos a tu WhatsApp personal cuando alguien quiere comprar, para que cierres tú la venta.",
-        done: o.alertCount > 0,
-        action: "Agregar mi número",
-        run: openAlertSettings,
-      },
-    ];
-    if (o.bookingAllowed !== false) {
-      steps.push({
-        title: "¿Das citas? Deja que la IA agende",
-        text: "Pon tu horario y activa «La IA agenda citas sola». Si no manejas citas, sáltate este paso.",
-        done: !!o.bookingEnabled,
-        optional: true,
-        action: "Configurar citas",
-        run: () => switchPanelMode("appointments"),
-      });
-    }
-    steps.push({
-      title: "Haz una prueba",
-      text: "Pídele a alguien que le escriba a tu WhatsApp como si fuera un cliente y mira aquí cómo responde la IA.",
-      done: o.totalChats > 0,
-    });
-    return steps;
+    return (
+      state.wa.status !== "connected" ||
+      !p.industry?.trim() ||
+      !p.products_services?.trim() ||
+      !(state.onboarding.alertCount > 0)
+    );
   }
 
   function renderOnboarding() {
-    const card = $("onboarding-card");
-    const guideBtn = $("guide-btn");
-    if (!card) return;
-    guideBtn?.classList.toggle("hidden", !canSeeGuide());
-    const visible = isGuideVisible();
-    card.classList.toggle("hidden", !visible);
-    syncWaSetupVisibility();
-    if (!visible) {
-      card.innerHTML = "";
-      return;
-    }
-
-    const steps = onboardingSteps();
-    const required = steps.filter((s) => !s.optional);
-    const doneCount = required.filter((s) => s.done).length;
-    const allDone = doneCount === required.length;
-    const nextIndex = steps.findIndex((s) => !s.done && !s.optional);
-
-    card.innerHTML = `
-      <div class="onboarding-head">
-        <div>
-          <h3>${allDone ? "¡Listo! Tu IA ya está atendiendo" : "Primeros pasos"}</h3>
-          <p class="muted small">${doneCount} de ${required.length} listos</p>
-        </div>
-        <button type="button" class="onboarding-close" data-guide-hide title="Ocultar guía" aria-label="Ocultar guía">×</button>
-      </div>
-      <div class="onboarding-progress" aria-hidden="true"><span style="width:${Math.round((doneCount / required.length) * 100)}%"></span></div>
-      <ul class="onboarding-how">
-        <li><span>💬</span><span>La IA le responde sola a tus clientes, a cualquier hora.</span></li>
-        <li><span>🔥</span><span>Cuando alguien quiere comprar o agendar, te avisa y lo marca como <strong>Interesado</strong>.</span></li>
-        <li><span>🙋</span><span>Apenas le escribes a ese cliente, la IA se aparta para que cierres tú.</span></li>
-      </ul>
-      <ol class="onboarding-steps">
-        ${steps
-          .map(
-            (s, i) => `
-          <li class="onboarding-step${s.done ? " done" : ""}${i === nextIndex ? " next" : ""}">
-            <span class="onboarding-check" aria-hidden="true">${s.done ? "✓" : i + 1}</span>
-            <div class="onboarding-step-body">
-              <strong>${escapeHtml(s.title)}${s.optional ? ' <em class="muted">· opcional</em>' : ""}</strong>
-              ${s.done ? "" : `<p class="muted small">${escapeHtml(s.text)}</p>`}
-            </div>
-            ${!s.done && s.action ? `<button type="button" class="btn ${i === nextIndex ? "primary" : "ghost"} small" data-guide-step="${i}">${escapeHtml(s.action)}</button>` : ""}
-          </li>`
-          )
-          .join("")}
-      </ol>
-      ${allDone ? '<button type="button" class="btn ghost small onboarding-done-btn" data-guide-hide>Ocultar guía</button>' : ""}
-    `;
-    card.querySelectorAll("[data-guide-step]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        steps[Number(btn.dataset.guideStep)]?.run?.();
-      });
-    });
-    card.querySelectorAll("[data-guide-hide]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        localStorage.setItem(guideStorageKey(), "1");
-        renderOnboarding();
-      });
-    });
+    $("guide-btn")?.classList.toggle("hidden", !canSeeGuide());
+    if (tour.active || tour.autoChecked || !canSeeGuide()) return;
+    tour.autoChecked = true;
+    if (localStorage.getItem(tourStorageKey()) === "1" || !setupIncomplete()) return;
+    setTimeout(() => {
+      if (!tour.active && $("qr-modal")?.classList.contains("hidden") !== false) startTour();
+    }, 700);
   }
 
-  function showGuide() {
-    localStorage.removeItem(guideStorageKey());
+  function fieldStep(id, title, text) {
+    return {
+      key: id,
+      mode: "ai",
+      target: () => $(id)?.closest(".ai-step"),
+      focus: () => $(id),
+      title,
+      text,
+      done: () => !!$(id)?.value?.trim(),
+    };
+  }
+
+  function buildTourSteps() {
+    const steps = [
+      {
+        key: "hello",
+        title: "¡Hola! Soy Omi, tu guía 👋",
+        text: "En un par de minutos dejamos tu IA lista para atender y venderle a tus clientes. Yo te voy marcando qué tocar y qué llenar.",
+        next: "Empezar",
+      },
+    ];
+    if (state.wa.status !== "connected" && state.canConnectWa) {
+      steps.push({
+        key: "wa",
+        mode: "chats",
+        target: () => $("wa-connect-btn"),
+        title: "Primero, conecta tu WhatsApp",
+        text: "Toca «Conectar WhatsApp». En tu celular abre WhatsApp › Dispositivos vinculados › Vincular dispositivo y escanea el código que aparece.",
+        hint: "Cuando quede conectado sigo solo. Si prefieres hacerlo después, toca Siguiente.",
+      });
+    }
+    steps.push(
+      {
+        key: "mode-ai",
+        mode: "chats",
+        target: () => $("mode-ai"),
+        title: "Ahora, cuéntale de tu negocio",
+        text: "La IA solo sabe lo que tú le cuentes. Toca «Personalizar IA».",
+        advanceOnClick: true,
+      },
+      fieldStep("biz-name", "¿Cómo se llama tu negocio?", "Escríbelo tal cual lo conocen tus clientes. Así se va a presentar la IA."),
+      fieldStep("biz-industry", "¿A qué te dedicas?", "Una frase corta. Por ejemplo: «peluquería», «restaurante de comida rápida» o «tienda de ropa»."),
+      fieldStep("biz-products", "¿Qué vendes?", "Lo que más te piden, con detalles. Entre más le cuentes, mejor responde."),
+      fieldStep("biz-prices", "¿Cuánto cuesta?", "Precios o rangos. Si no los pones, la IA dice que te confirma, pero nunca inventa un valor."),
+      fieldStep("biz-hours", "¿Dónde estás y cuándo atiendes?", "Ciudad o barrio y tu horario. Por ejemplo: «Laureles, lun a sáb 9am-7pm»."),
+      {
+        key: "biz-save",
+        mode: "ai",
+        target: () => $("biz-save-btn"),
+        title: "Guarda tu negocio",
+        text: "Las demás preguntas son opcionales. Toca «Guardar mi negocio» y la IA empieza a responder con esto.",
+        advanceOnClick: true,
+      },
+      {
+        key: "alerts",
+        mode: "ai",
+        target: () => $("alert-recipients"),
+        focus: () => $("alert-recipients")?.querySelector("input[type=tel], input[type=text], input"),
+        title: "Tu WhatsApp para las alertas",
+        text: "Escribe tu número personal, no el del negocio. Cuando un cliente quiera comprar te escribimos ahí para que cierres tú la venta.",
+        done: () => state.onboarding.alertCount > 0,
+      },
+      {
+        key: "alerts-save",
+        mode: "ai",
+        target: () => $("alert-save-btn"),
+        title: "Guarda las alertas",
+        text: "Toca «Guardar alertas». Con «Enviar prueba» puedes ver cómo te llegan.",
+        advanceOnClick: true,
+      }
+    );
+    if (state.onboarding.bookingAllowed !== false) {
+      steps.push(
+        {
+          key: "citas-ask",
+          mode: "ai",
+          target: () => $("mode-appointments"),
+          title: "¿Trabajas con citas?",
+          text: "Peluquería, consultorio, spa, clases… Si das citas, la IA puede agendarlas sola, sin preguntarte.",
+          next: "Sí, doy citas",
+          secondary: { label: "No, vendo productos", goTo: "tabs" },
+          advanceOnClick: true,
+        },
+        {
+          key: "citas",
+          mode: "appointments",
+          target: () => document.querySelector(".appointments-schedule-card"),
+          title: "Tu horario y la agenda automática",
+          text: "Pon a qué hora abres, a qué hora cierras y cuánto dura cada cita. Activa «La IA agenda citas sola» y toca «Guardar horario».",
+          done: () => !!state.onboarding.bookingEnabled,
+        }
+      );
+    }
+    steps.push(
+      {
+        key: "tabs",
+        mode: "chats",
+        target: () => document.querySelector(".chat-tabs"),
+        title: "Aquí llegan tus clientes",
+        text: "En «Todos» ves cada chat. En «Interesados» solo los que quieren comprar: atiéndelos primero. Apenas les escribes, la IA se aparta.",
+      },
+      {
+        key: "bye",
+        title: "¡Listo! 🎉",
+        text: "Pídele a un amigo que le escriba a tu WhatsApp como si fuera un cliente y mira aquí cómo responde la IA. Para repetir este recorrido, toca «Guía» arriba.",
+        next: "Terminar",
+      }
+    );
+    return steps;
+  }
+
+  function ensureTourRoot() {
+    if (tour.root) return tour.root;
+    const root = document.createElement("div");
+    root.className = "tour hidden";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-labelledby", "tour-title");
+    root.innerHTML = `
+      <div class="tour-backdrop"></div>
+      <div class="tour-ring" aria-hidden="true"></div>
+      <div class="tour-pop">
+        <div class="tour-pop-head">
+          <span class="tour-avatar" aria-hidden="true">O</span>
+          <span class="tour-who">Omi · tu guía</span>
+          <span class="tour-count"></span>
+        </div>
+        <h3 id="tour-title" class="tour-title"></h3>
+        <p class="tour-text"></p>
+        <p class="tour-done hidden">✓ Ya está listo. Revísalo si quieres y sigue.</p>
+        <p class="tour-hint"></p>
+        <div class="tour-progress" aria-hidden="true"><span></span></div>
+        <div class="tour-actions">
+          <button type="button" class="tour-skip">Saltar guía</button>
+          <span class="tour-spacer"></span>
+          <button type="button" class="btn ghost small tour-back">Atrás</button>
+          <button type="button" class="btn ghost small tour-secondary hidden"></button>
+          <button type="button" class="btn primary small tour-next">Siguiente</button>
+        </div>
+      </div>`;
+    document.body.appendChild(root);
+    root.querySelector(".tour-skip").addEventListener("click", () => endTour());
+    root.querySelector(".tour-back").addEventListener("click", () => tourGo(tour.index - 1));
+    root.querySelector(".tour-next").addEventListener("click", () => tourGo(tour.index + 1));
+    root.querySelector(".tour-secondary").addEventListener("click", () => {
+      const goTo = tour.steps[tour.index]?.secondary?.goTo;
+      const i = tour.steps.findIndex((s) => s.key === goTo);
+      tourGo(i >= 0 ? i : tour.index + 1);
+    });
+    root.querySelector(".tour-backdrop").addEventListener("click", () => {
+      const pop = root.querySelector(".tour-pop");
+      pop.classList.remove("tour-nudge");
+      void pop.offsetWidth;
+      pop.classList.add("tour-nudge");
+    });
+    tour.root = root;
+    return root;
+  }
+
+  function startTour() {
+    if (!canSeeGuide()) return;
     if (state.activeId) {
       state.activeId = null;
       renderConversationList();
     }
-    switchPanelMode("chats");
-    renderOnboarding();
-    $("onboarding-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    tour.steps = buildTourSteps();
+    tour.active = true;
+    ensureTourRoot().classList.remove("hidden");
+    document.addEventListener("keydown", onTourKey);
+    window.addEventListener("resize", scheduleTourLayout);
+    window.addEventListener("scroll", scheduleTourLayout, true);
+    tourGo(0);
+  }
+
+  function endTour({ remember = true } = {}) {
+    if (!tour.active) return;
+    tour.active = false;
+    tour.cleanup?.();
+    tour.cleanup = null;
+    tour.target = null;
+    tour.root?.classList.add("hidden");
+    document.removeEventListener("keydown", onTourKey);
+    window.removeEventListener("resize", scheduleTourLayout);
+    window.removeEventListener("scroll", scheduleTourLayout, true);
+    if (remember) localStorage.setItem(tourStorageKey(), "1");
+  }
+
+  function onTourKey(e) {
+    if (e.key === "Escape" && $("qr-modal")?.classList.contains("hidden")) endTour();
+  }
+
+  function currentTourStep() {
+    return tour.active ? tour.steps[tour.index] : null;
+  }
+
+  function tourGo(index) {
+    if (!tour.active) return;
+    if (index >= tour.steps.length) {
+      endTour();
+      return;
+    }
+    tour.index = Math.max(0, index);
+    const step = tour.steps[tour.index];
+    tour.cleanup?.();
+    tour.cleanup = null;
+
+    if (step.mode && state.panelMode !== step.mode) switchPanelMode(step.mode);
+
+    const root = tour.root;
+    const total = tour.steps.length;
+    root.querySelector(".tour-count").textContent = `${tour.index + 1} de ${total}`;
+    root.querySelector(".tour-title").textContent = step.title;
+    root.querySelector(".tour-text").textContent = step.text;
+    const hint = root.querySelector(".tour-hint");
+    hint.textContent = step.hint || "";
+    hint.classList.toggle("hidden", !step.hint);
+    root.querySelector(".tour-done").classList.toggle("hidden", !step.done?.());
+    root.querySelector(".tour-progress span").style.width = `${Math.round(((tour.index + 1) / total) * 100)}%`;
+    root.querySelector(".tour-back").classList.toggle("hidden", tour.index === 0);
+    root.querySelector(".tour-skip").classList.toggle("hidden", tour.index === total - 1);
+    root.querySelector(".tour-next").textContent = step.next || "Siguiente";
+    const secondary = root.querySelector(".tour-secondary");
+    secondary.textContent = step.secondary?.label || "";
+    secondary.classList.toggle("hidden", !step.secondary);
+    const pop = root.querySelector(".tour-pop");
+    pop.classList.remove("tour-pop-in");
+    void pop.offsetWidth;
+    pop.classList.add("tour-pop-in");
+
+    setTimeout(() => {
+      if (!tour.active || tour.steps[tour.index] !== step) return;
+      const el = step.target?.() || null;
+      tour.target = el && el.getClientRects().length ? el : null;
+      if (tour.target) {
+        const r = tour.target.getBoundingClientRect();
+        if (r.top < 70 || r.bottom > window.innerHeight - 40) {
+          tour.target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+        }
+        if (step.advanceOnClick) {
+          const target = tour.target;
+          const onClick = () => setTimeout(() => {
+            if (tour.active && tour.steps[tour.index] === step) tourGo(tour.index + 1);
+          }, 120);
+          target.addEventListener("click", onClick);
+          tour.cleanup = () => target.removeEventListener("click", onClick);
+        }
+        const input = step.focus?.();
+        if (input) setTimeout(() => input.focus({ preventScroll: true }), 350);
+      }
+      layoutTour();
+      setTimeout(() => {
+        if (tour.steps[tour.index] !== step) return;
+        layoutTour();
+        root.querySelector(".tour-done").classList.toggle("hidden", !step.done?.());
+      }, 450);
+      if (!step.focus) root.querySelector(".tour-next").focus({ preventScroll: true });
+    }, 30);
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function scheduleTourLayout() {
+    if (!tour.active || tour.raf) return;
+    tour.raf = requestAnimationFrame(() => {
+      tour.raf = 0;
+      layoutTour();
+    });
+  }
+
+  function layoutTour() {
+    if (!tour.active || !tour.root) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const pad = 8;
+    let hole = { x: W / 2, y: H / 2, w: 0, h: 0, r: 0 };
+    if (tour.target) {
+      const r = tour.target.getBoundingClientRect();
+      hole = { x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2, r: 12 };
+    }
+    const { x, y, w, h } = hole;
+    const rr = Math.min(hole.r, w / 2, h / 2);
+    const path =
+      `M0 0H${W}V${H}H0Z ` +
+      `M${x + rr} ${y}H${x + w - rr}A${rr} ${rr} 0 0 1 ${x + w} ${y + rr}` +
+      `V${y + h - rr}A${rr} ${rr} 0 0 1 ${x + w - rr} ${y + h}` +
+      `H${x + rr}A${rr} ${rr} 0 0 1 ${x} ${y + h - rr}` +
+      `V${y + rr}A${rr} ${rr} 0 0 1 ${x + rr} ${y}Z`;
+    tour.root.querySelector(".tour-backdrop").style.clipPath = `path(evenodd, "${path}")`;
+
+    const ring = tour.root.querySelector(".tour-ring");
+    ring.classList.toggle("hidden", !tour.target);
+    Object.assign(ring.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+
+    const pop = tour.root.querySelector(".tour-pop");
+    const pw = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+    const gap = 16;
+    const margin = 12;
+    let left;
+    let top;
+    if (!tour.target) {
+      left = (W - pw) / 2;
+      top = (H - ph) / 2;
+    } else if (y + h + gap + ph <= H - margin) {
+      left = x + w / 2 - pw / 2;
+      top = y + h + gap;
+    } else if (y - gap - ph >= margin) {
+      left = x + w / 2 - pw / 2;
+      top = y - gap - ph;
+    } else if (x + w + gap + pw <= W - margin) {
+      left = x + w + gap;
+      top = y + h / 2 - ph / 2;
+    } else if (x - gap - pw >= margin) {
+      left = x - gap - pw;
+      top = y + h / 2 - ph / 2;
+    } else {
+      left = (W - pw) / 2;
+      top = H - ph - margin;
+    }
+    pop.style.left = `${Math.round(Math.min(Math.max(left, margin), W - pw - margin))}px`;
+    pop.style.top = `${Math.round(Math.min(Math.max(top, margin), H - ph - margin))}px`;
   }
 
   async function loadOnboardingStatus() {
@@ -3556,7 +3772,7 @@
   });
   $("guide-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    showGuide();
+    startTour();
   });
   $("wa-disconnect-btn").addEventListener("click", async () => {
     if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel.")) return;

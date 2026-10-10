@@ -728,127 +728,137 @@ textarea { resize: vertical; min-height: 44px; }
   justify-content: safe center;
 }
 
-/* —— Guía de primeros pasos —— */
-.onboarding-card {
-  width: 100%;
-  max-width: 560px;
+/* —— Recorrido guiado —— */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.tour.hidden { display: none; }
+
+.tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 10, 14, 0.72);
+  pointer-events: auto;
+  transition: clip-path 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.tour-ring {
+  position: absolute;
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent);
+  pointer-events: none;
+  transition: left 0.35s cubic-bezier(0.23, 1, 0.32, 1), top 0.35s cubic-bezier(0.23, 1, 0.32, 1),
+    width 0.35s cubic-bezier(0.23, 1, 0.32, 1), height 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+  animation: tour-ring-pulse 1.8s ease-in-out infinite;
+}
+
+.tour-ring.hidden { display: none; }
+
+@keyframes tour-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); }
+  50% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 11px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.tour-pop {
+  position: absolute;
+  width: min(360px, calc(100vw - 24px));
   background: var(--surface);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 1.25rem 1.35rem 1.1rem;
-  text-align: left;
+  padding: 1rem 1.1rem 0.9rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  transition: left 0.35s cubic-bezier(0.23, 1, 0.32, 1), top 0.35s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.empty-state .wa-setup:not(.hidden) + .onboarding-card:not(.hidden) { margin-top: 1.5rem; }
+.tour-pop-in { animation: tour-pop-in 0.22s cubic-bezier(0.23, 1, 0.32, 1); }
 
-.onboarding-head {
+@keyframes tour-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+
+.tour-nudge { animation: tour-nudge 0.32s ease; }
+
+@keyframes tour-nudge {
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+.tour-pop-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
 }
 
-.onboarding-head h3 { margin: 0; color: var(--text); font-size: 1.05rem; }
-.onboarding-head p { margin: 0.15rem 0 0; }
-
-.onboarding-close {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 1.35rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0.1rem 0.35rem;
-  border-radius: 8px;
+.tour-avatar {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
 }
 
-.onboarding-close:hover { color: var(--text); background: var(--surface2); }
+.tour-who { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.tour-count { margin-left: auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.onboarding-progress {
-  height: 6px;
-  margin: 0.75rem 0 1rem;
+.tour-title { margin: 0 0 0.35rem; font-size: 1.05rem; line-height: 1.3; }
+.tour-text { margin: 0; font-size: 0.9rem; line-height: 1.5; }
+.tour-hint { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
+.tour-hint.hidden, .tour-done.hidden { display: none; }
+.tour-done { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--accent); font-weight: 600; }
+
+.tour-progress {
+  height: 4px;
+  margin: 0.9rem 0 0.75rem;
   border-radius: 999px;
   background: var(--surface2);
   overflow: hidden;
 }
 
-.onboarding-progress span {
+.tour-progress span {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: inherit;
-  transition: width 0.4s ease;
+  transition: width 0.35s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.onboarding-how {
-  list-style: none;
-  margin: 0 0 1rem;
-  padding: 0.75rem 0.9rem;
-  border-radius: 12px;
-  background: var(--surface2);
-  display: grid;
-  gap: 0.45rem;
-  font-size: 0.875rem;
-  color: var(--text);
-}
-
-.onboarding-how li { display: flex; gap: 0.55rem; align-items: baseline; }
-.onboarding-how li span:first-child { flex-shrink: 0; }
-
-.onboarding-steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.onboarding-step {
+.tour-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0.65rem;
-  border-radius: 12px;
-  border: 1px solid transparent;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
-.onboarding-step.next {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-}
+.tour-spacer { flex: 1; }
+.tour-actions .btn { width: auto; }
+.tour-actions .hidden { display: none; }
 
-.onboarding-check {
-  flex-shrink: 0;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: 1.5px solid var(--border);
+.tour-skip {
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
   color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
-.onboarding-step.next .onboarding-check { border-color: var(--accent); color: var(--accent); }
+.tour-skip:hover { color: var(--text); }
 
-.onboarding-step.done .onboarding-check {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.onboarding-step-body { flex: 1; min-width: 0; }
-.onboarding-step-body strong { color: var(--text); font-size: 0.9rem; font-weight: 600; }
-.onboarding-step-body em { font-style: normal; font-weight: 400; font-size: 0.8rem; }
-.onboarding-step-body p { margin: 0.15rem 0 0; }
-.onboarding-step.done .onboarding-step-body strong { color: var(--muted); font-weight: 500; }
-.onboarding-step .btn { flex-shrink: 0; white-space: nowrap; width: auto; }
-.onboarding-done-btn { margin-top: 0.75rem; }
-
-@media (max-width: 520px) {
-  .onboarding-step { flex-wrap: wrap; }
-  .onboarding-step .btn { margin-left: 2.35rem; }
+@media (prefers-reduced-motion: reduce) {
+  .tour-backdrop, .tour-ring, .tour-pop, .tour-progress span { transition: none; }
+  .tour-ring, .tour-pop-in, .tour-nudge { animation: none; }
 }
 
 /* —— Resultados: lo que la IA le generó al negocio —— */
@@ -858,7 +868,7 @@ textarea { resize: vertical; min-height: 44px; }
 }
 
 .empty-state .results-slot { margin-top: 1.5rem; }
-.empty-state .wa-setup.hidden + .onboarding-card.hidden + .results-slot { margin-top: 0; }
+.empty-state .wa-setup.hidden + .results-slot { margin-top: 0; }
 .appointments-panel .results-slot { max-width: none; margin-bottom: 1rem; }
 
 .results-card {
