@@ -144,6 +144,13 @@ def test_evolution_posts_webhooks_through_the_internal_network():
     assert _prod_settings().evolution_webhook_base_url() == "https://app.omitel.net"
 
 
+def test_api_accepts_the_host_evolution_uses_for_webhooks():
+    hosts = _prod_settings(evolution_webhook_internal_url="http://api:8000").trusted_hosts()
+    assert "api" in hosts
+    assert "app.omitel.net" in hosts
+    assert "evil.example.com" not in hosts
+
+
 def test_oauth_session_cookie_is_set_on_the_panel_domain(monkeypatch):
     from app.config import settings
     from app.presentation.api import auth

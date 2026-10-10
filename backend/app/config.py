@@ -252,6 +252,8 @@ class Settings(BaseSettings):
             self.site_public_url,
             self.panel_public_url,
             self.wompi_checkout_redirect_url,
+            # Evolution llama a la API por la red interna de Docker (p. ej. http://api:8000).
+            self.evolution_webhook_base_url(),
         ):
             host = urlparse((url or "").strip()).hostname
             if host:
