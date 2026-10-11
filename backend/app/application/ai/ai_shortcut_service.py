@@ -54,7 +54,7 @@ STAGE_RANK = {STAGE_CHATTING: 0, STAGE_INTERESTED: 1, STAGE_CLOSING: 2}
 _REPLY_FORMAT = """
 
 Responde SOLO con JSON válido (sin markdown), exactamente con estas claves:
-{{"message":"tu respuesta al cliente","shortcut_id":null,"book_slot":null,"stage":"conversando"}}
+{{"message":"tu respuesta al cliente","shortcut_id":null,"book_slot":null,"stage":"conversando"{order_key}}}
 {key_rules}
 stage = en qué punto está el cliente, mirando toda la conversación:
 - "conversando": saluda, charla o pregunta en general; aún no muestra intención de compra.
@@ -62,7 +62,9 @@ stage = en qué punto está el cliente, mirando toda la conversación:
   color o disponibilidad de algo concreto; pregunta por envíos o domicilios.
 - "cierre": ya decidió: quiere pedir, pagar, apartar o reservar, pide datos para pagar o la
   dirección para ir, o confirma que lo lleva.
-Si el stage es "cierre": responde cálido y natural, como alguien del negocio. Si aún falta un dato
+{closing_rules}"""
+
+_HANDOFF_CLOSING = """Si el stage es "cierre": responde cálido y natural, como alguien del negocio. Si aún falta un dato
 para dejar el pedido listo (qué, cuándo, talla, dirección), pídelo. Cuando lo tengas, resume en una
 frase lo que quedó acordado para que sienta que quedó anotado, y dile que por este chat le
 confirmas lo que falte (ej. «¡Listo, Juan! Te dejo anotado el post para Facebook el lunes 12 ✅
@@ -71,8 +73,29 @@ confirmo» ni nada que lo haga esperar una respuesta en minutos: la confirmació
 persona del negocio y puede tardar. No digas que lo pasas con un asesor u otra persona ni que
 eres un bot. No pidas datos de pago."""
 
+_SELLING_CLOSING = """Si el stage es "cierre": cierra tú la venta, cálido y natural, como alguien del negocio:
+1. Confirma qué lleva (producto o servicio, variante o talla, cantidad) y el total, solo con precios
+   que estén en la información del negocio.
+2. Si hay que entregárselo, pide en un solo mensaje lo que falte: nombre, dirección, barrio y ciudad
+   (o si prefiere recoger, cuando el negocio tenga local).
+3. Compártele cómo pagar, tal cual está en «Cómo pagarle al negocio». Nunca inventes números de
+   cuenta, links ni medios de pago que no estén ahí.
+4. Cuando mande el comprobante, agradécele y dile que su pedido quedó registrado y qué sigue.
+Si algo no está en la información del negocio (un precio, si hay existencias, el costo del envío),
+no lo inventes ni lo adivines: dile «te confirmo por aquí apenas lo revise» y sigue con lo demás.
+No digas que lo pasas con un asesor u otra persona ni que eres un bot.
 
-def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool) -> str:
+order = null mientras el cliente no haya confirmado qué lleva. Cuando lo confirme y tengas cómo
+entregárselo, llénalo (y repítelo igual en las respuestas siguientes, actualizando lo que cambie):
+{"items":"2 camisetas negras talla M","total":"$120.000","customer":"Laura Gómez","delivery":"Cra 45 #10-20, Laureles, Medellín","payment":"Nequi","paid":false}
+- total: solo si sale de los precios del negocio; si no lo sabes, "".
+- delivery: dirección completa, o "recoge en el local".
+- payment: el medio que eligió; "" si aún no lo dice.
+- paid: true solo si ya mandó el comprobante o la foto de la transferencia.
+Para citas y reservas no uses order."""
+
+
+def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool, selling: bool = False) -> str:
     rules = []
     if not has_shortcuts:
         rules.append("- shortcut_id siempre null (no hay atajos).")
@@ -81,7 +104,11 @@ def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool) -> s
             "- book_slot siempre null. Si piden una cita o reserva, no la confirmes tú: es stage \"cierre\"."
         )
     key_rules = ("\n".join(rules) + "\n") if rules else ""
-    return _REPLY_FORMAT.format(key_rules=key_rules)
+    return _REPLY_FORMAT.format(
+        key_rules=key_rules,
+        order_key=',"order":null' if selling else "",
+        closing_rules=_SELLING_CLOSING if selling else _HANDOFF_CLOSING,
+    )
 
 _CATALOG_BLOCK = """
 Lo que sabes de los productos (sacado del catálogo/carta del negocio):
@@ -98,6 +125,47 @@ class AiGeneratedReply:
     shortcut_id: Optional[str] = None
     book_slot: Optional["BookSlotRequest"] = None
     stage: str = STAGE_CHATTING
+    order: Optional["OrderSummary"] = None
+
+
+@dataclass(frozen=True)
+class OrderSummary:
+    items: str
+    total: str = ""
+    customer: str = ""
+    delivery: str = ""
+    payment: str = ""
+    paid: bool = False
+
+
+_ORDER_FIELD_MAX = 300
+
+
+def parse_order(raw: Any) -> Optional[OrderSummary]:
+    if not isinstance(raw, dict):
+        return None
+
+    def field(key: str) -> str:
+        value = raw.get(key)
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value if v)
+        if value is None or isinstance(value, (dict, bool)):
+            return ""
+        text = " ".join(str(value).split())
+        return "" if text.lower() in {"null", "none"} else text[:_ORDER_FIELD_MAX]
+
+    items = field("items")
+    if not items:
+        return None
+    paid = raw.get("paid")
+    return OrderSummary(
+        items=items,
+        total=field("total"),
+        customer=field("customer"),
+        delivery=field("delivery"),
+        payment=field("payment"),
+        paid=paid is True or str(paid).strip().lower() == "true",
+    )
 
 
 def _preview_text(text: str) -> str:
@@ -283,7 +351,11 @@ def parse_ai_reply(
         stage = STAGE_CHATTING
 
     return AiGeneratedReply(
-        message=message, shortcut_id=shortcut_id, book_slot=book_slot, stage=stage
+        message=message,
+        shortcut_id=shortcut_id,
+        book_slot=book_slot,
+        stage=stage,
+        order=parse_order(data.get("order")),
     )
 
 

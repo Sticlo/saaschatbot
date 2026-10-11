@@ -44,6 +44,7 @@ from app.application.ai.ai_qualify_service import (
     detect_interest_signal,
     detect_purchase_intent,
     handoff_reply,
+    payment_methods_of,
 )
 from app.application.ai.ai_shortcut_service import (
     STAGE_CHATTING,
@@ -51,6 +52,7 @@ from app.application.ai.ai_shortcut_service import (
     STAGE_INTERESTED,
     STAGE_RANK,
     AiGeneratedReply,
+    OrderSummary,
     annotate_sent_shortcuts,
     asks_to_resend,
     infer_promised_shortcut,
@@ -127,6 +129,7 @@ HANDOFF_WAIT_TTL_SECONDS = 24 * 3600
 # La IA le dijo al cliente que el negocio le confirma: si el dueño no le escribe, se le recuerda.
 OWNER_CONFIRM_REMINDER_SECONDS = (5 * 60, 30 * 60)
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
+ORDER_ALERT_TTL_SECONDS = 12 * 3600
 BOOKING_TIP = (
     "\n\n💡 Te pidió una cita. Si activas «La IA agenda citas sola» en la sección Citas del panel, "
     "la IA revisa tus horarios libres y agenda sin preguntarte."
@@ -1179,6 +1182,7 @@ def _resolve_stage(
     message: Message,
     shortcuts: list[dict],
     booking: Optional[BookingContext],
+    selling: bool = False,
 ) -> str:
     """La IA lee toda la conversación; las palabras clave solo suben la etapa, nunca la bajan."""
     text = _turn_text(message)
@@ -1199,6 +1203,14 @@ def _resolve_stage(
         stage = _max_stage(stage, STAGE_INTERESTED)
     if scheduling and stage == STAGE_CLOSING:
         # Con agenda activa, quien pide cita la agenda la IA: no hace falta pasar el chat.
+        stage = STAGE_INTERESTED
+    if (
+        selling
+        and stage == STAGE_CLOSING
+        and reply.message != BOOKING_HANDOFF_MESSAGE
+        and not (booking is None and detect_scheduling_interest(text))
+    ):
+        # Con medios de pago la IA cierra la venta sola: el chat pasa al dueño solo si ella lo necesita.
         stage = STAGE_INTERESTED
     if promises_follow_up(reply.message):
         # Prometió escribir después y la IA no escribe sola: alguien tiene que cumplirlo.
@@ -1377,15 +1389,64 @@ def _deliver_reply(
             ),
             skip_phone=staff_phone,
         )
+    selling = bool(payment_methods_of(tenant.profile))
+    stage = _resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking, selling=selling)
+    if selling and reply.order is not None:
+        _alert_order(tenant, conversation, reply.order)
+        stage = _max_stage(stage, STAGE_INTERESTED)
     _apply_stage(
         db,
         tenant=tenant,
         conversation=conversation,
         message=message,
-        stage=_resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking),
+        stage=stage,
         booking_tip=_could_have_booked(tenant, message),
     )
     return True
+
+
+def _alert_order(tenant: Tenant, conversation: Conversation, order: OrderSummary) -> None:
+    """Un aviso cuando el pedido queda listo y otro cuando el cliente manda el comprobante."""
+    kind = "paid" if order.paid else "new"
+    if order.paid:
+        headline = f"💰 *{tenant.business_name}*: ¡pedido pagado! {_contact_label(conversation)} mandó el comprobante."
+    else:
+        headline = f"🛍️ *{tenant.business_name}*: la IA cerró un pedido de {_contact_label(conversation)}."
+    lines = [headline, "", f"• Pedido: {order.items}"]
+    if order.total:
+        lines.append(f"• Total: {order.total}")
+    if order.customer:
+        lines.append(f"• A nombre de: {order.customer}")
+    if order.delivery:
+        lines.append(f"• Entrega: {order.delivery}")
+    if order.paid:
+        via = f" por {order.payment}" if order.payment else ""
+        lines.append(f"• Pago{via}: revisa que te haya llegado antes de despachar ✅")
+    else:
+        lines.append(f"• Pago: {order.payment or 'aún no'} (pendiente del comprobante)")
+    lines += ["", _contact_line(conversation), f"Ver chat: {_panel_link()}"]
+    _send_sales_alert(
+        tenant,
+        key=f"ai:order_alert:{conversation.id}:{kind}",
+        ttl_seconds=ORDER_ALERT_TTL_SECONDS,
+        text="\n".join(lines),
+    )
+    if order.paid:
+        try:
+            # Si el pedido y el pago llegan en la misma respuesta, sobra el aviso de «pedido nuevo».
+            get_redis().set(f"ai:order_alert:{conversation.id}:new", "1", nx=True, ex=ORDER_ALERT_TTL_SECONDS)
+        except Exception:
+            pass
+    log.info("IA cerró pedido conv=%s pagado=%s", conversation.id, order.paid)
+    record_incident(
+        tenant.id,
+        "system.ai_order_paid" if order.paid else "system.ai_order_new",
+        f"{_contact_label(conversation)}: {'pagó' if order.paid else 'pidió'} {order.items}"
+        + (f" — {order.total}" if order.total else ""),
+        details={"conversation_id": str(conversation.id)},
+        throttle_seconds=ORDER_ALERT_TTL_SECONDS,
+        throttle_scope=f"{conversation.id}:{kind}",
+    )
 
 
 def _could_have_booked(tenant: Tenant, message: Message) -> bool:

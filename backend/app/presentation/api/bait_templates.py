@@ -91,6 +91,7 @@ def _profile_response(tenant: Tenant, profile) -> BusinessProfileResponse:
         location_hours=answers.get("location_hours"),
         tone=answers.get("tone"),
         restrictions=answers.get("restrictions"),
+        payment_methods=answers.get("payment_methods"),
         maps_prospect_business=answers.get("maps_prospect_business"),
         maps_prospect_city=answers.get("maps_prospect_city"),
         ai_system_prompt=profile.ai_system_prompt,
@@ -136,6 +137,7 @@ def update_business_profile(
         "location_hours",
         "tone",
         "restrictions",
+        "payment_methods",
         "maps_prospect_business",
         "maps_prospect_city",
     ):

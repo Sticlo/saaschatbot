@@ -10,7 +10,11 @@ from app.application.ai.ai_appointment_service import (
     append_appointment_instructions,
     valid_book_slot_keys,
 )
-from app.application.ai.ai_qualify_service import build_qualify_system_prompt
+from app.application.ai.ai_qualify_service import (
+    build_qualify_system_prompt,
+    payment_methods_block,
+    payment_methods_of,
+)
 from app.application.ai.ai_shortcut_service import (
     AiGeneratedReply,
     append_shortcuts_instructions,
@@ -158,9 +162,12 @@ def _complete_reply(
     shortcuts: list[dict],
     booking: Optional[BookingContext] = None,
     correction: str = "",
+    payment_methods: str = "",
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
+    if payment_methods:
+        system += payment_methods_block(payment_methods)
     system += date_context()
     if booking is not None:
         system = append_appointment_instructions(
@@ -172,7 +179,9 @@ def _complete_reply(
             extra_days=booking.extra_days,
         )
         book_keys = valid_book_slot_keys(booking.free_slots)
-    system += reply_format_instruction(has_shortcuts=bool(ids), booking_enabled=booking is not None)
+    system += reply_format_instruction(
+        has_shortcuts=bool(ids), booking_enabled=booking is not None, selling=bool(payment_methods)
+    )
     messages = [{"role": "system", "content": system + MEDIA_RULES + SAFETY_RULES}, *format_history(history)]
     if correction:
         # Al final pesa más que lo que la IA misma dijo antes en el chat.
@@ -207,7 +216,12 @@ def generate_qualify_reply(
         system += f"\n\nNombre del contacto: {contact_name}"
 
     return _complete_reply(
-        system=system, history=history, shortcuts=shortcut_rows, booking=booking, correction=correction
+        system=system,
+        history=history,
+        shortcuts=shortcut_rows,
+        booking=booking,
+        correction=correction,
+        payment_methods=payment_methods_of(profile),
     )
 
 
@@ -228,7 +242,12 @@ def generate_reply(
 
     try:
         return _complete_reply(
-            system=system, history=history, shortcuts=shortcut_rows, booking=booking, correction=correction
+            system=system,
+            history=history,
+            shortcuts=shortcut_rows,
+            booking=booking,
+            correction=correction,
+            payment_methods=payment_methods_of(profile),
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

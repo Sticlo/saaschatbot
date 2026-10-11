@@ -226,7 +226,7 @@
             <header class="ai-setup-hero">
               <div class="ai-setup-hero-icon" aria-hidden="true">✨</div>
               <h2>Cuéntanos de tu negocio</h2>
-              <p>La IA saluda, responde las primeras dudas y te avisa en <strong>Interesados</strong> cuando el cliente quiera reservar o comprar — tú cierras la venta.</p>
+              <p>La IA atiende, resuelve dudas y, si le cuentas <strong>cómo te pagan</strong>, cierra la venta sola: confirma el pedido, pide la dirección, comparte tus medios de pago y te avisa cuando llega el comprobante.</p>
             </header>
 
             <div class="ai-setup-layout">
@@ -279,6 +279,15 @@
                 <div class="ai-step">
                   <span class="ai-step-num">6</span>
                   <label class="ai-field">
+                    <span>¿Cómo te pagan?</span>
+                    <span class="ai-field-hint">Con esto la IA cierra la venta sola. Escríbelo tal cual se lo darías a un cliente.</span>
+                    <textarea id="biz-payments" rows="2" maxlength="1000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">7</span>
+                  <label class="ai-field">
                     <span>¿Dónde estás y cuándo atiendes?</span>
                     <span class="ai-field-hint">Ciudad, barrio u horario.</span>
                     <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
@@ -286,7 +295,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">7</span>
+                  <span class="ai-step-num">8</span>
                   <label class="ai-field">
                     <span>¿Cómo quieres que hable?</span>
                     <span class="ai-field-hint">Formal, cercano, divertido…</span>
@@ -295,7 +304,7 @@
                 </div>
 
                 <div class="ai-step ai-step-last">
-                  <span class="ai-step-num">8</span>
+                  <span class="ai-step-num">9</span>
                   <label class="ai-field">
                     <span>¿Algo que no debe decir?</span>
                     <span class="ai-field-hint">Opcional — descuentos, promesas, etc.</span>
@@ -311,8 +320,8 @@
 
               <aside class="ai-setup-preview-card">
                 <div class="ai-preview-badge">Vista previa</div>
-                <h3>Tu IA calificará leads sabiendo esto</h3>
-                <p class="ai-preview-note">Saluda, responde preguntas, envía atajos (menú, fotos…) y pasa el chat a ti cuando quieran reservar.</p>
+                <h3 id="biz-preview-title">Tu IA atenderá sabiendo esto</h3>
+                <p id="biz-preview-note" class="ai-preview-note">Saluda, responde preguntas, envía atajos (menú, fotos…) y te pasa el chat cuando quieran comprar.</p>
                 <ul id="biz-summary-list" class="biz-summary-list">
                   <li class="muted">Completa las preguntas y pulsa guardar.</li>
                 </ul>
@@ -333,7 +342,7 @@
             <section id="alerts-card" class="ai-shortcuts-card">
               <div class="ai-shortcuts-card-head">
                 <h3>Alertas por WhatsApp</h3>
-                <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando un cliente <strong>ya quiere comprar</strong> o agenda una cita, con sus datos.</p>
+                <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando la IA <strong>cierra un pedido</strong>, llega un <strong>comprobante de pago</strong> o se agenda una cita, con sus datos.</p>
               </div>
               <div class="alert-recipients-head">
                 <span>Números que reciben las alertas</span>
@@ -637,6 +646,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=120"></script>
+  <script src="/static/panel/app.js?v=121"></script>
 </body>
 </html>

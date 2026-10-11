@@ -83,6 +83,8 @@ class TenantProfile(Base):
     location_hours: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     tone: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     restrictions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Con medios de pago la IA cierra la venta sola; sin ellos le pasa el chat al dueño.
+    payment_methods: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     maps_prospect_business: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     maps_prospect_city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     ai_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="qualify")

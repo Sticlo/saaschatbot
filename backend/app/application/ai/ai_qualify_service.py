@@ -15,11 +15,31 @@ Tu trabajo:
 1. Saludar y dar la bienvenida cuando es el inicio de la conversación.
 2. Responder preguntas (precios, horarios, qué ofrecen, cómo funciona) y enviar el catálogo si lo piden.
 3. Acompañar con paciencia hasta que el cliente decida comprar, reservar o contratar.
-4. NO cierres la venta tú ni pidas datos de pago: cuando ya quiera comprar, dile con naturalidad que ya le confirmas.
+4. {closing_rule}
 
 No inventes precios, plazos ni promesas. Si no sabes algo, dilo y ofrece confirmarlo.
 {context_block}
 """
+
+_HANDOFF_RULE = (
+    "NO cierres la venta tú ni pidas datos de pago: cuando ya quiera comprar, dile con naturalidad que ya le confirmas."
+)
+_SELLING_RULE = (
+    "Cuando decida comprar, cierra tú la venta sin hacerlo esperar: confirma qué lleva y el total, "
+    "pide lo que falte para entregárselo y compártele cómo pagar."
+)
+
+
+def payment_methods_of(profile: Optional[TenantProfile]) -> str:
+    """Con medios de pago la IA vende sola; sin ellos le pasa el chat al dueño para cerrar."""
+    return ((profile.payment_methods if profile is not None else "") or "").strip()
+
+
+def payment_methods_block(payment_methods: str) -> str:
+    return (
+        "\n\nCómo pagarle al negocio (compártelo tal cual, sin cambiar números ni nombres, "
+        f"cuando el cliente ya decidió comprar):\n{payment_methods}"
+    )
 
 _NO_INTEREST = ("no me interesa", "no estoy interesad")
 _INTEREST_RE = re.compile(r"\b(cat[aá]logo|portafolio|la carta|men[uú])\b")
@@ -100,12 +120,19 @@ def build_qualify_system_prompt(
     is_first_contact: bool = False,
     shortcuts: list[dict] | None = None,
 ) -> str:
+    selling = bool(payment_methods_of(profile))
     if profile and profile.ai_system_prompt and profile.ai_system_prompt.strip():
         base = profile.ai_system_prompt.strip()
-        base += (
-            "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y NO cierres la venta. "
-            "Cuando ya quieran comprar, dile con naturalidad que ya le confirmas."
-        )
+        if selling:
+            base += (
+                "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y, cuando el cliente decida, "
+                "cierra tú la venta sin hacerlo esperar."
+            )
+        else:
+            base += (
+                "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y NO cierres la venta. "
+                "Cuando ya quieran comprar, dile con naturalidad que ya le confirmas."
+            )
     else:
         answers = answers_from_profile(profile) if profile else {}
         context_lines: list[str] = []
@@ -128,6 +155,7 @@ def build_qualify_system_prompt(
         base = QUALIFY_PROMPT_TEMPLATE.format(
             business_name=tenant.business_name,
             context_block=context_block,
+            closing_rule=_SELLING_RULE if selling else _HANDOFF_RULE,
         )
 
     if is_first_contact:

@@ -2743,6 +2743,7 @@
     "biz-products",
     "biz-target",
     "biz-prices",
+    "biz-payments",
     "biz-hours",
     "biz-tone",
     "biz-restrictions",
@@ -2755,6 +2756,7 @@
       products_services: $("biz-products")?.value.trim() || "",
       target_customer: $("biz-target")?.value.trim() || "",
       price_range: $("biz-prices")?.value.trim() || "",
+      payment_methods: $("biz-payments")?.value.trim() || "",
       location_hours: $("biz-hours")?.value.trim() || "",
       tone: $("biz-tone")?.value.trim() || "",
       restrictions: $("biz-restrictions")?.value.trim() || "",
@@ -2779,6 +2781,7 @@
     $("biz-products").value = profile?.products_services || "";
     $("biz-target").value = profile?.target_customer || "";
     $("biz-prices").value = profile?.price_range || "";
+    $("biz-payments").value = profile?.payment_methods || "";
     $("biz-hours").value = profile?.location_hours || "";
     $("biz-tone").value = profile?.tone || "";
     $("biz-restrictions").value = profile?.restrictions || "";
@@ -2789,6 +2792,11 @@
   function renderBizSummary(profile) {
     const list = $("biz-summary-list");
     if (!list) return;
+    const sells = Boolean(profile?.payment_methods);
+    $("biz-preview-title").textContent = sells ? "Tu IA venderá sola sabiendo esto" : "Tu IA atenderá sabiendo esto";
+    $("biz-preview-note").textContent = sells
+      ? "Responde, envía tu catálogo, toma el pedido con la dirección y comparte cómo pagarte. Te avisa a los números de «Alertas por WhatsApp» (abajo) cuando entra un pedido y cuando llega el comprobante."
+      : "Saluda, responde preguntas, envía atajos (menú, fotos…) y te pasa el chat cuando quieran comprar. Cuéntale cómo te pagan y cerrará la venta sola.";
     const lines = profile?.ai_summary || [];
     if (!lines.length) {
       list.innerHTML = '<li class="muted">Completa las preguntas y guarda.</li>';
@@ -2975,7 +2983,9 @@
       state.aiProfile = profile;
       fillBizForm(profile);
       setBusinessName(profile.business_name, profile.business_name_is_placeholder);
-      setBizSaveStatus("✓ Guardado — tu IA ya conoce tu negocio");
+      setBizSaveStatus(
+        profile.payment_methods ? "✓ Guardado — tu IA ya puede vender sola" : "✓ Guardado — tu IA ya conoce tu negocio",
+      );
       renderOnboarding();
     } catch (err) {
       setBizSaveStatus(err.message);

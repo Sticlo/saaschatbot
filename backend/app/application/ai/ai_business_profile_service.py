@@ -37,6 +37,9 @@ def business_summary_lines(*, business_name: str, answers: dict) -> list[str]:
         value = str(answers.get(key) or "").strip()
         if value:
             lines.append(f"{label}: {value}")
+    payments = str(answers.get("payment_methods") or "").strip()
+    if payments:
+        lines.append(f"Cómo le pagan: {payments}")
     if not lines:
         return [f"Aún no has contado mucho sobre {business_name or 'tu negocio'}."]
     return lines
