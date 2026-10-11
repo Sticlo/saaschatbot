@@ -91,8 +91,11 @@ class Settings(BaseSettings):
     ai_provider_timeout_seconds: float = 25.0
     ai_audio_max_mb: float = 15.0
     ai_image_max_mb: float = 10.0
-    ai_reply_delay_min_seconds: float = 2.0
-    ai_reply_delay_max_seconds: float = 6.0
+    # La gente escribe en varios mensajes seguidos («hola» / «una pregunta» / «cuánto vale…»):
+    # la IA espera a que el cliente haga una pausa y contesta todo junto, como una persona.
+    ai_burst_quiet_seconds: float = 8.0
+    # Tope desde el primer mensaje de la ráfaga: si sigue escribiendo, igual le respondemos.
+    ai_burst_max_wait_seconds: float = 30.0
     # Costo IA — deepseek-flash + heurísticas (sin clasificador LLM por defecto)
     ai_classifier_use_llm: bool = False
     ai_history_messages: int = 10

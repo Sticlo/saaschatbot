@@ -8,7 +8,8 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, object_session
 
 from app.application.ai.ai_appointment_service import (
     BOOKING_HANDOFF_MESSAGE,
@@ -132,6 +133,7 @@ BOOKING_TIP = (
 )
 BOOKING_DAYS_AHEAD = 14
 BOOKING_DATE_LOOKBACK = 16  # últimos mensajes (cliente e IA) donde buscamos fechas de las que se habló
+CLIENT_TURN_MAX_MESSAGES = 15
 HOLDING_REPLIES_FIRST_CONTACT = (
     "¡Hola! 😊 Gracias por escribirnos. Dame un momentico y ya te ayudo.",
     "¡Hola! Qué gusto saludarte 😊 Dame un momentico y te cuento.",
@@ -453,7 +455,7 @@ def _close_on_interest(
 ) -> bool:
     """La primera vez que se detecta interés o desinterés la IA se apaga y el chat pasa a manual.
     Si el agente reactivó la IA después, solo se actualiza la etiqueta. True = no seguir respondiendo."""
-    interest = _detect_interest(category, text_for_ai(message))
+    interest = _detect_interest(category, _turn_text(message))
     if interest is None:
         return False
 
@@ -626,12 +628,98 @@ def _is_textless_opening(db: Session, conversation_id: uuid.UUID, message: Messa
     return bool(recent) and recent[0].id == message.id and all(_is_ai_noise(m) for m in recent)
 
 
-def _inbound_count(db: Session, conversation_id: uuid.UUID) -> int:
+def _is_first_contact(db: Session, conversation_id: uuid.UUID) -> bool:
+    """Aún nadie le ha escrito: es el primer contacto aunque el cliente haya mandado varios mensajes."""
     return (
         db.query(Message.id)
-        .filter(Message.conversation_id == conversation_id, Message.direction == MessageDirection.IN.value)
-        .count()
+        .filter(Message.conversation_id == conversation_id, Message.direction == MessageDirection.OUT.value)
+        .first()
+        is None
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _client_turn(db: Session, message: Message) -> list[Message]:
+    """Lo que el cliente escribió desde la última respuesta (nuestra o del dueño) hasta `message`."""
+    last_out = (
+        db.query(func.max(Message.created_at))
+        .filter(
+            Message.conversation_id == message.conversation_id,
+            Message.direction == MessageDirection.OUT.value,
+            Message.created_at <= message.created_at,
+        )
+        .scalar()
+    )
+    query = db.query(Message).filter(
+        Message.conversation_id == message.conversation_id,
+        Message.direction == MessageDirection.IN.value,
+        Message.created_at <= message.created_at,
+    )
+    if last_out is not None:
+        query = query.filter(Message.created_at > last_out)
+    rows = query.order_by(Message.created_at.desc()).limit(CLIENT_TURN_MAX_MESSAGES).all()
+    rows.reverse()
+    return rows or [message]
+
+
+def _turn_text(message: Message) -> str:
+    """El cliente suele partir su idea en varios mensajes: las señales (interés, cita, «no gracias»)
+    se buscan en todo lo que dijo desde nuestra última respuesta, no solo en el último pedazo."""
+    try:
+        db = object_session(message)
+    except Exception:
+        db = None
+    if db is None:
+        return text_for_ai(message)
+    parts = [text_for_ai(m).strip() for m in _client_turn(db, message) if not _is_ai_noise(m)]
+    return "\n".join(p for p in parts if p) or text_for_ai(message)
+
+
+def _quiet_seconds_after(text: str) -> float:
+    """Una pregunta completa casi siempre cierra la idea; un «hola» o una frase cortada casi nunca."""
+    base = settings.ai_burst_quiet_seconds
+    clean = (text or "").strip()
+    if clean.endswith("?") or len(clean) >= 120:
+        return base * 0.6
+    if len(clean) <= 20 or clean.endswith((",", ":", "...", "…")):
+        return base * 1.5
+    return base
+
+
+def _burst_started_at(turn: list[Message]) -> datetime:
+    """Inicio de la ráfaga actual: mensajes seguidos sin una pausa larga entre ellos."""
+    gap = timedelta(seconds=settings.ai_burst_quiet_seconds * 1.5)
+    start = _as_utc(turn[-1].created_at)
+    for row in reversed(turn[:-1]):
+        at = _as_utc(row.created_at)
+        if start - at > gap:
+            break
+        start = at
+    return start
+
+
+def _seconds_until_client_pauses(db: Session, message: Message) -> float:
+    """Cuánto falta para dar por terminado lo que el cliente está escribiendo (0 = responder ya)."""
+    quiet = _quiet_seconds_after(text_for_ai(message))
+    if quiet <= 0 or message.created_at is None:
+        return 0.0
+    sent_at = _as_utc(message.created_at)
+    deadline = min(
+        sent_at + timedelta(seconds=quiet),
+        _burst_started_at(_client_turn(db, message)) + timedelta(seconds=settings.ai_burst_max_wait_seconds),
+    )
+    wait = (deadline - datetime.now(timezone.utc)).total_seconds()
+    return wait if wait >= 1 else 0.0
+
+
+def _client_kept_writing(db: Session, conversation_id: uuid.UUID, message: Message) -> bool:
+    """Llegó otro mensaje mientras se generaba la respuesta: esa respuesta ya quedó corta;
+    el job del mensaje nuevo contesta todo junto."""
+    latest = _latest_meaningful_inbound(db, conversation_id)
+    return latest is not None and latest.id != message.id and latest.created_at > message.created_at
 
 
 def _bot_already_replied(
@@ -862,7 +950,7 @@ def _handle_unreadable_media(
             conversation=conversation,
             message=message,
             session=session,
-            is_first_contact=_inbound_count(db, conversation.id) <= 1,
+            is_first_contact=_is_first_contact(db, conversation.id),
         )
     # Se procesó pero no hay nada entendible (audio sin voz, archivo enorme): pedirlo como lo haría una persona.
     text = UNREADABLE_AUDIO_REPLY if is_voice_note(message) else UNREADABLE_IMAGE_REPLY
@@ -897,7 +985,7 @@ def _send_generated_reply(
             session=session,
             conversation=conversation,
             reply=reply,
-            allow_resend=asks_to_resend(text_for_ai(message)),
+            allow_resend=asks_to_resend(_turn_text(message)),
         )
     except Exception as exc:
         log.exception("Error enviando respuesta IA conv=%s", conversation.id)
@@ -1093,7 +1181,7 @@ def _resolve_stage(
     booking: Optional[BookingContext],
 ) -> str:
     """La IA lee toda la conversación; las palabras clave solo suben la etapa, nunca la bajan."""
-    text = text_for_ai(message)
+    text = _turn_text(message)
     stage = reply.stage
     # «Sí, confirmo» justo después de que la IA agendó es sobre esa cita, no una venta por cerrar.
     scheduling = booking is not None and (
@@ -1142,7 +1230,7 @@ def _apply_stage(
         _mark_handed_off(conversation.id)
         _mark_awaiting_owner(tenant.id, conversation.id, message.id)
         changed = True
-        snippet = " ".join(text_for_ai(message).split())[:200]
+        snippet = " ".join(_turn_text(message).split())[:200]
         _send_sales_alert(
             tenant,
             key=f"ai:closing_alert:{conversation.id}",
@@ -1179,6 +1267,10 @@ def _deliver_reply(
     shortcuts: list[dict],
     booking: Optional[BookingContext],
 ) -> bool:
+    if _client_kept_writing(db, conversation.id, message):
+        log.info("IA no envía: el cliente siguió escribiendo conv=%s", conversation.id)
+        return False
+
     appointment = None
     repeated = None
     inferred = None
@@ -1195,7 +1287,7 @@ def _deliver_reply(
             tenant_id=tenant.id,
             conversation_id=conversation.id,
             slot=reply.book_slot,
-            client_text=text_for_ai(message),
+            client_text=_turn_text(message),
             inferred=inferred is not None,
             reply_text=reply.message,
         )
@@ -1248,7 +1340,7 @@ def _deliver_reply(
             reply = replace(reply, message=BOOKING_HANDOFF_MESSAGE, book_slot=None, stage=STAGE_CLOSING)
 
     if reply.shortcut_id is None:
-        promised = infer_promised_shortcut(reply.message, text_for_ai(message), shortcuts)
+        promised = infer_promised_shortcut(reply.message, _turn_text(message), shortcuts)
         if promised:
             log.info("IA prometió un atajo sin adjuntarlo; se adjunta conv=%s", conversation.id)
             reply = replace(reply, shortcut_id=promised)
@@ -1303,7 +1395,7 @@ def _could_have_booked(tenant: Tenant, message: Message) -> bool:
         profile is not None
         and not profile.ai_booking_enabled
         and feature_allowed(tenant, "ai_booking")
-        and detect_scheduling_interest(text_for_ai(message))
+        and detect_scheduling_interest(_turn_text(message))
     )
 
 
@@ -1376,7 +1468,7 @@ def _run_classification(
 ) -> Optional[dict]:
     try:
         return classify_inbound_message(
-            text_for_ai(message),
+            _turn_text(message),
             business_name=tenant.business_name,
         )
     except Exception:
@@ -1509,8 +1601,7 @@ def _process_qualify(
         return True
 
     history = _load_history(db, conversation.id)
-    inbound_count = sum(1 for m in history if m.direction == MessageDirection.IN.value)
-    is_first_contact = inbound_count <= 1
+    is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
     booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
 
@@ -1614,14 +1705,13 @@ def _process_full_reply(
         log.warning("IA sin respuesta conv=%s: %s", conversation.id, exc)
         generated_reply = None
     if generated_reply is None or not generated_reply.message.strip():
-        inbound_count = sum(1 for m in history if m.direction == MessageDirection.IN.value)
         return _handle_ai_unavailable(
             db,
             tenant=tenant,
             conversation=conversation,
             message=message,
             session=session,
-            is_first_contact=inbound_count <= 1,
+            is_first_contact=not any(m.direction == MessageDirection.OUT.value for m in history),
         )
 
     increment_daily_reply_count(tenant.id)
@@ -1715,15 +1805,17 @@ def process_ai_reply(
         log.info("IA skip conv=%s: ya respondida msg=%s", conversation_id, message_id)
         return True
 
-    delay = (
-        settings.ai_classify_delay_seconds
-        if classify_mode
-        else random.uniform(
-            settings.ai_reply_delay_min_seconds,
-            settings.ai_reply_delay_max_seconds,
-        )
-    )
-    time.sleep(delay)
+    if classify_mode:
+        time.sleep(settings.ai_classify_delay_seconds)
+    else:
+        wait = _seconds_until_client_pauses(db, message)
+        if wait > 0:
+            # Se vuelve a mirar cuando el cliente haga la pausa, sin ocupar un worker esperando.
+            # Si escribe otra cosa antes, este job se salta y responde el del último mensaje.
+            from app.application.ai.ai_queue_service import schedule_ai_retry
+
+            schedule_ai_retry(tenant_id, conversation_id, message_id, delay_seconds=wait)
+            return True
 
     db.refresh(conversation)
     db.refresh(tenant)

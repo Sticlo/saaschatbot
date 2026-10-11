@@ -33,6 +33,9 @@ settings.wompi_private_key = ""
 settings.wompi_integrity_secret = ""
 settings.wompi_events_secret = ""
 settings.wompi_api_base_url = ""
+# La IA contesta apenas se procesa el job: las pruebas de la espera por ráfagas la encienden.
+settings.ai_burst_quiet_seconds = 0
+settings.ai_burst_max_wait_seconds = 0
 
 
 def _prepare_test_database() -> bool:

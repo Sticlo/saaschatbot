@@ -114,9 +114,26 @@ _MEDIA_LABELS = {
 }
 
 
+def _recent_turns(messages: list[Message], turns: int) -> list[Message]:
+    """El límite cuenta turnos, no mensajes: si el cliente escribe en 10 mensajes seguidos,
+    la IA no debe perder de vista lo que ella misma le había dicho antes."""
+    rows: list[Message] = []
+    seen = 0
+    for msg in reversed(messages):
+        if not rows or msg.direction != rows[-1].direction:
+            seen += 1
+            if seen > turns:
+                break
+        rows.append(msg)
+        if len(rows) >= turns * 3:
+            break
+    rows.reverse()
+    return rows
+
+
 def format_history(messages: list[Message], *, limit: Optional[int] = None) -> list[dict[str, str]]:
     cap = limit if limit is not None else settings.ai_history_messages
-    rows = messages[-cap:]
+    rows = _recent_turns(messages, cap)
     formatted: list[dict[str, str]] = []
     for msg in rows:
         role = "user" if msg.direction == MessageDirection.IN.value else "assistant"

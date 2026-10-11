@@ -34,6 +34,7 @@ AI_QUEUED_PREFIX = "ai:queued:"
 AI_QUEUED_TTL_SECONDS = 600
 MAX_AI_JOB_RETRIES = 8
 TENANT_BUSY_REQUEUE_DELAY_SECONDS = 0.25
+BUSY_CHAT_RETRY_SECONDS = 4
 JOB_REPLY = "reply"
 JOB_RESCUE = "rescue"  # el chat pasó a una persona: revisar si alguien le respondió al cliente
 
@@ -95,12 +96,10 @@ def _process_ai_job(
     kind: str = JOB_REPLY,
 ) -> None:
     if not _try_acquire_ai_lock(conversation_id):
-        if kind == JOB_RESCUE:
-            # Otro job tiene el chat: el rescate no se puede perder, se intenta en un rato.
-            schedule_ai_retry(tenant_id, conversation_id, message_id, delay_seconds=15, kind=kind)
-            return
-        log.debug("IA job omitido: lock activo conv=%s", conversation_id)
-        _clear_queued_marker(message_id)
+        # Otro job tiene el chat (p. ej. respondiendo lo anterior mientras el cliente sigue
+        # escribiendo): este mensaje no se puede perder, se mira de nuevo en un rato.
+        delay = 15 if kind == JOB_RESCUE else BUSY_CHAT_RETRY_SECONDS
+        schedule_ai_retry(tenant_id, conversation_id, message_id, delay_seconds=delay, kind=kind)
         return
 
     tenant_slot = acquire_tenant_ai_slot(tenant_id)
