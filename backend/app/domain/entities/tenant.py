@@ -104,6 +104,8 @@ class TenantProfile(Base):
     avg_ticket_cop: Mapped[Optional[int]] = mapped_column(nullable=True)
     # Mes ("2026-09") del último resumen de resultados enviado al dueño.
     results_report_sent_for: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)
+    # Cómo atendía el WhatsApp antes de Omitel, sacado del historial al vincular. Solo números.
+    whatsapp_diagnostic: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

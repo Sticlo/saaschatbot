@@ -53,6 +53,7 @@
   };
 
   const tour = { active: false, autoChecked: false, steps: [], index: 0, root: null, target: null, cleanup: null, raf: 0 };
+  const diag = { data: null, timer: 0, polls: 0, wasConnected: false, loading: false };
 
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
   const mediaCache = new Map();
@@ -902,6 +903,11 @@
         : "Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.";
     }
     $("empty-ready")?.classList.toggle("hidden", !connected);
+    if (connected && !diag.wasConnected) {
+      diag.polls = 0;
+      loadDiagnostic();
+    }
+    diag.wasConnected = connected;
     $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     const cwLink = $("wa-chatwoot-link");
@@ -1278,6 +1284,7 @@
     window.removeEventListener("resize", scheduleTourLayout);
     window.removeEventListener("scroll", scheduleTourLayout, true);
     if (remember) localStorage.setItem(tourStorageKey(), "1");
+    setTimeout(maybeShowDiagnostic, 500);
   }
 
   function onTourKey(e) {
@@ -1429,7 +1436,177 @@
       state.onboarding.bookingAllowed = schedule.ai_booking_allowed !== false;
     }
     renderOnboarding();
+    loadDiagnostic();
   }
+
+  // —— Diagnóstico: lo que el negocio se perdía en el chat antes de Omitel ——
+  const DIAG_POLL_MS = 8000;
+  const DIAG_MAX_POLLS = 60;
+  // Supuesto explícito en el texto: de cada 4 clientes sin respuesta, 1 habría comprado.
+  const DIAG_BUYERS_RATIO = 4;
+
+  function diagSeenKey(res) {
+    const tenantId = state.tenant?.id || state.user?.tenant_id || "";
+    return `omitel_diag_seen:${tenantId}:${res?.diagnostic?.connection_id || ""}`;
+  }
+
+  function renderDiagEntry(analyzing) {
+    $("diag-analyzing")?.classList.toggle("hidden", !analyzing);
+    $("diag-open")?.classList.toggle("hidden", !diag.data);
+  }
+
+  async function loadDiagnostic() {
+    if (diag.loading || !state.canManageGlobal || state.wa.status !== "connected") return;
+    clearTimeout(diag.timer);
+    diag.loading = true;
+    let res;
+    try {
+      res = await api("/whatsapp/diagnostic");
+    } catch {
+      return;
+    } finally {
+      diag.loading = false;
+    }
+    if (res?.status === "analyzing") {
+      renderDiagEntry(!diag.data);
+      if (diag.polls++ < DIAG_MAX_POLLS) diag.timer = setTimeout(loadDiagnostic, DIAG_POLL_MS);
+      return;
+    }
+    diag.data = res?.status === "ready" ? res : null;
+    renderDiagEntry(false);
+    maybeShowDiagnostic();
+  }
+
+  function maybeShowDiagnostic() {
+    if (!diag.data || tour.active) return;
+    if ([...document.querySelectorAll(".modal")].some((m) => !m.classList.contains("hidden"))) return;
+    if (localStorage.getItem(diagSeenKey(diag.data)) === "1") return;
+    openDiagnostic();
+  }
+
+  function formatWait(seconds) {
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) return "menos de un minuto";
+    if (minutes < 60) return pluralEs(minutes, "minuto", "minutos");
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    if (hours < 24) return rest && hours < 10 ? `${hours} h ${rest} min` : pluralEs(hours, "hora", "horas");
+    return pluralEs(Math.round(hours / 24), "día", "días");
+  }
+
+  /** Lo que más le duele al negocio va de titular; el resto, debajo sin repetirlo. */
+  function diagHeadlineKind(d) {
+    if (d.unanswered > 0) return "unanswered";
+    if (d.median_reply_seconds >= 30 * 60) return "slow";
+    if (d.after_hours > 0) return "after_hours";
+    return "all_answered";
+  }
+
+  function diagHeadline(d, kind) {
+    if (kind === "unanswered") {
+      const one = d.unanswered === 1;
+      return `<strong>${pluralEs(d.unanswered, "cliente", "clientes")}</strong> te ${one ? "escribió" : "escribieron"} y ${one ? "se quedó" : "se quedaron"} sin respuesta`;
+    }
+    if (kind === "slow") return `Tus clientes esperan <strong>${formatWait(d.median_reply_seconds)}</strong> por una respuesta`;
+    if (kind === "after_hours") return `<strong>${pluralEs(d.after_hours, "vez", "veces")}</strong> te escribieron fuera de tu horario`;
+    return "Le respondiste a todos tus clientes 👏";
+  }
+
+  function diagMoneyHtml(d, ticket) {
+    if (!(d.unanswered > 0)) return "";
+    if (ticket) {
+      const lost = Math.round((d.unanswered * ticket) / DIAG_BUYERS_RATIO);
+      return `<p class="diag-money">Si solo 1 de cada ${DIAG_BUYERS_RATIO} te hubiera comprado, eran <strong>≈ ${formatCop(lost)}</strong> en ventas.</p>`;
+    }
+    return `<form class="diag-ticket">
+      <label for="diag-ticket-input">¿Cuánto vale en promedio una venta o servicio tuyo?</label>
+      <div class="diag-ticket-row">
+        <input id="diag-ticket-input" name="ticket" inputmode="numeric" maxlength="12" placeholder="50.000" />
+        <button type="submit" class="btn ghost small">Ver cuánto es</button>
+      </div>
+      <p class="diag-ticket-status"></p>
+    </form>`;
+  }
+
+  function diagnosticHtml(res) {
+    const d = res.diagnostic || {};
+    const kind = diagHeadlineKind(d);
+    const stats = [`<li><strong>${pluralEs(d.clients, "persona", "personas")}</strong> te escribieron</li>`];
+    if (d.after_hours > 0 && kind !== "after_hours") {
+      stats.push(`<li><strong>${pluralEs(d.after_hours, "vez", "veces")}</strong> te escribieron fuera de tu horario</li>`);
+    }
+    if (d.median_reply_seconds != null && kind !== "slow") {
+      stats.push(`<li>Normalmente tardas <strong>${formatWait(d.median_reply_seconds)}</strong> en contestar</li>`);
+    }
+    const topics = (d.topics || []).slice(0, 3);
+    const topicsHtml = topics.length
+      ? `<p class="diag-topics-title">Lo que más te preguntan</p>
+         <div class="diag-topics">${topics
+           .map((t) => `<span>${escapeHtml(t.label)} <em>${pluralEs(t.chats, "chat", "chats")}</em></span>`)
+           .join("")}</div>`
+      : "";
+    const cta = setupIncomplete() ? "Configurar mi IA (2 min)" : "¡Entendido!";
+    return `<p class="diag-kicker">Tu WhatsApp en los últimos ${d.window_days || 30} días</p>
+      <h3 id="diag-title" class="diag-headline">${diagHeadline(d, kind)}</h3>
+      <ul class="diag-stats">${stats.join("")}</ul>
+      ${diagMoneyHtml(d, res.avg_ticket_cop)}
+      ${topicsHtml}
+      <p class="diag-omi">Desde hoy la IA les responde en segundos, de día y de noche, y te avisa cuando alguien quiere comprar.</p>
+      <button type="button" class="btn primary diag-cta" data-diag-cta>${cta}</button>
+      <p class="diag-fine">Contamos solo chats personales, no grupos. No guardamos esos mensajes: solo estos números.</p>`;
+  }
+
+  function openDiagnostic() {
+    if (!diag.data) return;
+    localStorage.setItem(diagSeenKey(diag.data), "1");
+    $("diag-body").innerHTML = diagnosticHtml(diag.data);
+    $("diag-modal").classList.remove("hidden");
+    $("diag-body").querySelector("[data-diag-cta]")?.focus();
+  }
+
+  function closeDiagnostic() {
+    $("diag-modal").classList.add("hidden");
+  }
+
+  async function saveDiagTicket(form) {
+    const status = form.querySelector(".diag-ticket-status");
+    const digits = String(form.querySelector("input[name=ticket]")?.value || "").replace(/\D/g, "");
+    if (!digits) {
+      status.textContent = "Escribe el valor, por ejemplo 50.000";
+      return;
+    }
+    status.textContent = "Calculando…";
+    try {
+      state.results = await api("/results/settings", {
+        method: "PUT",
+        body: JSON.stringify({ avg_ticket_cop: Number(digits) }),
+      });
+      resultsLoadedAt = Date.now();
+      diag.data = { ...diag.data, avg_ticket_cop: state.results?.avg_ticket_cop ?? Number(digits) };
+      $("diag-body").innerHTML = diagnosticHtml(diag.data);
+    } catch (err) {
+      status.textContent = err.message || "No se pudo guardar";
+    }
+  }
+
+  $("diag-open")?.addEventListener("click", openDiagnostic);
+  $("diag-modal-close")?.addEventListener("click", closeDiagnostic);
+  $("diag-modal-backdrop")?.addEventListener("click", closeDiagnostic);
+  $("diag-modal")?.addEventListener("submit", (e) => {
+    const form = e.target.closest?.(".diag-ticket");
+    if (!form) return;
+    e.preventDefault();
+    saveDiagTicket(form);
+  });
+  $("diag-modal")?.addEventListener("click", (e) => {
+    if (!e.target.closest?.("[data-diag-cta]")) return;
+    const configure = setupIncomplete();
+    closeDiagnostic();
+    if (configure) startTour();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("diag-modal")?.classList.contains("hidden")) closeDiagnostic();
+  });
 
   function formatPlanDate(iso) {
     const date = new Date(iso);

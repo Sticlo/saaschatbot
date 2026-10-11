@@ -635,6 +635,12 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
             from app.application.sync.history_sync_tracker import record_messages_set_batch
 
             record_messages_set_batch(tenant_id, payload)
+            try:
+                from app.application.whatsapp.whatsapp_diagnostic_service import record_history_batch
+
+                record_history_batch(session, data)
+            except Exception:
+                log.exception("Diagnóstico: lote de historial no registrado tenant=%s", tenant_id)
             # Solo cachear nombres de historial — NO disparar sync adicional
             # (schedule_whatsapp_sync desde aquí crea un loop: chats.set → sync → chats.set)
             _apply_names_from_message_history(

@@ -238,6 +238,16 @@ def whatsapp_status(current: RequireViewer, db: Session = Depends(get_db)):
     return _session_response(session)
 
 
+@router.get("/diagnostic")
+def whatsapp_diagnostic(current: RequireOwner, db: Session = Depends(get_db)) -> dict:
+    from app.application.whatsapp.whatsapp_diagnostic_service import diagnostic_status
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    return diagnostic_status(db, tenant)
+
+
 @router.post("/sync", response_model=WhatsAppSyncResponse)
 def sync_whatsapp_chats_endpoint(
     request: Request,
