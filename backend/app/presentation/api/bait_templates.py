@@ -11,7 +11,9 @@ from app.application.ai.ai_business_profile_service import (
     build_ai_system_prompt_from_answers,
     business_summary_lines,
 )
+from app.application.ai.ai_readiness_service import readiness_from
 from app.application.billing.tenant_service import is_placeholder_business_name, log_audit
+from app.application.products.product_service import list_products
 from app.application.outbound.bait_template_service import (
     create_template,
     delete_template,
@@ -79,9 +81,11 @@ def _business_summary(business_name: str, answers: dict) -> list[str]:
     return business_summary_lines(business_name=business_name, answers=answers)
 
 
-def _profile_response(tenant: Tenant, profile) -> BusinessProfileResponse:
+def _profile_response(db: Session, tenant: Tenant, profile) -> BusinessProfileResponse:
     answers = _answers_from_profile(profile)
     return BusinessProfileResponse(
+        readiness=readiness_from(answers, list_products(db, tenant.id)),
+        delivery_info=answers.get("delivery_info"),
         business_name=tenant.business_name,
         business_name_is_placeholder=is_placeholder_business_name(tenant.business_name),
         industry=answers.get("industry"),
@@ -107,7 +111,7 @@ def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     profile = get_or_create_tenant_profile(db, tenant.id)
     db.commit()
-    return _profile_response(tenant, profile)
+    return _profile_response(db, tenant, profile)
 
 
 @router.put("/business-profile", response_model=BusinessProfileResponse)
@@ -138,6 +142,7 @@ def update_business_profile(
         "tone",
         "restrictions",
         "payment_methods",
+        "delivery_info",
         "maps_prospect_business",
         "maps_prospect_city",
     ):
@@ -167,7 +172,7 @@ def update_business_profile(
     db.refresh(profile)
     if body.business_name is not None:
         publish_tenant_settings(tenant)
-    return _profile_response(tenant, profile)
+    return _profile_response(db, tenant, profile)
 
 
 @router.post("/assets", response_model=AssetUploadResponse)

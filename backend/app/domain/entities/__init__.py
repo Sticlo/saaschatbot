@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.domain.entities.ai_question import AiQuestion
 from app.domain.entities.ai_reply_event import AiReplyEvent
 from app.domain.entities.appointment import Appointment
 from app.domain.entities.audit_log import AuditLog
@@ -31,6 +32,7 @@ from app.domain.entities.whatsapp_contact_link import WhatsAppContactLink
 from app.domain.entities.whatsapp_session import WhatsAppSession
 
 __all__ = [
+    "AiQuestion",
     "AiReplyEvent",
     "Appointment",
     "AuditLog",

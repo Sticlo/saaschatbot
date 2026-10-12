@@ -142,6 +142,7 @@ def build_qualify_system_prompt(
             ("target_customer", "Clientes"),
             ("price_range", "Precios"),
             ("location_hours", "Ubicación y horario"),
+            ("delivery_info", "Envíos y entregas"),
             ("tone", "Tono"),
             ("restrictions", "No prometer"),
         )

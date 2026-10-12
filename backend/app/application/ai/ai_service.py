@@ -37,6 +37,7 @@ from app.application.ai.ai_appointment_service import (
     try_create_booking,
 )
 from app.application.ai.ai_classifier_service import classify_inbound_message
+from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
 from app.application.ai.ai_qualify_service import (
@@ -1137,14 +1138,20 @@ def _contact_line(conversation: Conversation) -> str:
 
 
 def _send_sales_alert(
-    tenant: Tenant, *, key: str, ttl_seconds: int, text: str, skip_phone: Optional[str] = None
+    tenant: Tenant,
+    *,
+    key: str,
+    ttl_seconds: int,
+    text: str,
+    skip_phone: Optional[str] = None,
+    sales: bool = True,
 ) -> None:
-    """Ventas listas y citas: al dueño y a quienes despachan."""
+    """Ventas listas y citas: al dueño y a quienes despachan. sales=False: solo a quienes reciben todo."""
     from app.application.conversations.interest_alert_service import alert_phones, send_alerts
     from app.shared.core.phone import phone_match_tail
 
     phones = [
-        p for p in alert_phones(tenant.profile, sales=True) if not (skip_phone and phone_match_tail(p, skip_phone))
+        p for p in alert_phones(tenant.profile, sales=sales) if not (skip_phone and phone_match_tail(p, skip_phone))
     ]
     session = tenant.whatsapp_session
     if not phones or session is None:
@@ -1367,6 +1374,8 @@ def _deliver_reply(
         db, tenant=tenant, conversation=conversation, message=message, session=session, reply=outgoing
     ):
         return False
+    if reply.missing:
+        _record_missing_info(db, tenant=tenant, conversation=conversation, message=message, topic=reply.missing)
 
     if appointment is not None:
         log.info("IA agendó cita conv=%s appointment=%s", conversation.id, appointment.id)
@@ -1404,6 +1413,43 @@ def _deliver_reply(
         booking_tip=_could_have_booked(tenant, message),
     )
     return True
+
+
+def _record_missing_info(
+    db: Session, *, tenant: Tenant, conversation: Conversation, message: Message, topic: str
+) -> None:
+    """La IA no tenía el dato: se anota para que el dueño lo responda una vez y no se repita."""
+    question = _turn_text(message)
+    try:
+        recorded = record_missing_info(
+            db, tenant_id=tenant.id, conversation_id=conversation.id, topic=topic, question=question
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("No se pudo anotar la pregunta sin respuesta conv=%s", conversation.id)
+        return
+    if recorded is None:
+        return
+    row, is_new = recorded
+    log.info("IA no sabía «%s» conv=%s nueva=%s", row.topic, conversation.id, is_new)
+    publish_panel_event(tenant.id, {"type": "ai_questions.updated"})
+    if not is_new:
+        return
+    snippet = " ".join(question.split())[:160]
+    _send_sales_alert(
+        tenant,
+        key=f"ai:question_alert:{row.id}",
+        ttl_seconds=24 * 3600,
+        sales=False,
+        text=(
+            f"❓ *{tenant.business_name}*: {_contact_label(conversation)} preguntó «{snippet}» "
+            f"y la IA no tenía este dato: *{row.topic}*.\n\n"
+            "Respóndele tú en el chat y enséñaselo a la IA una sola vez en Personalizar IA → "
+            f"Preguntas pendientes, para que no vuelva a pasar.\n\n{_contact_line(conversation)}\n"
+            f"Abrir panel: {_panel_link()}"
+        ),
+    )
 
 
 def _reserve_stock_once(
@@ -1714,6 +1760,7 @@ def _process_qualify(
             shortcuts=shortcuts,
             booking=booking,
             products=list_products(db, tenant.id),
+            knowledge=learned_answers_block(db, tenant.id),
         )
     except DeepSeekError as exc:
         log.warning("IA qualify sin respuesta conv=%s: %s", conversation.id, exc)
@@ -1800,6 +1847,7 @@ def _process_full_reply(
             shortcuts=shortcuts,
             booking=booking,
             products=list_products(db, tenant.id),
+            knowledge=learned_answers_block(db, tenant.id),
         )
     except DeepSeekError as exc:
         log.warning("IA sin respuesta conv=%s: %s", conversation.id, exc)

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.presentation.api import (
     ai,
+    ai_questions,
     appointments,
     audit_logs,
     auth,
@@ -35,6 +36,7 @@ api_router.include_router(products.router)
 api_router.include_router(appointments.router)
 api_router.include_router(results.router)
 api_router.include_router(ai.router)
+api_router.include_router(ai_questions.router)
 api_router.include_router(users.router)
 api_router.include_router(audit_logs.router)
 api_router.include_router(platform.router)

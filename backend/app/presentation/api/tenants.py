@@ -45,6 +45,12 @@ def update_my_tenant(
 
     if body.business_name is not None:
         tenant.business_name = body.business_name.strip()
+    if body.ai_global_enabled and not tenant.ai_global_enabled:
+        from app.application.ai.ai_readiness_service import not_ready_message, tenant_readiness
+
+        readiness = tenant_readiness(db, tenant.id)
+        if not readiness["ready"]:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=not_ready_message(readiness))
     if body.ai_global_enabled is not None:
         tenant.ai_global_enabled = body.ai_global_enabled
         cache_delete(tenant_cache_key(str(tenant.id), "ai_global"))

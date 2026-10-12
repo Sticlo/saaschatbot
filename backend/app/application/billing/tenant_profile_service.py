@@ -16,6 +16,7 @@ _BUSINESS_FIELDS = (
     "tone",
     "restrictions",
     "payment_methods",
+    "delivery_info",
     "maps_prospect_business",
     "maps_prospect_city",
 )

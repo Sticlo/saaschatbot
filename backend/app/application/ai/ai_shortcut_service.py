@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.application.ai.ai_knowledge_service import clean_topic
 from app.application.outbound.quick_shortcut_service import find_shortcut
 from app.application.whatsapp.whatsapp_service import (
     send_document_message,
@@ -54,8 +55,11 @@ STAGE_RANK = {STAGE_CHATTING: 0, STAGE_INTERESTED: 1, STAGE_CLOSING: 2}
 _REPLY_FORMAT = """
 
 Responde SOLO con JSON válido (sin markdown), exactamente con estas claves:
-{{"message":"tu respuesta al cliente","shortcut_id":null,"book_slot":null,"stage":"conversando"{order_key}}}
-{key_rules}
+{{"message":"tu respuesta al cliente","shortcut_id":null,"book_slot":null,"stage":"conversando","missing":""{order_key}}}
+{key_rules}missing = si el cliente preguntó algo que NO está en la información del negocio y por eso no pudiste
+responderlo, escribe en pocas palabras qué dato te faltó (ej. "costo del envío a Cali", "si hay talla 42").
+Si pudiste responder todo, "". No lo uses para cosas que el cliente debe decirte (su dirección, su talla).
+
 stage = en qué punto está el cliente, mirando toda la conversación:
 - "conversando": saluda, charla o pregunta en general; aún no muestra intención de compra.
 - "interesado": muestra interés real: pide el catálogo, la carta o fotos; pregunta precio, talla,
@@ -82,7 +86,8 @@ _SELLING_CLOSING = """Si el stage es "cierre": cierra tú la venta, cálido y na
    cuenta, links ni medios de pago que no estén ahí.
 4. Cuando mande el comprobante, agradécele y dile que su pedido quedó registrado y qué sigue.
 Si algo no está en la información del negocio (un precio, si hay existencias, el costo del envío),
-no lo inventes ni lo adivines: dile «te confirmo por aquí apenas lo revise» y sigue con lo demás.
+no lo inventes ni lo adivines: dile «te confirmo por aquí apenas lo revise», ponlo en missing y sigue
+con lo demás.
 No digas que lo pasas con un asesor u otra persona ni que eres un bot.
 
 order = null mientras el cliente no haya confirmado qué lleva. Cuando lo confirme y tengas cómo
@@ -126,6 +131,8 @@ class AiGeneratedReply:
     book_slot: Optional["BookSlotRequest"] = None
     stage: str = STAGE_CHATTING
     order: Optional["OrderSummary"] = None
+    # Lo que el cliente preguntó y no está en la información del negocio.
+    missing: str = ""
 
 
 @dataclass(frozen=True)
@@ -377,6 +384,7 @@ def parse_ai_reply(
         book_slot=book_slot,
         stage=stage,
         order=parse_order(data.get("order")),
+        missing=clean_topic(data.get("missing")),
     )
 
 

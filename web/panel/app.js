@@ -40,6 +40,7 @@
     searchTimer: null,
     panelMode: "chats",
     aiProfile: null,
+    aiQuestions: [],
     quickShortcuts: [],
     shortcutsDraft: [],
     appointmentsDate: null,
@@ -481,6 +482,8 @@
     $("ai-setup-panel").classList.add("hidden");
     $("appointments-panel").classList.add("hidden");
     $("inventory-panel").classList.add("hidden");
+    $("ai-ready-banner").classList.add("hidden");
+    $("ai-questions-badge").classList.add("hidden");
     $("sidebar-chats").classList.remove("hidden");
     $("mode-chats").classList.add("active");
     $("mode-appointments").classList.remove("active");
@@ -2754,6 +2757,7 @@
     "biz-target",
     "biz-prices",
     "biz-payments",
+    "biz-delivery",
     "biz-hours",
     "biz-tone",
     "biz-restrictions",
@@ -2767,6 +2771,7 @@
       target_customer: $("biz-target")?.value.trim() || "",
       price_range: $("biz-prices")?.value.trim() || "",
       payment_methods: $("biz-payments")?.value.trim() || "",
+      delivery_info: $("biz-delivery")?.value.trim() || "",
       location_hours: $("biz-hours")?.value.trim() || "",
       tone: $("biz-tone")?.value.trim() || "",
       restrictions: $("biz-restrictions")?.value.trim() || "",
@@ -2792,11 +2797,165 @@
     $("biz-target").value = profile?.target_customer || "";
     $("biz-prices").value = profile?.price_range || "";
     $("biz-payments").value = profile?.payment_methods || "";
+    $("biz-delivery").value = profile?.delivery_info || "";
     $("biz-hours").value = profile?.location_hours || "";
     $("biz-tone").value = profile?.tone || "";
     $("biz-restrictions").value = profile?.restrictions || "";
     renderBizSummary(profile);
+    renderReadiness();
     updateAiSetupControls();
+  }
+
+  function listEs(items) {
+    if (items.length < 2) return items.join("");
+    return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+  }
+
+  function missingReadiness() {
+    const r = state.aiProfile?.readiness;
+    return r ? r.items.filter((i) => !i.done) : [];
+  }
+
+  function renderReadiness() {
+    const r = state.aiProfile?.readiness;
+    const card = $("ai-ready-card");
+    card.classList.toggle("hidden", !r);
+    if (r) {
+      card.classList.toggle("is-ready", r.ready);
+      $("ai-ready-title").textContent = r.ready ? "✅ Tu IA está lista para vender" : "¿Tu IA está lista para vender?";
+      $("ai-ready-count").textContent = `${r.done} de ${r.total}`;
+      $("ai-ready-note").textContent = r.ready
+        ? "Tiene lo que necesita para responder y cerrar sin dejar a nadie esperando. Si te preguntan algo nuevo, te lo anotamos abajo para que se lo enseñes."
+        : "Sin esto la IA le dice «te confirmo» al cliente, gasta respuestas y la venta se enfría. Hasta completarlo no podrás prender la IA.";
+      $("ai-ready-list").innerHTML = r.items
+        .map(
+          (i) => `
+          <li class="ai-ready-item${i.done ? " is-done" : ""}">
+            <span class="ai-ready-mark" aria-hidden="true">${i.done ? "✓" : "!"}</span>
+            <span class="ai-ready-text"><strong>${escapeHtml(i.label)}</strong>${i.done ? "" : `<span>${escapeHtml(i.hint)}</span>`}</span>
+            ${i.done ? "" : `<button type="button" class="link-btn ai-ready-go" data-field="${escapeHtml(i.field)}">Completar</button>`}
+          </li>`
+        )
+        .join("");
+    }
+    renderReadyBanner();
+  }
+
+  function renderReadyBanner() {
+    const missing = missingReadiness();
+    const show = Boolean(missing.length && state.tenant?.ai_global_enabled && state.canManageGlobal);
+    $("ai-ready-banner").classList.toggle("hidden", !show);
+    if (show) {
+      $("ai-ready-banner-text").textContent =
+        `Tu IA está respondiendo a medias: le falta ${listEs(missing.map((i) => i.label.toLowerCase()))}. ` +
+        "Sin eso le dice «te confirmo» a tus clientes.";
+    }
+  }
+
+  function goToReadinessField(fieldId) {
+    if (state.panelMode !== "ai") switchPanelMode("ai");
+    const target = (fieldId && $(fieldId)) || $("ai-ready-card");
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (target.focus) target.focus({ preventScroll: true });
+  }
+
+  let readinessTimer = null;
+  function refreshReadinessSoon() {
+    clearTimeout(readinessTimer);
+    readinessTimer = setTimeout(async () => {
+      try {
+        state.aiProfile = await api("/outbound/business-profile");
+        renderReadiness();
+      } catch (_) {
+        /* se vuelve a revisar al abrir Personalizar IA */
+      }
+    }, 600);
+  }
+
+  function setAiQuestionsStatus(text) {
+    const el = $("ai-questions-status");
+    if (el) el.textContent = text || "";
+  }
+
+  function renderAiQuestionsBadge() {
+    const open = (state.aiQuestions || []).filter((q) => q.status === "open").length;
+    const badge = $("ai-questions-badge");
+    badge.textContent = String(open);
+    badge.classList.toggle("hidden", !open || !state.canManageGlobal);
+  }
+
+  function aiQuestionRow(q) {
+    const ro = !state.canManageGlobal;
+    const learned = q.status === "answered";
+    const times = q.times_asked > 1 ? `Te lo han preguntado ${q.times_asked} veces` : "";
+    return `
+      <li class="ai-question${learned ? " is-learned" : ""}" data-id="${escapeHtml(q.id)}">
+        <div class="ai-question-head">
+          <strong>${escapeHtml(q.topic)}</strong>
+          ${times ? `<span class="ai-question-times">${times}</span>` : ""}
+        </div>
+        ${q.question ? `<p class="ai-question-quote">«${escapeHtml(q.question)}»</p>` : ""}
+        <textarea rows="2" maxlength="1000" placeholder="Escribe la respuesta como se la darías a un cliente" ${ro ? "disabled" : ""}>${escapeHtml(q.answer || "")}</textarea>
+        <div class="ai-question-actions">
+          <button type="button" class="btn primary small ai-question-save" ${ro ? "disabled" : ""}>${learned ? "Actualizar" : "Enseñar a la IA"}</button>
+          <button type="button" class="btn ghost small ai-question-delete" ${ro ? "disabled" : ""}>${learned ? "Olvidar" : "Descartar"}</button>
+        </div>
+      </li>`;
+  }
+
+  function renderAiQuestions() {
+    renderAiQuestionsBadge();
+    const rows = state.aiQuestions || [];
+    const open = rows.filter((q) => q.status === "open");
+    const learned = rows.filter((q) => q.status === "answered");
+    $("ai-questions-list").innerHTML = open.length
+      ? open.map(aiQuestionRow).join("")
+      : '<li class="muted">Por ahora la IA ha podido responder todo lo que le preguntan 👌</li>';
+    $("ai-learned-wrap").classList.toggle("hidden", !learned.length);
+    $("ai-learned-summary").textContent = `Lo que la IA ya aprendió (${learned.length})`;
+    $("ai-learned-list").innerHTML = learned.map(aiQuestionRow).join("");
+  }
+
+  async function loadAiQuestions({ badgeOnly = false } = {}) {
+    try {
+      state.aiQuestions = await api("/ai-questions");
+    } catch (err) {
+      if (!badgeOnly) setAiQuestionsStatus(err.message);
+      return;
+    }
+    if (badgeOnly) renderAiQuestionsBadge();
+    else renderAiQuestions();
+  }
+
+  async function saveAiQuestion(item) {
+    const input = item.querySelector("textarea");
+    const answer = input.value.trim();
+    if (!answer) {
+      input.focus();
+      setAiQuestionsStatus("Escribe la respuesta para que la IA la aprenda");
+      return;
+    }
+    item.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    setAiQuestionsStatus("Guardando…");
+    try {
+      await api(`/ai-questions/${item.dataset.id}`, { method: "PUT", body: JSON.stringify({ answer }) });
+      setAiQuestionsStatus("✓ Listo — la IA ya lo sabe y lo usará en todos tus chats");
+      await loadAiQuestions();
+    } catch (err) {
+      setAiQuestionsStatus(err.message);
+      item.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  async function deleteAiQuestion(item) {
+    const learned = item.classList.contains("is-learned");
+    try {
+      await api(`/ai-questions/${item.dataset.id}`, { method: "DELETE" });
+      setAiQuestionsStatus(learned ? "La IA olvidó esa respuesta" : "Pregunta descartada");
+      await loadAiQuestions();
+    } catch (err) {
+      setAiQuestionsStatus(err.message);
+    }
   }
 
   function renderBizSummary(profile) {
@@ -2970,7 +3129,7 @@
       setBizSaveStatus(err.message);
       fillBizForm(null);
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadAiQuestions()]);
     renderAiShortcutsSummary();
   }
 
@@ -3087,6 +3246,7 @@
       renderProductsSummary();
       row.querySelector(".product-price").value = saved.price_cop != null ? "$" + formatThousands(saved.price_cop) : "";
       setProductsStatus(saved.stock === 0 ? `✓ Guardado — ${saved.name} quedó agotado` : "✓ Guardado");
+      refreshReadinessSoon();
     } catch (err) {
       setProductsStatus(err.message);
     }
@@ -3112,6 +3272,7 @@
     row.remove();
     syncProductsChrome();
     setProductsStatus(id ? "Producto quitado" : "");
+    if (id) refreshReadinessSoon();
   }
 
   async function importProductsFromCatalog() {
@@ -3153,9 +3314,16 @@
       state.aiProfile = profile;
       fillBizForm(profile);
       setBusinessName(profile.business_name, profile.business_name_is_placeholder);
-      setBizSaveStatus(
-        profile.payment_methods ? "✓ Guardado — tu IA ya puede vender sola" : "✓ Guardado — tu IA ya conoce tu negocio",
-      );
+      const missing = missingReadiness();
+      if (missing.length) {
+        setBizSaveStatus(`✓ Guardado — aún falta: ${listEs(missing.map((i) => i.label.toLowerCase()))}`);
+      } else {
+        setBizSaveStatus(
+          state.tenant?.ai_global_enabled
+            ? "✓ Guardado — tu IA ya puede vender sola"
+            : "✓ Guardado — tu IA está lista. Préndela arriba (IA global)",
+        );
+      }
       renderOnboarding();
     } catch (err) {
       setBizSaveStatus(err.message);
@@ -3624,6 +3792,8 @@
         setBusinessName(tenant.business_name, !!bizProfile?.business_name_is_placeholder);
       $("toggle-ai-global").checked = tenant.ai_global_enabled;
       }
+      renderReadiness();
+      loadAiQuestions({ badgeOnly: true });
 
       applyWaSession(wa);
       setChatListTab(state.chatListTab);
@@ -3794,6 +3964,7 @@
           state.tenant.ai_global_enabled = event.ai_global_enabled;
           $("toggle-ai-global").checked = event.ai_global_enabled;
           renderAiAlerts();
+          renderReadyBanner();
           if (state.activeId) {
             const conv = state.conversations.find((c) => c.id === state.activeId);
             if (conv) syncChatToggles(conv);
@@ -3856,7 +4027,13 @@
         break;
       case "products.updated":
         if (state.panelMode === "inventory" && !document.activeElement?.closest?.("#products-list")) loadProducts();
+        refreshReadinessSoon();
         break;
+      case "ai_questions.updated": {
+        const typing = state.panelMode === "ai" && document.activeElement?.closest?.("#ai-questions-card");
+        loadAiQuestions({ badgeOnly: state.panelMode !== "ai" || Boolean(typing) });
+        break;
+      }
       case "ai.error":
       case "ai.handoff": {
         const text = String(event.error || event.message || "").slice(0, 220);
@@ -4390,6 +4567,17 @@
   });
   $("staff-modal-backdrop")?.addEventListener("click", hideStaffModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
+  $("ai-ready-banner-btn").addEventListener("click", () => goToReadinessField(null));
+  $("ai-ready-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".ai-ready-go");
+    if (btn) goToReadinessField(btn.dataset.field);
+  });
+  $("ai-questions-card").addEventListener("click", (e) => {
+    const item = e.target.closest(".ai-question");
+    if (!item || !state.canManageGlobal) return;
+    if (e.target.closest(".ai-question-save")) saveAiQuestion(item);
+    else if (e.target.closest(".ai-question-delete")) deleteAiQuestion(item);
+  });
   $("business-name-cta").addEventListener("click", openBusinessNameSetup);
   $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
   $("alert-test-btn").addEventListener("click", () => testInterestAlert());
@@ -4693,6 +4881,11 @@
 
   $("toggle-ai-global").addEventListener("change", async (e) => {
     if (!state.canManageGlobal) return;
+    if (e.target.checked && missingReadiness().length) {
+      e.target.checked = false;
+      goToReadinessField(null);
+      return;
+    }
     try {
       const tenant = await api("/tenants/me", {
         method: "PATCH",

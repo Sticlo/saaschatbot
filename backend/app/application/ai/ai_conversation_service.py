@@ -165,10 +165,12 @@ def _complete_reply(
     correction: str = "",
     payment_methods: str = "",
     products: Optional[list[Product]] = None,
+    knowledge: str = "",
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
     system += products_prompt_block(products or [], selling=bool(payment_methods))
+    system += knowledge
     if payment_methods:
         system += payment_methods_block(payment_methods)
     system += date_context()
@@ -208,6 +210,7 @@ def generate_qualify_reply(
     booking: Optional[BookingContext] = None,
     correction: str = "",
     products: Optional[list[Product]] = None,
+    knowledge: str = "",
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_qualify_system_prompt(
@@ -227,6 +230,7 @@ def generate_qualify_reply(
         correction=correction,
         payment_methods=payment_methods_of(profile),
         products=products,
+        knowledge=knowledge,
     )
 
 
@@ -240,6 +244,7 @@ def generate_reply(
     booking: Optional[BookingContext] = None,
     correction: str = "",
     products: Optional[list[Product]] = None,
+    knowledge: str = "",
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_system_prompt(tenant, profile, shortcuts=shortcut_rows)
@@ -255,6 +260,7 @@ def generate_reply(
             correction=correction,
             payment_methods=payment_methods_of(profile),
             products=products,
+            knowledge=knowledge,
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)
