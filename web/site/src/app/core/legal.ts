@@ -6,8 +6,8 @@ import { CONTACT } from './contact';
  * de backend/app/application/auth/legal_consent_service.py.
  */
 export const LEGAL = {
-  version: '2026-10-04',
-  updatedLabel: '4 de octubre de 2026',
+  version: '2026-10-12',
+  updatedLabel: '12 de octubre de 2026',
   brand: 'Omitel',
   companyName: '[RAZÓN SOCIAL — POR COMPLETAR]',
   taxId: '[NIT — POR COMPLETAR]',

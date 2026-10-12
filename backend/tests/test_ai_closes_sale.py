@@ -140,8 +140,9 @@ def test_ai_closes_the_sale_without_handing_off(_sleep, mock_generate, mock_send
 
     assert mock_alert.call_count == 2
     paid_text = mock_alert.call_args.args[2]
-    assert "¡pedido pagado! Laura mandó el comprobante" in paid_text
-    assert "• Pago por Nequi: revisa que te haya llegado antes de despachar" in paid_text
+    assert "Laura mandó un comprobante de pago" in paid_text
+    assert "pagado" not in paid_text and "SIN CONFIRMAR" in paid_text
+    assert "• Pago por Nequi: SIN CONFIRMAR" in paid_text
 
 
 @requires_db

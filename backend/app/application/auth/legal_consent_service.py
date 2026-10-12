@@ -9,8 +9,8 @@ from app.domain.entities import LegalConsent
 
 # Cambiar junto con web/site/src/app/core/legal.ts cada vez que se publique una versión
 # nueva de los documentos (y pedir de nuevo la aceptación si el cambio es sustancial).
-TERMS_VERSION = "2026-10-04"
-PRIVACY_VERSION = "2026-10-04"
+TERMS_VERSION = "2026-10-12"
+PRIVACY_VERSION = "2026-10-12"
 
 LEGAL_REQUIRED_MESSAGE = (
     "Para crear la cuenta debes aceptar los Términos y Condiciones "

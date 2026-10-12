@@ -1445,7 +1445,7 @@ def _alert_order(
     """Un aviso cuando el pedido queda listo y otro cuando el cliente manda el comprobante."""
     kind = "paid" if order.paid else "new"
     if order.paid:
-        headline = f"💰 *{tenant.business_name}*: ¡pedido pagado! {_contact_label(conversation)} mandó el comprobante."
+        headline = f"🧾 *{tenant.business_name}*: {_contact_label(conversation)} mandó un comprobante de pago."
     else:
         headline = f"🛍️ *{tenant.business_name}*: la IA cerró un pedido de {_contact_label(conversation)}."
     lines = [headline, "", f"• Pedido: {order.items}"]
@@ -1457,7 +1457,7 @@ def _alert_order(
         lines.append(f"• Entrega: {order.delivery}")
     if order.paid:
         via = f" por {order.payment}" if order.payment else ""
-        lines.append(f"• Pago{via}: revisa que te haya llegado antes de despachar ✅")
+        lines.append(f"• Pago{via}: SIN CONFIRMAR. Un comprobante puede ser falso; revisa en tu banco o Nequi que la plata llegó antes de despachar.")
     else:
         lines.append(f"• Pago: {order.payment or 'aún no'} (pendiente del comprobante)")
     lines += _stock_lines(list(stock))
@@ -1478,7 +1478,7 @@ def _alert_order(
     record_incident(
         tenant.id,
         "system.ai_order_paid" if order.paid else "system.ai_order_new",
-        f"{_contact_label(conversation)}: {'pagó' if order.paid else 'pidió'} {order.items}"
+        f"{_contact_label(conversation)}: {'mandó comprobante de' if order.paid else 'pidió'} {order.items}"
         + (f" — {order.total}" if order.total else ""),
         details={"conversation_id": str(conversation.id)},
         throttle_seconds=ORDER_ALERT_TTL_SECONDS,
