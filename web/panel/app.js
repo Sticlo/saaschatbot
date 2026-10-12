@@ -1507,11 +1507,13 @@
   function diagHeadline(d, kind) {
     if (kind === "unanswered") {
       const one = d.unanswered === 1;
-      return `<strong>${pluralEs(d.unanswered, "cliente", "clientes")}</strong> te ${one ? "escribió" : "escribieron"} y ${one ? "se quedó" : "se quedaron"} sin respuesta`;
+      return `<strong>${pluralEs(d.unanswered, "persona", "personas")}</strong> te ${one ? "preguntó" : "preguntaron"} por lo que vendes y ${one ? "se quedó" : "se quedaron"} sin respuesta`;
     }
-    if (kind === "slow") return `Tus clientes esperan <strong>${formatWait(d.median_reply_seconds)}</strong> por una respuesta`;
-    if (kind === "after_hours") return `<strong>${pluralEs(d.after_hours, "vez", "veces")}</strong> te escribieron fuera de tu horario`;
-    return "Le respondiste a todos tus clientes 👏";
+    if (kind === "slow") return `Quien te pregunta por lo que vendes espera <strong>${formatWait(d.median_reply_seconds)}</strong> por una respuesta`;
+    if (kind === "after_hours") {
+      return `<strong>${pluralEs(d.after_hours, "persona", "personas")}</strong> te ${d.after_hours === 1 ? "escribió" : "escribieron"} fuera de tu horario`;
+    }
+    return "Le respondiste a todos los que te preguntaron 👏";
   }
 
   function diagMoneyHtml(d, ticket) {
@@ -1533,12 +1535,14 @@
   function diagnosticHtml(res) {
     const d = res.diagnostic || {};
     const kind = diagHeadlineKind(d);
-    const stats = [`<li><strong>${pluralEs(d.clients, "persona", "personas")}</strong> te escribieron</li>`];
+    const stats = [
+      `<li><strong>${pluralEs(d.clients, "persona", "personas")}</strong> te ${d.clients === 1 ? "preguntó" : "preguntaron"} por precios, productos, envíos o citas</li>`,
+    ];
     if (d.after_hours > 0 && kind !== "after_hours") {
-      stats.push(`<li><strong>${pluralEs(d.after_hours, "vez", "veces")}</strong> te escribieron fuera de tu horario</li>`);
+      stats.push(`<li><strong>${pluralEs(d.after_hours, "persona", "personas")}</strong> te ${d.after_hours === 1 ? "escribió" : "escribieron"} fuera de tu horario</li>`);
     }
     if (d.median_reply_seconds != null && kind !== "slow") {
-      stats.push(`<li>Normalmente tardas <strong>${formatWait(d.median_reply_seconds)}</strong> en contestar</li>`);
+      stats.push(`<li>Normalmente tardas <strong>${formatWait(d.median_reply_seconds)}</strong> en contestarles</li>`);
     }
     const topics = (d.topics || []).slice(0, 3);
     const topicsHtml = topics.length
@@ -1548,14 +1552,14 @@
            .join("")}</div>`
       : "";
     const cta = setupIncomplete() ? "Configurar mi IA (2 min)" : "¡Entendido!";
-    return `<p class="diag-kicker">Tu WhatsApp en los últimos ${d.window_days || 30} días</p>
+    return `<p class="diag-kicker">Tus clientes en WhatsApp, últimos ${d.window_days || 30} días</p>
       <h3 id="diag-title" class="diag-headline">${diagHeadline(d, kind)}</h3>
       <ul class="diag-stats">${stats.join("")}</ul>
       ${diagMoneyHtml(d, res.avg_ticket_cop)}
       ${topicsHtml}
       <p class="diag-omi">Desde hoy la IA les responde en segundos, de día y de noche, y te avisa cuando alguien quiere comprar.</p>
       <button type="button" class="btn primary diag-cta" data-diag-cta>${cta}</button>
-      <p class="diag-fine">Contamos solo chats personales, no grupos. No guardamos esos mensajes: solo estos números.</p>`;
+      <p class="diag-fine">Contamos solo los chats donde te preguntaron por lo que vendes; dejamos por fuera grupos, conversaciones personales y notificaciones. Son chats de antes de conectar Omitel, por eso no aparecen en tu panel. No guardamos esos mensajes: solo estos números.</p>`;
   }
 
   function openDiagnostic() {

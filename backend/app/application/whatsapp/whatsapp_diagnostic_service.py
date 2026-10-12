@@ -42,11 +42,22 @@ UNANSWERED_MIN_AGE_SECONDS = 30 * 60
 SLOW_REPLY_SECONDS = 3600
 FAST_REPLY_SECONDS = 5 * 60
 MIN_CLIENTS = 3
+# Sube cuando cambia qué se cuenta: un diagnóstico viejo no se muestra con reglas nuevas.
+DIAGNOSTIC_VERSION = 2
+# Muchos números son mixtos: un chat con cientos de mensajes al mes es familia o amigos, no un cliente.
+PERSONAL_CHAT_MIN_MESSAGES = 300
+# Notificaciones de bancos y tiendas: largas y con links, nunca son un cliente preguntando.
+_INQUIRY_MAX_CHARS = 400
 
 TOPICS: tuple[tuple[str, str, re.Pattern], ...] = tuple(
     (key, label, re.compile(pattern))
     for key, label, pattern in (
-        ("precio", "precios", r"\b(precio|precios|cuanto|cuantos|valor|vale|cuesta|costo|cobran|tarifa)\b"),
+        (
+            "precio",
+            "precios",
+            r"\b(precio|precios|valor|cuesta|cuestan|costo|cobran|tarifa"
+            r"|cuanto (vale|valen|cuesta|cuestan|es|son|sale|salen|cobra|cobran|seria|queda))\b",
+        ),
         (
             "envio",
             "envíos y domicilios",
@@ -57,7 +68,8 @@ TOPICS: tuple[tuple[str, str, re.Pattern], ...] = tuple(
         (
             "disponible",
             "disponibilidad y tallas",
-            r"\b(tienen|disponible|disponibles|talla|tallas|color|colores|stock|catalogo|referencia|modelos)\b",
+            r"\b(disponible|disponibles|disponibilidad|talla|tallas|stock|catalogo|referencia|referencias|modelos"
+            r"|tienen (el|la|los|las|en|disponible|de))\b",
         ),
         ("pago", "formas de pago", r"\b(nequi|daviplata|transferencia|bancolombia|tarjeta|pse|efectivo|pagar|consignar)\b"),
         ("cita", "citas y reservas", r"\b(cita|citas|agendar|agenda|reservar|reserva|turno|cupo|cupos)\b"),
@@ -98,6 +110,19 @@ def _is_closing(text: str) -> bool:
     return all(word in _CLOSING_WORDS for word in words)
 
 
+_ASKS_RE = re.compile(
+    r"\b(cuanto|cuantos|precio|tienen|tiene|hay|manejan|venden|hacen|envian|donde|como (hago|compro|pago|puedo)"
+    r"|quisiera|quiero|necesito|info|informacion|me (regala|regalas|das|pasa|pasas|puede|puedes|podria|interesa))\b"
+)
+
+
+def _is_sales_inquiry(text: str, topics: str) -> bool:
+    """Alguien preguntando por lo que vende el negocio, no una charla ni una notificación."""
+    if not topics or len(text) > _INQUIRY_MAX_CHARS or "http" in text.lower():
+        return False
+    return "?" in text or bool(_ASKS_RE.search(_normalize(text)))
+
+
 def _is_noise(body: str) -> bool:
     """Stickers y reacciones: solos no piden respuesta."""
     return is_reaction_only(body) or _detect_media_type_from_body(body) in ("sticker", "reaction")
@@ -127,9 +152,14 @@ def record_history_batch(session: WhatsAppSession, data: Any, *, now: Optional[d
         chat = hashlib.sha1(jid.encode()).hexdigest()[:12]
         if from_me:
             flags = "o||"
+        elif _is_noise(body):
+            flags = "i|n|"
+        elif _is_closing(body):
+            flags = "i|c|"
         else:
-            kind = "n" if _is_noise(body) else ("c" if _is_closing(body) else "q")
-            flags = f"i|{kind}|{_topics_of(body)}"
+            topics = _topics_of(body)
+            # s = pregunta de venta; m = cualquier otro mensaje que espera respuesta.
+            flags = f"i|s|{topics}" if _is_sales_inquiry(body, topics) else "i|m|"
         members[f"{chat}|{flags}|{item.get('message_id')}"] = sent_at.timestamp()
     if not members:
         return 0
@@ -189,33 +219,41 @@ def compute_diagnostic(
     topic_chats: dict[str, int] = {}
     now_ts = now.timestamp()
     for events in chats.values():
-        events.sort()
-        if not any(direction == "i" for _, direction, _, _ in events):
+        # Solo cuenta quien preguntó por lo que vende el negocio; las charlas personales no son clientes.
+        if len(events) >= PERSONAL_CHAT_MIN_MESSAGES or not any(kind == "s" for _, _, kind, _ in events):
             continue
+        events.sort()
         clients += 1
         seen_topics: set[str] = set()
+        wrote_after_hours = False
         turn_start: Optional[float] = None
-        last_question: Optional[float] = None
+        turn_is_sale = False
+        last_message: Optional[float] = None
         for ts, direction, kind, topics in events:
             if direction == "o":
-                if turn_start is not None:
+                if turn_start is not None and turn_is_sale:
                     requests += 1
-                    after_hours += outside_hours(turn_start)
+                    wrote_after_hours = wrote_after_hours or outside_hours(turn_start)
                     wait = ts - turn_start
                     waits.append(wait)
                     slow += wait >= SLOW_REPLY_SECONDS
                 turn_start = None
-                last_question = None
+                turn_is_sale = False
+                last_message = None
                 continue
-            seen_topics.update(t for t in topics.split(",") if t)
-            if kind == "q":
-                turn_start = turn_start if turn_start is not None else ts
-                last_question = ts
-        if turn_start is not None:
+            if kind not in ("s", "m"):
+                continue
+            turn_start = turn_start if turn_start is not None else ts
+            last_message = ts
+            if kind == "s":
+                turn_is_sale = True
+                seen_topics.update(t for t in topics.split(",") if t)
+        if turn_start is not None and turn_is_sale:
             requests += 1
-            after_hours += outside_hours(turn_start)
-            if last_question is not None and now_ts - last_question >= UNANSWERED_MIN_AGE_SECONDS:
+            wrote_after_hours = wrote_after_hours or outside_hours(turn_start)
+            if last_message is not None and now_ts - last_message >= UNANSWERED_MIN_AGE_SECONDS:
                 unanswered += 1
+        after_hours += wrote_after_hours
         for topic in seen_topics:
             topic_chats[topic] = topic_chats.get(topic, 0) + 1
 
@@ -225,6 +263,7 @@ def compute_diagnostic(
         if count >= 2
     ][:4]
     return {
+        "version": DIAGNOSTIC_VERSION,
         "connection_id": str(connection_id),
         "computed_at": now.isoformat(),
         "window_days": WINDOW_DAYS,
@@ -261,6 +300,8 @@ def diagnostic_status(db: Session, tenant: Tenant, *, now: Optional[datetime] = 
     session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant.id).first()
     connection_id = session.active_connection_id if session else None
 
+    if stored and stored.get("version") != DIAGNOSTIC_VERSION:
+        stored = None
     if connection_id is not None:
         last_batch = _last_batch_at(tenant.id, connection_id)
         current = bool(stored) and stored.get("connection_id") == str(connection_id)

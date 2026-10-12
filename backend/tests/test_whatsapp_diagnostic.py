@@ -27,10 +27,25 @@ def _msg(jid: str, text: str | None, when: datetime, *, from_me: bool = False, s
     }
 
 
+def _personal_chats() -> list[dict]:
+    """Un número mixto: la familia y el banco también escriben, y no son clientes."""
+    family, friend, bank = (f"57311{n}000000@s.whatsapp.net" for n in range(1, 4))
+    chatty = [
+        _msg(family, "jaja sí" if i % 2 else "¿cuánto vale el arriendo este mes?", _at(5, 8) + timedelta(minutes=i), from_me=bool(i % 3 == 0))
+        for i in range(300)
+    ]
+    return [
+        *chatty,
+        _msg(friend, "Hola mami, cómo estás? ya llegaste?", _at(2, 21)),
+        _msg(bank, "Bancolombia: recibiste una transferencia por $50.000. Detalle en https://banco.co/x", _at(2, 23)),
+    ]
+
+
 def _history() -> dict:
     a, b, c, d = (f"57300{n}000000@s.whatsapp.net" for n in range(1, 5))
     return {
         "messages": [
+            *_personal_chats(),
             # Contestado a las 2 horas; el «gracias» final no deja a nadie esperando.
             _msg(a, "Hola, cuánto vale?", _at(3, 10)),
             _msg(a, "Vale $90.000", _at(3, 12), from_me=True),
@@ -57,10 +72,11 @@ def test_history_becomes_a_diagnostic_without_storing_texts():
 
     with SessionLocal() as db:
         tenant, session = make_wa_tenant(db, label="Diag")
-        assert record_history_batch(session, _history(), now=NOW) == 7
+        assert record_history_batch(session, _history(), now=NOW) == 7 + 302
         result = compute_diagnostic(db, db.get(Tenant, tenant.id), session.active_connection_id, now=NOW)
 
-    assert result["clients"] == 4
+    # Solo quienes preguntaron por lo que vende: ni la familia, ni el banco, ni el sticker suelto.
+    assert result["clients"] == 3
     assert result["requests"] == 3
     assert result["unanswered"] == 1
     assert result["after_hours"] == 1
@@ -124,4 +140,26 @@ def test_messages_set_webhook_feeds_the_diagnostic(wa_offline):
     )
     with SessionLocal() as db:
         result = compute_diagnostic(db, db.get(Tenant, tenant.id), session.active_connection_id)
-    assert result is not None and result["clients"] == 4
+    assert result is not None and result["clients"] == 3
+
+
+def test_diagnostic_counted_with_old_rules_is_not_shown():
+    from app.application.whatsapp.whatsapp_diagnostic_service import diagnostic_status
+    from app.domain.entities import Tenant, TenantProfile
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, session = make_wa_tenant(db, label="Diag")
+        db.add(
+            TenantProfile(
+                tenant_id=tenant.id,
+                whatsapp_diagnostic={
+                    "connection_id": str(session.active_connection_id),
+                    "computed_at": NOW.isoformat(),
+                    "clients": 86,
+                    "unanswered": 54,
+                },
+            )
+        )
+        db.commit()
+        assert diagnostic_status(db, db.get(Tenant, tenant.id), now=NOW)["status"] == "none"
