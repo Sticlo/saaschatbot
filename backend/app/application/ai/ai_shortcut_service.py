@@ -136,9 +136,29 @@ class OrderSummary:
     delivery: str = ""
     payment: str = ""
     paid: bool = False
+    # (ref del producto, cantidad): con esto se descuenta lo vendido.
+    lines: tuple[tuple[str, int], ...] = ()
 
 
 _ORDER_FIELD_MAX = 300
+_REF_RE = re.compile(r"^[0-9a-f]{8}$")
+
+
+def _order_lines(raw: Any) -> tuple[tuple[str, int], ...]:
+    if not isinstance(raw, list):
+        return ()
+    out: list[tuple[str, int]] = []
+    for item in raw[:30]:
+        if not isinstance(item, dict):
+            continue
+        ref = str(item.get("ref") or "").strip().lower()
+        try:
+            qty = int(item.get("qty", 1))
+        except (TypeError, ValueError):
+            continue
+        if _REF_RE.match(ref) and 0 < qty <= 999:
+            out.append((ref, qty))
+    return tuple(out)
 
 
 def parse_order(raw: Any) -> Optional[OrderSummary]:
@@ -165,6 +185,7 @@ def parse_order(raw: Any) -> Optional[OrderSummary]:
         delivery=field("delivery"),
         payment=field("payment"),
         paid=paid is True or str(paid).strip().lower() == "true",
+        lines=_order_lines(raw.get("lines")),
     )
 
 

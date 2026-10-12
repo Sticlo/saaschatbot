@@ -2960,8 +2960,142 @@
       setBizSaveStatus(err.message);
       fillBizForm(null);
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadProducts()]);
     renderAiShortcutsSummary();
+  }
+
+  async function loadProducts() {
+    try {
+      state.products = await api("/products");
+    } catch {
+      state.products = [];
+    }
+    renderProducts();
+  }
+
+  function formatThousands(n) {
+    return Number(n).toLocaleString("es-CO", { maximumFractionDigits: 0 });
+  }
+
+  function productRow(p) {
+    const ro = state.canManageGlobal ? "" : " disabled";
+    return `
+      <div class="product-row${p.stock === 0 ? " is-out" : ""}" data-id="${escapeHtml(p.id || "")}">
+        <input type="text" class="product-name" maxlength="120" placeholder="Ej: Tenis blancos" aria-label="Producto" value="${escapeHtml(p.name || "")}"${ro} />
+        <input type="text" class="product-price" inputmode="numeric" placeholder="Precio" aria-label="Precio" value="${p.price_cop != null ? "$" + formatThousands(p.price_cop) : ""}"${ro} />
+        <input type="number" class="product-stock" min="0" step="1" placeholder="Sin contar" aria-label="Cuántos quedan" value="${p.stock ?? ""}"${ro} />
+        <input type="text" class="product-details" maxlength="500" placeholder="Tallas, colores, sabores…" aria-label="Detalles" value="${escapeHtml(p.details || "")}"${ro} />
+        <button type="button" class="alert-remove product-remove" aria-label="Quitar producto" title="Quitar"${ro}>×</button>
+      </div>`;
+  }
+
+  function renderProducts() {
+    const list = $("products-list");
+    if (!list) return;
+    const items = state.products || [];
+    list.innerHTML = items.map(productRow).join("");
+    syncProductsChrome();
+    $("products-add-btn").disabled = !state.canManageGlobal;
+  }
+
+  function syncProductsChrome() {
+    const rows = document.querySelectorAll("#products-list .product-row").length;
+    $("products-head").classList.toggle("hidden", !rows);
+    $("products-empty").classList.toggle("hidden", rows > 0);
+  }
+
+  function renderProductsImport() {
+    const hasCatalog = (state.quickShortcuts || []).some((s) => s.content);
+    $("products-import-btn")?.classList.toggle("hidden", !hasCatalog || !state.canManageGlobal);
+  }
+
+  function setProductsStatus(text) {
+    const el = $("products-status");
+    if (el) el.textContent = text || "";
+  }
+
+  function addProductRow() {
+    const list = $("products-list");
+    list.insertAdjacentHTML("beforeend", productRow({}));
+    syncProductsChrome();
+    list.lastElementChild.querySelector(".product-name").focus();
+  }
+
+  function readProductRow(row) {
+    const digits = row.querySelector(".product-price").value.replace(/\D/g, "");
+    const stockRaw = row.querySelector(".product-stock").value.trim();
+    const stock = stockRaw === "" ? null : Math.max(0, Math.floor(Number(stockRaw)) || 0);
+    return {
+      name: row.querySelector(".product-name").value.trim(),
+      price_cop: digits ? Number(digits) : null,
+      stock,
+      details: row.querySelector(".product-details").value.trim(),
+    };
+  }
+
+  async function saveProductRow(row) {
+    const body = readProductRow(row);
+    if (!body.name) {
+      if (row.dataset.id) setProductsStatus("Escribe el nombre del producto");
+      return;
+    }
+    setProductsStatus("Guardando…");
+    try {
+      const id = row.dataset.id;
+      const saved = await api(id ? `/products/${id}` : "/products", {
+        method: id ? "PATCH" : "POST",
+        body: JSON.stringify(body),
+      });
+      row.dataset.id = saved.id;
+      state.products = [...(state.products || []).filter((p) => p.id !== saved.id), saved];
+      row.classList.toggle("is-out", saved.stock === 0);
+      row.querySelector(".product-price").value = saved.price_cop != null ? "$" + formatThousands(saved.price_cop) : "";
+      setProductsStatus(saved.stock === 0 ? `✓ Guardado — ${saved.name} quedó agotado` : "✓ Guardado");
+    } catch (err) {
+      setProductsStatus(err.message);
+    }
+  }
+
+  function queueProductSave(row) {
+    // Un producto nuevo se crea en el primer guardado: los cambios siguientes esperan su id.
+    row._saving = (row._saving || Promise.resolve()).then(() => saveProductRow(row));
+  }
+
+  async function removeProductRow(row) {
+    await row._saving;
+    const id = row.dataset.id;
+    if (id) {
+      try {
+        await api(`/products/${id}`, { method: "DELETE" });
+      } catch (err) {
+        setProductsStatus(err.message);
+        return;
+      }
+      state.products = (state.products || []).filter((p) => p.id !== id);
+    }
+    row.remove();
+    syncProductsChrome();
+    setProductsStatus(id ? "Producto quitado" : "");
+  }
+
+  async function importProductsFromCatalog() {
+    const btn = $("products-import-btn");
+    btn.disabled = true;
+    setProductsStatus("Leyendo tu catálogo…");
+    try {
+      const res = await api("/products/import-catalog", { method: "POST" }, 20000);
+      state.products = res.products;
+      renderProducts();
+      setProductsStatus(
+        res.created
+          ? `✓ Agregamos ${res.created} producto${res.created === 1 ? "" : "s"} de tu catálogo. Revisa los precios y pon cuántos quedan.`
+          : "No encontramos productos nuevos con precio en tu catálogo.",
+      );
+    } catch (err) {
+      setProductsStatus(err.message);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function saveAiSetup() {
@@ -3033,6 +3167,7 @@
       }).join("");
     }
     if (btn) btn.classList.toggle("hidden", !state.canManageGlobal);
+    renderProductsImport();
   }
 
   function renderQuickShortcuts() {
@@ -3683,6 +3818,9 @@
           })
           .catch(() => {});
         break;
+      case "products.updated":
+        if (state.panelMode === "ai" && !document.activeElement?.closest?.("#products-list")) loadProducts();
+        break;
       case "ai.error":
       case "ai.handoff": {
         const text = String(event.error || event.message || "").slice(0, 220);
@@ -4224,6 +4362,16 @@
     if (btn) removeAlertRecipient(btn);
   });
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
+  $("products-add-btn")?.addEventListener("click", addProductRow);
+  $("products-import-btn")?.addEventListener("click", importProductsFromCatalog);
+  $("products-list")?.addEventListener("change", (e) => {
+    const row = e.target.closest(".product-row");
+    if (row && state.canManageGlobal) queueProductSave(row);
+  });
+  $("products-list")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".product-remove");
+    if (btn && state.canManageGlobal) removeProductRow(btn.closest(".product-row"));
+  });
   $("shortcuts-add-btn").addEventListener("click", () => {
     if (state.shortcutsDraft.length >= 12) return;
     state.shortcutsDraft.push(newShortcutDraft());

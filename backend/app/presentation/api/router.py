@@ -12,6 +12,7 @@ from app.presentation.api import (
     conversations,
     plans,
     platform,
+    products,
     quick_shortcuts,
     results,
     subscriptions,
@@ -30,6 +31,7 @@ api_router.include_router(whatsapp.router)
 api_router.include_router(conversations.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
+api_router.include_router(products.router)
 api_router.include_router(appointments.router)
 api_router.include_router(results.router)
 api_router.include_router(ai.router)

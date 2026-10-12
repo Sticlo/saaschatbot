@@ -27,8 +27,9 @@ from app.application.messaging.message_service import (
     media_caption,
     text_for_ai,
 )
+from app.application.products.product_service import products_prompt_block
 from app.config import settings
-from app.domain.entities import Message, Tenant, TenantProfile
+from app.domain.entities import Message, Product, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
 from app.infrastructure.ai.ai_text_provider import chat_completion
 from app.infrastructure.ai.deepseek_client import DeepSeekError
@@ -163,9 +164,11 @@ def _complete_reply(
     booking: Optional[BookingContext] = None,
     correction: str = "",
     payment_methods: str = "",
+    products: Optional[list[Product]] = None,
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
+    system += products_prompt_block(products or [], selling=bool(payment_methods))
     if payment_methods:
         system += payment_methods_block(payment_methods)
     system += date_context()
@@ -204,6 +207,7 @@ def generate_qualify_reply(
     shortcuts: list[dict] | None = None,
     booking: Optional[BookingContext] = None,
     correction: str = "",
+    products: Optional[list[Product]] = None,
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_qualify_system_prompt(
@@ -222,6 +226,7 @@ def generate_qualify_reply(
         booking=booking,
         correction=correction,
         payment_methods=payment_methods_of(profile),
+        products=products,
     )
 
 
@@ -234,6 +239,7 @@ def generate_reply(
     shortcuts: list[dict] | None = None,
     booking: Optional[BookingContext] = None,
     correction: str = "",
+    products: Optional[list[Product]] = None,
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_system_prompt(tenant, profile, shortcuts=shortcut_rows)
@@ -248,6 +254,7 @@ def generate_reply(
             booking=booking,
             correction=correction,
             payment_methods=payment_methods_of(profile),
+            products=products,
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

@@ -88,6 +88,7 @@ from app.application.messaging.message_service import (
 )
 from app.application.outbound.outbound_dedup_service import mark_phone_excluded
 from app.application.outbound.quick_shortcut_service import get_shortcuts
+from app.application.products.product_service import StockChange, list_products, reserve_order_stock
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
 from app.application.whatsapp.whatsapp_service import send_text_message
 from app.config import settings
@@ -1392,7 +1393,7 @@ def _deliver_reply(
     selling = bool(payment_methods_of(tenant.profile))
     stage = _resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking, selling=selling)
     if selling and reply.order is not None:
-        _alert_order(tenant, conversation, reply.order)
+        _alert_order(tenant, conversation, reply.order, _reserve_stock_once(db, tenant, conversation, reply.order))
         stage = _max_stage(stage, STAGE_INTERESTED)
     _apply_stage(
         db,
@@ -1405,7 +1406,42 @@ def _deliver_reply(
     return True
 
 
-def _alert_order(tenant: Tenant, conversation: Conversation, order: OrderSummary) -> None:
+def _reserve_stock_once(
+    db: Session, tenant: Tenant, conversation: Conversation, order: OrderSummary
+) -> list[StockChange]:
+    """La IA repite el pedido en cada respuesta: las unidades se descuentan una sola vez."""
+    if not order.lines:
+        return []
+    try:
+        if not get_redis().set(f"ai:order_stock:{conversation.id}", "1", nx=True, ex=ORDER_ALERT_TTL_SECONDS):
+            return []
+    except Exception:
+        return []
+    try:
+        changes = reserve_order_stock(db, tenant.id, order.lines)
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("No se pudo descontar el pedido conv=%s", conversation.id)
+        return []
+    if changes:
+        publish_panel_event(tenant.id, {"type": "products.updated"})
+    return changes
+
+
+def _stock_lines(changes: list[StockChange]) -> list[str]:
+    lines = []
+    for change in changes:
+        if change.left == 0:
+            lines.append(f"• ⚠️ Se agotó {change.name}: la IA ya no lo ofrece. Si te llega más, súmalo en el panel.")
+        else:
+            lines.append(f"• Quedan {change.left} de {change.name}")
+    return lines
+
+
+def _alert_order(
+    tenant: Tenant, conversation: Conversation, order: OrderSummary, stock: list[StockChange] = ()
+) -> None:
     """Un aviso cuando el pedido queda listo y otro cuando el cliente manda el comprobante."""
     kind = "paid" if order.paid else "new"
     if order.paid:
@@ -1424,6 +1460,7 @@ def _alert_order(tenant: Tenant, conversation: Conversation, order: OrderSummary
         lines.append(f"• Pago{via}: revisa que te haya llegado antes de despachar ✅")
     else:
         lines.append(f"• Pago: {order.payment or 'aún no'} (pendiente del comprobante)")
+    lines += _stock_lines(list(stock))
     lines += ["", _contact_line(conversation), f"Ver chat: {_panel_link()}"]
     _send_sales_alert(
         tenant,
@@ -1676,6 +1713,7 @@ def _process_qualify(
             is_first_contact=is_first_contact,
             shortcuts=shortcuts,
             booking=booking,
+            products=list_products(db, tenant.id),
         )
     except DeepSeekError as exc:
         log.warning("IA qualify sin respuesta conv=%s: %s", conversation.id, exc)
@@ -1761,6 +1799,7 @@ def _process_full_reply(
             history=history,
             shortcuts=shortcuts,
             booking=booking,
+            products=list_products(db, tenant.id),
         )
     except DeepSeekError as exc:
         log.warning("IA sin respuesta conv=%s: %s", conversation.id, exc)
