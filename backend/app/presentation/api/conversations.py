@@ -684,8 +684,9 @@ def update_conversation_ai(
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     if body.ai_active:
-        from app.application.ai.ai_service import maybe_schedule_ai_for_conversation
+        from app.application.ai.ai_service import mark_ai_enabled_by_owner, maybe_schedule_ai_for_conversation
 
+        mark_ai_enabled_by_owner(conversation.id)
         scheduled = maybe_schedule_ai_for_conversation(
             db,
             tenant_id=current.tenant_id,

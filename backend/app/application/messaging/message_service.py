@@ -651,6 +651,7 @@ def save_inbound_message(
         tenant=tenant,
         conversation=conversation,
         body=body,
+        db=db,
     ):
         if publish:
             from app.application.realtime.realtime_service import publish_conversation_updated

@@ -47,6 +47,7 @@ def _finalize_inbound_ai(
                     tenant=tenant,
                     conversation=conversation,
                     body=latest_in.body or "",
+                    db=db,
                 ):
                     db.flush()
                     publish_conversation_updated(tenant.id, conversation)

@@ -36,6 +36,7 @@ from app.application.ai.ai_appointment_service import (
     stalls_on_agenda,
     try_create_booking,
 )
+from app.application.ai.ai_auto_enable_service import owner_messages
 from app.application.ai.ai_classifier_service import classify_inbound_message
 from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
@@ -129,6 +130,7 @@ HANDOFF_MARKER_TTL_SECONDS = 30 * 24 * 3600
 # Chat pasado a una persona: si nadie le contesta al cliente en este tiempo, la IA lo retoma.
 HANDOFF_RESCUE_SECONDS = 5 * 60
 HANDOFF_WAIT_TTL_SECONDS = 24 * 3600
+AI_ENABLED_MARKER_TTL_SECONDS = 90 * 24 * 3600
 # La IA le dijo al cliente que el negocio le confirma: si el dueño no le escribe, se le recuerda.
 OWNER_CONFIRM_REMINDER_SECONDS = (5 * 60, 30 * 60)
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
@@ -256,24 +258,63 @@ def _mark_awaiting_owner(tenant_id: uuid.UUID, conversation_id: uuid.UUID, messa
             _schedule_rescue(tenant_id, conversation_id, message_id, delay_seconds=delay)
 
 
-def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
-    """El dueño ya le escribió al cliente (panel o celular) después del aviso: el chat es suyo."""
-    if not conversation.ai_active or conversation.mode != ConversationMode.AUTO.value:
-        return False
+def _ai_enabled_key(conversation_id: uuid.UUID) -> str:
+    return f"ai:enabled_by_owner:{conversation_id}"
+
+
+def mark_ai_enabled_by_owner(conversation_id: uuid.UUID) -> None:
+    """El dueño prendió la IA de este chat a mano: lo que él escribió antes no la aparta."""
+    try:
+        get_redis().set(_ai_enabled_key(conversation_id), str(time.time()), ex=AI_ENABLED_MARKER_TTL_SECONDS)
+    except Exception:
+        log.warning("No se pudo marcar la IA como activada por el dueño conv=%s", conversation_id)
+
+
+def _ai_enabled_by_owner_at(conversation_id: uuid.UUID) -> Optional[datetime]:
+    try:
+        raw = get_redis().get(_ai_enabled_key(conversation_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _owner_is_talking(db: Session, conversation: Conversation) -> bool:
+    """El dueño escribió en el chat y la IA no ha hablado desde entonces (ni él la prendió después)."""
     since = _awaiting_human_since(conversation.id)
-    if since is None:
-        return False
-    replied = (
-        db.query(Message.id)
+    if since is not None and db.query(
+        owner_messages(db, conversation.id).filter(Message.created_at >= since).exists()
+    ).scalar():
+        return True
+    last_bot = (
+        db.query(func.max(Message.created_at))
         .filter(
             Message.conversation_id == conversation.id,
             Message.direction == MessageDirection.OUT.value,
-            Message.source == MessageSource.AGENT.value,
-            Message.created_at >= since,
+            Message.source == MessageSource.BOT.value,
         )
-        .first()
+        .scalar()
     )
-    if replied is None:
+    floor = max(
+        (t for t in (last_bot, _ai_enabled_by_owner_at(conversation.id)) if t is not None),
+        default=None,
+    )
+    query = owner_messages(db, conversation.id)
+    if floor is not None:
+        query = query.filter(Message.created_at > floor)
+    return db.query(query.exists()).scalar()
+
+
+def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
+    """El dueño le está escribiendo al cliente (panel o celular): el chat es suyo y la IA no
+    habla por él, ni en chats de clientes que atiende él ni en los personales."""
+    if not conversation.ai_active or conversation.mode != ConversationMode.AUTO.value:
+        return False
+    if not _owner_is_talking(db, conversation):
         return False
     conversation.ai_active = False
     conversation.mode = ConversationMode.MANUAL.value
@@ -530,7 +571,7 @@ def maybe_schedule_ai_for_conversation(
     elif not is_respondable_text(text_for_ai(latest_in)) and not can_transcribe(latest_in):
         return False
 
-    if not classify_mode and _bot_already_replied(db, conversation_id, latest_in):
+    if not classify_mode and _already_answered(db, conversation_id, latest_in):
         return False
 
     # El panel abierto refresca cada pocos segundos: sin esto, un envío que falla siempre
@@ -728,14 +769,18 @@ def _client_kept_writing(db: Session, conversation_id: uuid.UUID, message: Messa
     return latest is not None and latest.id != message.id and latest.created_at > message.created_at
 
 
-def _bot_already_replied(
+def _already_answered(
     db: Session,
     conversation_id: uuid.UUID,
     message: Message,
     *,
     ignore_message_id: Optional[str] = None,
 ) -> bool:
-    """`ignore_message_id`: el «dame un momentico» no cuenta como respuesta real."""
+    """Le contestó la IA o el dueño. `ignore_message_id`: el «dame un momentico» no cuenta."""
+    if db.query(
+        owner_messages(db, conversation_id).filter(Message.created_at >= message.created_at).exists()
+    ).scalar():
+        return True
     query = db.query(Message.id).filter(
         Message.conversation_id == conversation_id,
         Message.direction == MessageDirection.OUT.value,
@@ -1961,7 +2006,7 @@ def process_ai_reply(
 
     holding_id = _holding_message_id(message_id)
 
-    if not classify_mode and _bot_already_replied(
+    if not classify_mode and _already_answered(
         db, conversation_id, message, ignore_message_id=holding_id
     ):
         log.info("IA skip conv=%s: ya respondida msg=%s", conversation_id, message_id)
@@ -1987,7 +2032,7 @@ def process_ai_reply(
         return True
     if not is_target():
         return True
-    if not classify_mode and _bot_already_replied(
+    if not classify_mode and _already_answered(
         db, conversation_id, message, ignore_message_id=holding_id
     ):
         return True
