@@ -480,9 +480,11 @@
     activeChat.classList.add("hidden");
     $("ai-setup-panel").classList.add("hidden");
     $("appointments-panel").classList.add("hidden");
+    $("inventory-panel").classList.add("hidden");
     $("sidebar-chats").classList.remove("hidden");
     $("mode-chats").classList.add("active");
     $("mode-appointments").classList.remove("active");
+    $("mode-inventory").classList.remove("active");
     $("mode-ai").classList.remove("active");
     $("chat-area").classList.remove("ai-setup-mode", "appointments-mode");
     $("business-name").textContent = "—";
@@ -2142,16 +2144,19 @@
     state.panelMode = mode;
     const isChats = mode === "chats";
     const isAppointments = mode === "appointments";
+    const isInventory = mode === "inventory";
     const isAi = mode === "ai";
 
     $("mode-chats").classList.toggle("active", isChats);
     $("mode-appointments").classList.toggle("active", isAppointments);
+    $("mode-inventory").classList.toggle("active", isInventory);
     $("mode-ai").classList.toggle("active", isAi);
     $("sidebar-chats").classList.toggle("hidden", !isChats);
     $("chat-area").classList.toggle("ai-setup-mode", isAi);
-    $("chat-area").classList.toggle("appointments-mode", isAppointments);
+    $("chat-area").classList.toggle("appointments-mode", isAppointments || isInventory);
     $("ai-setup-panel").classList.toggle("hidden", !isAi);
     $("appointments-panel").classList.toggle("hidden", !isAppointments);
+    $("inventory-panel").classList.toggle("hidden", !isInventory);
 
     if (isChats) {
       if (state.activeId) {
@@ -2165,6 +2170,7 @@
       emptyChat.classList.add("hidden");
       activeChat.classList.add("hidden");
       if (isAi) loadAiSetupPanel();
+      if (isInventory) loadInventoryPanel();
       if (isAppointments) {
         loadAppointmentsPanel();
         loadResults();
@@ -2960,8 +2966,13 @@
       setBizSaveStatus(err.message);
       fillBizForm(null);
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadProducts()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert()]);
     renderAiShortcutsSummary();
+  }
+
+  async function loadInventoryPanel() {
+    setProductsStatus("");
+    await Promise.all([loadQuickShortcuts(), loadProducts()]);
   }
 
   async function loadProducts() {
@@ -2977,10 +2988,15 @@
     return Number(n).toLocaleString("es-CO", { maximumFractionDigits: 0 });
   }
 
+  function stockClass(stock) {
+    if (stock === 0) return " is-out";
+    return stock != null && stock <= 3 ? " is-low" : "";
+  }
+
   function productRow(p) {
     const ro = state.canManageGlobal ? "" : " disabled";
     return `
-      <div class="product-row${p.stock === 0 ? " is-out" : ""}" data-id="${escapeHtml(p.id || "")}">
+      <div class="product-row${stockClass(p.stock)}" data-id="${escapeHtml(p.id || "")}">
         <input type="text" class="product-name" maxlength="120" placeholder="Ej: Tenis blancos" aria-label="Producto" value="${escapeHtml(p.name || "")}"${ro} />
         <input type="text" class="product-price" inputmode="numeric" placeholder="Precio" aria-label="Precio" value="${p.price_cop != null ? "$" + formatThousands(p.price_cop) : ""}"${ro} />
         <input type="number" class="product-stock" min="0" step="1" placeholder="Sin contar" aria-label="Cuántos quedan" value="${p.stock ?? ""}"${ro} />
@@ -3002,6 +3018,20 @@
     const rows = document.querySelectorAll("#products-list .product-row").length;
     $("products-head").classList.toggle("hidden", !rows);
     $("products-empty").classList.toggle("hidden", rows > 0);
+    renderProductsSummary();
+  }
+
+  function renderProductsSummary() {
+    const el = $("products-summary");
+    if (!el) return;
+    const items = state.products || [];
+    const out = items.filter((p) => p.stock === 0).length;
+    const low = items.filter((p) => p.stock != null && p.stock > 0 && p.stock <= 3).length;
+    const parts = [`${items.length} producto${items.length === 1 ? "" : "s"}`];
+    if (out) parts.push(`<span class="products-out">${out} agotado${out === 1 ? "" : "s"}</span>`);
+    if (low) parts.push(`<span class="products-low">${low} con pocas unidades</span>`);
+    el.innerHTML = parts.join(" · ");
+    el.classList.toggle("hidden", !items.length);
   }
 
   function renderProductsImport() {
@@ -3049,6 +3079,8 @@
       row.dataset.id = saved.id;
       state.products = [...(state.products || []).filter((p) => p.id !== saved.id), saved];
       row.classList.toggle("is-out", saved.stock === 0);
+      row.classList.toggle("is-low", stockClass(saved.stock) === " is-low");
+      renderProductsSummary();
       row.querySelector(".product-price").value = saved.price_cop != null ? "$" + formatThousands(saved.price_cop) : "";
       setProductsStatus(saved.stock === 0 ? `✓ Guardado — ${saved.name} quedó agotado` : "✓ Guardado");
     } catch (err) {
@@ -3819,7 +3851,7 @@
           .catch(() => {});
         break;
       case "products.updated":
-        if (state.panelMode === "ai" && !document.activeElement?.closest?.("#products-list")) loadProducts();
+        if (state.panelMode === "inventory" && !document.activeElement?.closest?.("#products-list")) loadProducts();
         break;
       case "ai.error":
       case "ai.handoff": {
@@ -4324,6 +4356,7 @@
 
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
   $("mode-appointments").addEventListener("click", () => switchPanelMode("appointments"));
+  $("mode-inventory").addEventListener("click", () => switchPanelMode("inventory"));
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
   $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
   $("appointments-prev-day")?.addEventListener("click", () => {

@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=52" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=53" />
 </head>
 <body>
   <div id="app">
@@ -130,7 +130,8 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-appointments" class="sidebar-mode-tab">Sistema de citas</button>
+            <button type="button" id="mode-appointments" class="sidebar-mode-tab">Citas</button>
+            <button type="button" id="mode-inventory" class="sidebar-mode-tab">Inventario</button>
             <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA</button>
           </div>
 
@@ -328,23 +329,6 @@
               </aside>
             </div>
 
-            <section id="products-card" class="ai-shortcuts-card">
-              <div class="ai-shortcuts-card-head">
-                <h3>Tus productos</h3>
-                <p class="muted small">La IA ofrece solo lo que hay, con tu precio. En <strong>Quedan</strong> pon cuántos tienes: vacío si no llevas la cuenta, en 0 queda agotado. Cuando la IA cierra un pedido, descuenta las unidades sola. Se guarda solo.</p>
-              </div>
-              <div id="products-head" class="product-row product-row-head hidden" aria-hidden="true">
-                <span>Producto</span><span>Precio</span><span>Quedan</span><span>Detalles</span><span></span>
-              </div>
-              <div id="products-list" class="products-list"></div>
-              <p id="products-empty" class="muted small hidden">Agrega lo que vendes, o créalo de una vez desde tu catálogo. Si solo das citas o servicios, puedes dejarlo vacío.</p>
-              <div class="alert-actions">
-                <button type="button" id="products-add-btn" class="btn ghost small">+ Agregar producto</button>
-                <button type="button" id="products-import-btn" class="btn ghost small hidden">Crear desde mi catálogo</button>
-              </div>
-              <p id="products-status" class="ai-save-status muted small"></p>
-            </section>
-
             <section class="ai-shortcuts-card">
               <div class="ai-shortcuts-card-head">
                 <h3>Atajos rápidos</h3>
@@ -380,6 +364,32 @@
                 <button type="button" id="alert-test-btn" class="btn ghost small">Enviar prueba</button>
               </div>
               <p id="alert-save-status" class="ai-save-status muted small"></p>
+            </section>
+          </div>
+
+          <div id="inventory-panel" class="appointments-panel inventory-panel hidden">
+            <header class="appointments-hero">
+              <div class="appointments-hero-icon" aria-hidden="true">📦</div>
+              <h2>Inventario</h2>
+              <p>Lo que vendes, a qué precio y cuántos quedan. La IA solo ofrece lo que hay y, cuando cierra un pedido, descuenta las unidades sola.</p>
+            </header>
+
+            <section id="products-card" class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Tus productos</h3>
+                <p id="products-summary" class="products-summary hidden"></p>
+                <p class="muted small">En <strong>Quedan</strong> pon cuántos tienes: vacío si no llevas la cuenta, en 0 queda agotado. Se guarda solo.</p>
+              </div>
+              <div id="products-head" class="product-row product-row-head hidden" aria-hidden="true">
+                <span>Producto</span><span>Precio</span><span>Quedan</span><span>Detalles</span><span></span>
+              </div>
+              <div id="products-list" class="products-list"></div>
+              <p id="products-empty" class="muted small hidden">Agrega lo que vendes, o créalo de una vez desde tu catálogo. Si solo das citas o servicios, puedes dejarlo vacío.</p>
+              <div class="alert-actions">
+                <button type="button" id="products-add-btn" class="btn ghost small">+ Agregar producto</button>
+                <button type="button" id="products-import-btn" class="btn ghost small hidden">Crear desde mi catálogo</button>
+              </div>
+              <p id="products-status" class="ai-save-status muted small"></p>
             </section>
           </div>
 
@@ -663,6 +673,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=122"></script>
+  <script src="/static/panel/app.js?v=123"></script>
 </body>
 </html>

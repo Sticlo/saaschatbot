@@ -2548,6 +2548,20 @@ textarea { resize: vertical; min-height: 44px; }
   .alert-recipient .alert-scope { grid-column: 1 / -1; }
 }
 
+.inventory-panel {
+  max-width: 920px;
+}
+
+.products-summary {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.products-summary .products-out { color: var(--danger); }
+.products-summary .products-low { color: var(--warning); }
+
 .products-list {
   display: flex;
   flex-direction: column;
@@ -2597,6 +2611,11 @@ textarea { resize: vertical; min-height: 44px; }
 .product-row.is-out .product-stock {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.product-row.is-low .product-stock {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 @media (max-width: 760px) {
