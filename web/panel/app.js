@@ -3241,12 +3241,18 @@
 
   const MAX_PRODUCT_PHOTOS = 4;
 
-  function productPhotosHtml(p) {
+  function productPhotoUrl(name) {
+    return `${API}/outbound/assets/${encodeURIComponent(name)}`;
+  }
+
+  function productPhotosHtml(p, newName = "") {
     const photos = p.photos || [];
     const thumbs = photos
       .map((name) => `
-        <span class="product-photo">
-          <img src="${API}/outbound/assets/${encodeURIComponent(name)}" alt="" loading="lazy" />
+        <span class="product-photo${name === newName ? " is-new" : ""}">
+          <button type="button" class="product-photo-view" data-name="${escapeHtml(name)}" aria-label="Ver foto de ${escapeHtml(p.name || "")}" title="Ver en grande">
+            <img src="${productPhotoUrl(name)}" alt="" loading="lazy" />
+          </button>
           ${state.canManageGlobal ? `<button type="button" class="product-photo-remove" data-name="${escapeHtml(name)}" aria-label="Quitar foto" title="Quitar foto">×</button>` : ""}
         </span>`)
       .join("");
@@ -3259,8 +3265,36 @@
     return thumbs + add;
   }
 
-  function renderProductPhotos(row, product) {
-    row.querySelector(".product-photos").innerHTML = productPhotosHtml(product);
+  function renderProductPhotos(row, product, newName = "") {
+    row.querySelector(".product-photos").innerHTML = productPhotosHtml(product, newName);
+  }
+
+  function openPhotoViewer(src, caption) {
+    let viewer = $("photo-viewer");
+    if (!viewer) {
+      viewer = document.createElement("div");
+      viewer.id = "photo-viewer";
+      viewer.className = "photo-viewer hidden";
+      viewer.setAttribute("role", "dialog");
+      viewer.setAttribute("aria-modal", "true");
+      viewer.innerHTML = `
+        <figure class="photo-viewer-card">
+          <img alt="" />
+          <figcaption></figcaption>
+        </figure>
+        <button type="button" class="photo-viewer-close" aria-label="Cerrar">×</button>`;
+      viewer.addEventListener("click", (e) => {
+        if (!e.target.closest(".photo-viewer-card img")) viewer.classList.add("hidden");
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") viewer.classList.add("hidden");
+      });
+      document.body.appendChild(viewer);
+    }
+    viewer.querySelector("img").src = src;
+    viewer.querySelector("figcaption").textContent = caption || "";
+    viewer.classList.remove("hidden");
+    viewer.querySelector(".photo-viewer-close").focus();
   }
 
   function upsertProduct(saved) {
@@ -3290,7 +3324,7 @@
         break;
       }
       upsertProduct(product);
-      renderProductPhotos(row, product);
+      renderProductPhotos(row, product, product.photos[product.photos.length - 1]);
     }
     if (files.length > room) setProductsStatus(`Cada producto puede tener hasta ${MAX_PRODUCT_PHOTOS} fotos`);
     else if (product) setProductsStatus(`✓ Listo — si piden fotos de ${product.name}, la IA las manda sola`);
@@ -4762,6 +4796,14 @@
     queueProductSave(row);
   });
   $("products-list")?.addEventListener("click", (e) => {
+    const view = e.target.closest(".product-photo-view");
+    if (view) {
+      const row = view.closest(".product-row");
+      const name = row.querySelector(".product-name").value.trim();
+      const price = row.querySelector(".product-price").value.trim();
+      openPhotoViewer(productPhotoUrl(view.dataset.name), [name, price].filter(Boolean).join(" — "));
+      return;
+    }
     if (!state.canManageGlobal) return;
     const photo = e.target.closest(".product-photo-remove");
     if (photo) {
