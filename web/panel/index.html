@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=54" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=55" />
 </head>
 <body>
   <div id="app">
@@ -285,7 +285,7 @@
                   <span class="ai-step-num">5</span>
                   <label class="ai-field">
                     <span>¿Precios o rangos?</span>
-                    <span class="ai-field-hint">Para que la IA no invente valores.</span>
+                    <span class="ai-field-hint">Solo de referencia. Los precios exactos van en Inventario: con esos cotiza la IA.</span>
                     <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
                   </label>
                 </div>
@@ -413,7 +413,7 @@
               <div class="ai-shortcuts-card-head">
                 <h3>Tus productos</h3>
                 <p id="products-summary" class="products-summary hidden"></p>
-                <p class="muted small">En <strong>Quedan</strong> pon cuántos tienes: vacío si no llevas la cuenta, en 0 queda agotado. Se guarda solo.</p>
+                <p class="muted small">En <strong>Quedan</strong> pon cuántos tienes: vacío si no llevas la cuenta, en 0 queda agotado. Con <strong>📷</strong> sube hasta 4 fotos: si un cliente pide verlo, la IA se las manda con el precio. Se guarda solo.</p>
               </div>
               <div id="products-head" class="product-row product-row-head hidden" aria-hidden="true">
                 <span>Producto</span><span>Precio</span><span>Quedan</span><span>Detalles</span><span></span>
@@ -709,6 +709,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=125"></script>
+  <script src="/static/panel/app.js?v=127"></script>
 </body>
 </html>

@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.application.outbound.quick_shortcut_service import get_shortcuts
+from app.application.outbound.tenant_asset_service import delete_asset
 from app.application.products.product_service import (
+    attach_uploaded_photo,
     create_product,
     get_product,
     import_from_catalog,
     list_products,
     product_to_dict,
+    remove_photo,
     update_product,
 )
 from app.infrastructure.persistence.database import get_db
@@ -22,6 +25,7 @@ from app.presentation.schemas.products import (
     ProductUpdate,
 )
 from app.shared.core.deps import RequireOwner, RequireViewer
+from app.shared.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -64,11 +68,53 @@ def patch_product(
 @router.delete("/{product_id}", status_code=204)
 def delete_product(product_id: uuid.UUID, current: RequireOwner, db: Session = Depends(get_db)):
     try:
-        db.delete(get_product(db, current.tenant_id, product_id))
+        product = get_product(db, current.tenant_id, product_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    photos = list(product.photos or [])
+    db.delete(product)
     db.commit()
+    for path in photos:
+        delete_asset(path, tenant_id=current.tenant_id)
     return Response(status_code=204)
+
+
+def enforce_photo_rate_limit(tenant_id: uuid.UUID) -> None:
+    enforce_rate_limit(
+        f"products:photo:{tenant_id}",
+        limit=60,
+        window_seconds=3600,
+        message="Subiste muchas fotos seguidas. Intenta de nuevo en un rato.",
+    )
+
+
+@router.post("/{product_id}/photos", response_model=ProductResponse)
+def post_product_photo(
+    product_id: uuid.UUID, current: RequireOwner, file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    enforce_photo_rate_limit(current.tenant_id)
+    try:
+        product = attach_uploaded_photo(db, get_product(db, current.tenant_id, product_id), file)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return ProductResponse(**product_to_dict(product))
+
+
+@router.delete("/{product_id}/photos/{name}", response_model=ProductResponse)
+def delete_product_photo(product_id: uuid.UUID, name: str, current: RequireOwner, db: Session = Depends(get_db)):
+    try:
+        product = get_product(db, current.tenant_id, product_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    path = remove_photo(db, product, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    db.commit()
+    delete_asset(path, tenant_id=current.tenant_id)
+    return ProductResponse(**product_to_dict(product))
 
 
 @router.post("/import-catalog", response_model=ProductImportResponse)

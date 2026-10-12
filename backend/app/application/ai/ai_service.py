@@ -56,6 +56,7 @@ from app.application.ai.ai_shortcut_service import (
     OrderSummary,
     annotate_sent_shortcuts,
     asks_to_resend,
+    infer_photo_ref,
     infer_promised_shortcut,
     send_reply_with_shortcut,
 )
@@ -94,7 +95,7 @@ from app.application.realtime.realtime_service import publish_conversation_updat
 from app.application.whatsapp.whatsapp_service import send_text_message
 from app.config import settings
 from app.infrastructure.cache.redis_client import get_redis
-from app.domain.entities import Conversation, Exclusion, Message, Tenant, TenantProfile, WhatsAppSession
+from app.domain.entities import Conversation, Exclusion, Message, Product, Tenant, TenantProfile, WhatsAppSession
 from app.domain.entities.enums import (
     ConversationInterest,
     ConversationMode,
@@ -1205,8 +1206,11 @@ def _resolve_stage(
         stage = _max_stage(stage, STAGE_CLOSING)
     elif detect_interest_signal(text):
         stage = _max_stage(stage, STAGE_INTERESTED)
-    if reply.shortcut_id and any(
-        str(s.get("id")) == reply.shortcut_id and s.get("type") in ("image", "document") for s in shortcuts
+    if reply.photo_ref or (
+        reply.shortcut_id
+        and any(
+            str(s.get("id")) == reply.shortcut_id and s.get("type") in ("image", "document") for s in shortcuts
+        )
     ):
         stage = _max_stage(stage, STAGE_INTERESTED)
     if scheduling and stage == STAGE_CLOSING:
@@ -1286,6 +1290,7 @@ def _deliver_reply(
     reply: AiGeneratedReply,
     shortcuts: list[dict],
     booking: Optional[BookingContext],
+    products: Optional[list[Product]] = None,
 ) -> bool:
     if _client_kept_writing(db, conversation.id, message):
         log.info("IA no envía: el cliente siguió escribiendo conv=%s", conversation.id)
@@ -1359,7 +1364,12 @@ def _deliver_reply(
             log.warning("IA dijo que agendó con la agenda apagada; se pasa al equipo conv=%s", conversation.id)
             reply = replace(reply, message=BOOKING_HANDOFF_MESSAGE, book_slot=None, stage=STAGE_CLOSING)
 
-    if reply.shortcut_id is None:
+    if reply.photo_ref is None and reply.shortcut_id is None:
+        shown = infer_photo_ref(reply.message, _turn_text(message), products or [])
+        if shown:
+            log.info("IA dijo que mostraba fotos sin photo_ref; se adjuntan conv=%s", conversation.id)
+            reply = replace(reply, photo_ref=shown)
+    if reply.shortcut_id is None and reply.photo_ref is None:
         promised = infer_promised_shortcut(reply.message, _turn_text(message), shortcuts)
         if promised:
             log.info("IA prometió un atajo sin adjuntarlo; se adjunta conv=%s", conversation.id)
@@ -1747,6 +1757,7 @@ def _process_qualify(
     history = _load_history(db, conversation.id)
     is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
+    products = list_products(db, tenant.id)
     booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
 
     try:
@@ -1759,7 +1770,7 @@ def _process_qualify(
             is_first_contact=is_first_contact,
             shortcuts=shortcuts,
             booking=booking,
-            products=list_products(db, tenant.id),
+            products=products,
             knowledge=learned_answers_block(db, tenant.id),
         )
     except DeepSeekError as exc:
@@ -1785,6 +1796,7 @@ def _process_qualify(
         reply=generated_reply,
         shortcuts=shortcuts,
         booking=booking,
+        products=products,
     )
 
 
@@ -1836,6 +1848,7 @@ def _process_full_reply(
 
     history = _load_history(db, conversation.id)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
+    products = list_products(db, tenant.id)
     booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
     try:
         generated_reply = _generate_without_stalling(
@@ -1846,7 +1859,7 @@ def _process_full_reply(
             history=history,
             shortcuts=shortcuts,
             booking=booking,
-            products=list_products(db, tenant.id),
+            products=products,
             knowledge=learned_answers_block(db, tenant.id),
         )
     except DeepSeekError as exc:
@@ -1872,6 +1885,7 @@ def _process_full_reply(
         reply=generated_reply,
         shortcuts=shortcuts,
         booking=booking,
+        products=products,
     )
 
 

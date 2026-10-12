@@ -25,6 +25,8 @@ class ProductResponse(BaseModel):
     price_cop: Optional[int] = None
     stock: Optional[int] = None
     details: str = ""
+    # Nombres de archivo; se ven en /api/v1/outbound/assets/<nombre>.
+    photos: list[str] = Field(default_factory=list)
 
 
 class ProductImportResponse(BaseModel):

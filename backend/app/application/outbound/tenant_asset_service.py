@@ -70,6 +70,19 @@ def read_chat_image(upload: UploadFile) -> tuple[bytes, str]:
     raise HTTPException(status_code=400, detail="Solo se pueden enviar fotos JPG, PNG o WEBP")
 
 
+def save_product_photo(tenant_id: uuid.UUID, upload: UploadFile) -> str:
+    """Solo fotos que WhatsApp muestra bien (JPG, PNG, WEBP), revisando el archivo y no su nombre."""
+    raw, mime = read_chat_image(upload)
+    return _store(tenant_id, raw, mime)
+
+
+def delete_asset(relative_path: str, *, tenant_id: uuid.UUID) -> None:
+    try:
+        resolve_asset_path(relative_path, tenant_id=tenant_id).unlink(missing_ok=True)
+    except (ValueError, FileNotFoundError, OSError):
+        pass
+
+
 def display_file_name(raw_name: str, *, default: str = "catalogo.pdf") -> str:
     """Nombre que verá el cliente en WhatsApp, sin rutas ni caracteres raros."""
     name = Path(raw_name or "").name

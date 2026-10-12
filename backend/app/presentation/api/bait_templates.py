@@ -11,7 +11,7 @@ from app.application.ai.ai_business_profile_service import (
     build_ai_system_prompt_from_answers,
     business_summary_lines,
 )
-from app.application.ai.ai_readiness_service import readiness_from
+from app.application.ai.ai_readiness_service import has_catalog_text, readiness_from
 from app.application.billing.tenant_service import is_placeholder_business_name, log_audit
 from app.application.products.product_service import list_products
 from app.application.outbound.bait_template_service import (
@@ -84,7 +84,9 @@ def _business_summary(business_name: str, answers: dict) -> list[str]:
 def _profile_response(db: Session, tenant: Tenant, profile) -> BusinessProfileResponse:
     answers = _answers_from_profile(profile)
     return BusinessProfileResponse(
-        readiness=readiness_from(answers, list_products(db, tenant.id)),
+        readiness=readiness_from(
+            answers, list_products(db, tenant.id), has_catalog=has_catalog_text(db, tenant.id)
+        ),
         delivery_info=answers.get("delivery_info"),
         business_name=tenant.business_name,
         business_name_is_placeholder=is_placeholder_business_name(tenant.business_name),

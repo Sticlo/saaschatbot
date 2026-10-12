@@ -8,13 +8,10 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.application.billing.tenant_profile_service import answers_from_profile
+from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.products.product_service import list_products
 from app.domain.entities import Product, TenantProfile
 
-_DIGIT_RE = re.compile(r"\d")
-_PRICE_IN_TEXT_RE = re.compile(
-    r"\$\s?\d|\d+(?:[.,]\d+)?\s?(?:mil|k|lucas)\b|\d{1,3}(?:[.,]\d{3})+|\d{4,}", re.IGNORECASE
-)
 # «Nequi» solo no sirve: el cliente necesita el número o saber que paga al recibir.
 _PAYMENT_DETAIL_RE = re.compile(
     r"(?:\d[\s.-]?){7,}|efectivo|contra\s?entrega|dat[aá]fono|tarjeta|link|llave|bre-?b|@|\bqr\b",
@@ -25,10 +22,10 @@ _ITEMS = (
     ("products", "biz-products", "Qué vendes", "Escribe qué vendes u ofreces, o carga tus productos en Inventario."),
     (
         "prices",
-        "biz-prices",
-        "Precios",
-        "Pon precios con números (ej. «Camisas desde $45.000») o cárgalos en Inventario. "
-        "Sin precios la IA no puede cerrar la venta.",
+        "inventory",
+        "Precios en Inventario",
+        "Carga en Inventario lo que vendes con su precio exacto: es lo que usa la IA para cotizar. "
+        "Un rango («desde $45.000») no le sirve para dar un total.",
     ),
     ("payments", "biz-payments", "Cómo te pagan", "Escribe cómo te pagan, tal cual se lo darías a un cliente."),
     (
@@ -49,19 +46,27 @@ _PAYMENT_NEEDS_DETAIL = (
 )
 
 
-def _missing_keys(answers: dict, products: list[Product]) -> dict[str, str]:
+_IMPORT_CATALOG_HINT = (
+    "Ya subiste tu catálogo: impórtalo a Inventario con un clic y revisa que los precios estén bien."
+)
+
+
+def _unpriced_hint(names: list[str]) -> str:
+    shown = ", ".join(names[:3])
+    more = f" y {len(names) - 3} más" if len(names) > 3 else ""
+    return f"Sin precio: {shown}{more}. Pónselo en Inventario; sin precio la IA tiene que decir «te confirmo»."
+
+
+def _missing_keys(answers: dict, products: list[Product], has_catalog: bool) -> dict[str, str]:
     """{clave: pista} de lo que falta."""
     missing: dict[str, str] = {}
-    products_text = answers.get("products_services", "")
-    if not products_text and not products:
+    if not answers.get("products_services") and not products:
         missing["products"] = ""
-    has_price = (
-        bool(_DIGIT_RE.search(answers.get("price_range", "")))
-        or bool(_PRICE_IN_TEXT_RE.search(products_text))
-        or any(p.price_cop for p in products)
-    )
-    if not has_price:
-        missing["prices"] = ""
+    unpriced = [p.name for p in products if not p.price_cop]
+    if not products:
+        missing["prices"] = _IMPORT_CATALOG_HINT if has_catalog else ""
+    elif unpriced:
+        missing["prices"] = _unpriced_hint(unpriced)
     payments = answers.get("payment_methods", "")
     if not payments:
         missing["payments"] = ""
@@ -74,18 +79,14 @@ def _missing_keys(answers: dict, products: list[Product]) -> dict[str, str]:
     return missing
 
 
-def readiness_from(answers: dict, products: list[Product]) -> dict:
-    missing = _missing_keys(answers, products)
-    items = [
-        {
-            "key": key,
-            "field": field,
-            "label": label,
-            "done": key not in missing,
-            "hint": missing.get(key) or hint,
-        }
-        for key, field, label, hint in _ITEMS
-    ]
+def readiness_from(answers: dict, products: list[Product], *, has_catalog: bool = False) -> dict:
+    missing = _missing_keys(answers, products, has_catalog)
+    items = []
+    for key, field, label, hint in _ITEMS:
+        item = {"key": key, "field": field, "label": label, "done": key not in missing, "hint": missing.get(key) or hint}
+        if key == "prices" and missing.get(key) == _IMPORT_CATALOG_HINT:
+            item["action"] = "import-catalog"
+        items.append(item)
     return {
         "ready": not missing,
         "done": len(items) - len(missing),
@@ -94,10 +95,15 @@ def readiness_from(answers: dict, products: list[Product]) -> dict:
     }
 
 
+def has_catalog_text(db: Session, tenant_id: uuid.UUID) -> bool:
+    """Lo que la IA leyó de los catálogos subidos (fotos o PDF) se puede importar a Inventario."""
+    return any(s.get("content") for s in get_shortcuts(db, tenant_id))
+
+
 def tenant_readiness(db: Session, tenant_id: uuid.UUID) -> dict:
     profile = db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).first()
     answers = answers_from_profile(profile) if profile is not None else {}
-    return readiness_from(answers, list_products(db, tenant_id))
+    return readiness_from(answers, list_products(db, tenant_id), has_catalog=has_catalog_text(db, tenant_id))
 
 
 def not_ready_message(readiness: dict) -> str:

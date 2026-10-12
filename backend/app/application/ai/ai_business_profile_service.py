@@ -4,7 +4,7 @@ _ANSWER_LABELS: tuple[tuple[str, str], ...] = (
     ("industry", "Rubro"),
     ("products_services", "Qué vende u ofrece"),
     ("target_customer", "A quién le vende"),
-    ("price_range", "Precios"),
+    ("price_range", "Precios de referencia"),
     ("location_hours", "Ubicación y horario"),
     ("delivery_info", "Envíos y entregas"),
     ("tone", "Tono de comunicación"),

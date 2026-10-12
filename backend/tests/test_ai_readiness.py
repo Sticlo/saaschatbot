@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -23,25 +24,50 @@ COMPLETE = {
 }
 
 
+TENIS = SimpleNamespace(name="Tenis blancos", price_cop=150000)
+
+
+def _item(readiness: dict, key: str) -> dict:
+    return next(i for i in readiness["items"] if i["key"] == key)
+
+
 def _missing(answers: dict, products: list | None = None) -> list[str]:
-    return [i["key"] for i in readiness_from(answers, products or [])["items"] if not i["done"]]
+    return [i["key"] for i in readiness_from(answers, [TENIS] if products is None else products)["items"] if not i["done"]]
 
 
 def test_readiness_lists_what_is_missing():
-    assert _missing({}) == ["products", "prices", "payments", "delivery", "location"]
-    assert readiness_from(COMPLETE, [])["ready"] is True
+    assert _missing({}, []) == ["products", "prices", "payments", "delivery", "location"]
+    assert readiness_from(COMPLETE, [TENIS])["ready"] is True
 
     # «Nequi» solo no le sirve al cliente para pagar.
-    vague = readiness_from({**COMPLETE, "payment_methods": "Nequi"}, [])
-    item = next(i for i in vague["items"] if i["key"] == "payments")
-    assert vague["ready"] is False and "300 123 4567" in item["hint"]
+    vague = readiness_from({**COMPLETE, "payment_methods": "Nequi"}, [TENIS])
+    assert vague["ready"] is False and "300 123 4567" in _item(vague, "payments")["hint"]
     assert _missing({**COMPLETE, "payment_methods": "Efectivo o contra entrega"}) == []
 
-    # Precios y productos pueden venir del inventario.
-    products = [SimpleNamespace(price_cop=150000)]
-    assert _missing({**COMPLETE, "products_services": "", "price_range": ""}, products) == []
-    assert _missing({**COMPLETE, "price_range": "", "products_services": "Camisas a 45 mil"}) == []
-    assert _missing({**COMPLETE, "price_range": "depende"}) == ["prices"]
+
+def test_prices_come_from_the_inventory():
+    # Un rango en el formulario no alcanza para cotizar: los precios salen del inventario.
+    assert _missing(COMPLETE, []) == ["prices"]
+    assert _missing({**COMPLETE, "products_services": "", "price_range": ""}) == []
+
+    botas = SimpleNamespace(name="Botas negras", price_cop=None)
+    readiness = readiness_from(COMPLETE, [TENIS, botas])
+    assert readiness["ready"] is False
+    assert _item(readiness, "prices")["hint"].startswith("Sin precio: Botas negras.")
+
+    # Con el catálogo ya subido, se ofrece importarlo en vez de teclear todo.
+    imported = _item(readiness_from(COMPLETE, [], has_catalog=True), "prices")
+    assert imported["action"] == "import-catalog" and "impórtalo" in imported["hint"]
+    assert "action" not in _item(readiness_from(COMPLETE, []), "prices")
+
+
+def test_inventory_price_wins_over_the_catalog():
+    from app.application.products.product_service import products_prompt_block
+
+    product = SimpleNamespace(id=uuid.uuid4(), name="Tenis blancos", price_cop=150000, stock=None, details=None, photos=[])
+    block = products_prompt_block([product], selling=True)
+    assert "Tenis blancos | $150.000" in block
+    assert "cotiza SIEMPRE con el precio de esta lista" in block
 
 
 def test_missing_info_is_read_from_the_reply():
@@ -67,6 +93,12 @@ def test_ai_cannot_be_turned_on_half_configured(client: TestClient):
 
     r = client.put("/api/v1/outbound/business-profile", json=COMPLETE, headers=headers)
     assert r.status_code == 200
+    assert [i["key"] for i in r.json()["readiness"]["items"] if not i["done"]] == ["prices"]
+    assert client.patch("/api/v1/tenants/me", json={"ai_global_enabled": True}, headers=headers).status_code == 409
+
+    r = client.post("/api/v1/products", json={"name": "Tenis blancos", "price_cop": 150000}, headers=headers)
+    assert r.status_code == 201
+    r = client.get("/api/v1/outbound/business-profile", headers=headers)
     assert r.json()["readiness"]["ready"] is True
     assert r.json()["delivery_info"] == COMPLETE["delivery_info"]
     assert "Envíos y entregas: Envíos a todo Colombia" in r.json()["ai_system_prompt"]

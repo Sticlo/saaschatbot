@@ -140,7 +140,7 @@ def build_qualify_system_prompt(
             ("industry", "Rubro"),
             ("products_services", "Qué ofrece"),
             ("target_customer", "Clientes"),
-            ("price_range", "Precios"),
+            ("price_range", "Precios de referencia"),
             ("location_hours", "Ubicación y horario"),
             ("delivery_info", "Envíos y entregas"),
             ("tone", "Tono"),

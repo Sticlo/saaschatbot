@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.application.ai.ai_knowledge_service import clean_topic
 from app.application.outbound.quick_shortcut_service import find_shortcut
+from app.application.products.product_service import find_by_ref, list_products, photo_caption, product_ref
 from app.application.whatsapp.whatsapp_service import (
     send_document_message,
     send_image_message,
@@ -55,7 +56,7 @@ STAGE_RANK = {STAGE_CHATTING: 0, STAGE_INTERESTED: 1, STAGE_CLOSING: 2}
 _REPLY_FORMAT = """
 
 Responde SOLO con JSON válido (sin markdown), exactamente con estas claves:
-{{"message":"tu respuesta al cliente","shortcut_id":null,"book_slot":null,"stage":"conversando","missing":""{order_key}}}
+{{"message":"tu respuesta al cliente","shortcut_id":null,{photo_key}"book_slot":null,"stage":"conversando","missing":""{order_key}}}
 {key_rules}missing = si el cliente preguntó algo que NO está en la información del negocio y por eso no pudiste
 responderlo, escribe en pocas palabras qué dato te faltó (ej. "costo del envío a Cali", "si hay talla 42").
 Si pudiste responder todo, "". No lo uses para cosas que el cliente debe decirte (su dirección, su talla).
@@ -100,10 +101,14 @@ entregárselo, llénalo (y repítelo igual en las respuestas siguientes, actuali
 Para citas y reservas no uses order."""
 
 
-def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool, selling: bool = False) -> str:
+def reply_format_instruction(
+    *, has_shortcuts: bool, booking_enabled: bool, selling: bool = False, has_photos: bool = False
+) -> str:
     rules = []
     if not has_shortcuts:
         rules.append("- shortcut_id siempre null (no hay atajos).")
+    if has_photos:
+        rules.append("- photo_ref = ref de un producto con 📷 cuando el cliente quiere verlo; si no, null.")
     if not booking_enabled:
         rules.append(
             "- book_slot siempre null. Si piden una cita o reserva, no la confirmes tú: es stage \"cierre\"."
@@ -111,6 +116,7 @@ def reply_format_instruction(*, has_shortcuts: bool, booking_enabled: bool, sell
     key_rules = ("\n".join(rules) + "\n") if rules else ""
     return _REPLY_FORMAT.format(
         key_rules=key_rules,
+        photo_key='"photo_ref":null,' if has_photos else "",
         order_key=',"order":null' if selling else "",
         closing_rules=_SELLING_CLOSING if selling else _HANDOFF_CLOSING,
     )
@@ -120,7 +126,8 @@ Lo que sabes de los productos (sacado del catálogo/carta del negocio):
 {catalog_text}
 
 Usa esta información para responder preguntas concretas (precios, tallas, sabores,
-disponibilidad). No inventes productos ni precios que no estén aquí.
+disponibilidad). No inventes productos ni precios que no estén aquí. Si un producto también está en
+«Productos del negocio», su precio y disponibilidad mandan sobre lo que diga el catálogo.
 """
 
 
@@ -133,6 +140,8 @@ class AiGeneratedReply:
     order: Optional["OrderSummary"] = None
     # Lo que el cliente preguntó y no está en la información del negocio.
     missing: str = ""
+    # Producto (ref) cuyas fotos se envían después del mensaje.
+    photo_ref: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -331,6 +340,34 @@ def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict
     return None
 
 
+_ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\b")
+_SHOWS_RE = re.compile(r"\bmira\b|\baqui\s+(?:estan|esta|las|la)\b|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b")
+
+
+def infer_photo_ref(message: str, client_text: str, products: list) -> Optional[str]:
+    """«¡Claro! Mira 👇» sin photo_ref: el cliente se queda sin las fotos que pidió.
+    Si pidió fotos y queda claro de qué producto, se adjuntan."""
+    reply = _plain(message)
+    asked = _plain(client_text)
+    if not _ASKS_PHOTO_RE.search(asked) or not (_SHOWS_RE.search(reply) or _PROMISE_RE.search(reply)):
+        return None
+    text = " " + " ".join(re.findall(r"\w+", f"{asked} {reply}")) + " "
+    scored = []
+    for product in products:
+        if not product.photos:
+            continue
+        words = [w for w in re.split(r"\W+", _plain(product.name)) if len(w) >= 3]
+        score = sum(1 for w in words if f" {w} " in text or f" {w}s " in text)
+        if score:
+            scored.append((score, product))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None
+    return product_ref(scored[0][1])
+
+
 def asks_to_resend(client_text: str) -> bool:
     """«No me llegó», «mándamelo de nuevo», «???»: el cliente no tiene lo que le prometimos."""
     return bool(_RESEND_RE.search(_plain(client_text)))
@@ -349,6 +386,7 @@ def parse_ai_reply(
     *,
     valid_ids: frozenset[str],
     valid_book_keys: frozenset[tuple[str, str, str]] | None = None,
+    valid_photo_refs: frozenset[str] = frozenset(),
 ) -> AiGeneratedReply:
     from app.application.ai.ai_appointment_service import parse_book_slot
 
@@ -385,7 +423,13 @@ def parse_ai_reply(
         stage=stage,
         order=parse_order(data.get("order")),
         missing=clean_topic(data.get("missing")),
+        photo_ref=_photo_ref(data.get("photo_ref"), valid_photo_refs),
     )
+
+
+def _photo_ref(raw: Any, valid: frozenset[str]) -> Optional[str]:
+    ref = str(raw or "").strip().lower().removeprefix("ref=")
+    return ref if ref in valid else None
 
 
 def _load_reply_json(candidate: str) -> Optional[dict]:
@@ -500,10 +544,81 @@ def send_reply_with_shortcut(
         text=reply.message.strip(),
         source=MessageSource.BOT.value,
     )
+    if reply.shortcut_id:
+        _send_reply_shortcut(
+            db, tenant=tenant, session=session, conversation=conversation, reply=reply, allow_resend=allow_resend
+        )
+    if reply.photo_ref:
+        send_product_photos(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            ref=reply.photo_ref,
+            allow_resend=allow_resend,
+        )
 
-    if not reply.shortcut_id:
-        return
 
+def _photos_sent_key(conversation_id, ref: str) -> str:
+    return f"ai:product_photos_sent:{conversation_id}:{ref}"
+
+
+def send_product_photos(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    ref: str,
+    allow_resend: bool = False,
+) -> int:
+    """Las fotos del producto, la primera con nombre y precio. Devuelve cuántas salieron."""
+    from app.domain.entities.enums import MessageSource
+
+    product = find_by_ref(list_products(db, tenant.id), ref)
+    if product is None or not product.photos:
+        return 0
+    key = _photos_sent_key(conversation.id, ref)
+    try:
+        recently = get_redis().exists(key)
+    except Exception:
+        recently = False
+    if recently and not allow_resend:
+        log.info("Fotos ya enviadas hace poco, no se reenvían conv=%s ref=%s", conversation.id, ref)
+        return 0
+    sent = 0
+    for index, path in enumerate(product.photos):
+        try:
+            send_image_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                image_path=str(path),
+                caption=photo_caption(product) if index == 0 else "",
+                source=MessageSource.BOT.value,
+            )
+            sent += 1
+        except Exception:
+            log.exception("Error enviando foto de producto conv=%s ref=%s", conversation.id, ref)
+    if sent:
+        try:
+            get_redis().set(key, "1", ex=SHORTCUT_RESEND_GUARD_SECONDS)
+        except Exception:
+            pass
+        log.info("IA envió %s fotos de %s conv=%s", sent, product.name, conversation.id)
+    return sent
+
+
+def _send_reply_shortcut(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    reply: AiGeneratedReply,
+    allow_resend: bool,
+) -> None:
     shortcut = find_shortcut(db, tenant.id, reply.shortcut_id)
     if shortcut is None:
         log.warning(

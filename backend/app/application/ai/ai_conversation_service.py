@@ -27,7 +27,7 @@ from app.application.messaging.message_service import (
     media_caption,
     text_for_ai,
 )
-from app.application.products.product_service import products_prompt_block
+from app.application.products.product_service import product_ref, products_prompt_block
 from app.config import settings
 from app.domain.entities import Message, Product, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
@@ -169,6 +169,7 @@ def _complete_reply(
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
+    photo_refs = frozenset(product_ref(p) for p in products or [] if p.photos)
     system += products_prompt_block(products or [], selling=bool(payment_methods))
     system += knowledge
     if payment_methods:
@@ -185,7 +186,10 @@ def _complete_reply(
         )
         book_keys = valid_book_slot_keys(booking.free_slots)
     system += reply_format_instruction(
-        has_shortcuts=bool(ids), booking_enabled=booking is not None, selling=bool(payment_methods)
+        has_shortcuts=bool(ids),
+        booking_enabled=booking is not None,
+        selling=bool(payment_methods),
+        has_photos=bool(photo_refs),
     )
     messages = [{"role": "system", "content": system + MEDIA_RULES + SAFETY_RULES}, *format_history(history)]
     if correction:
@@ -196,7 +200,7 @@ def _complete_reply(
         temperature=0.45,
         max_tokens=settings.ai_reply_max_tokens,
     )
-    return parse_ai_reply(raw, valid_ids=ids, valid_book_keys=book_keys)
+    return parse_ai_reply(raw, valid_ids=ids, valid_book_keys=book_keys, valid_photo_refs=photo_refs)
 
 
 def generate_qualify_reply(

@@ -2833,7 +2833,9 @@
           <li class="ai-ready-item${i.done ? " is-done" : ""}">
             <span class="ai-ready-mark" aria-hidden="true">${i.done ? "✓" : "!"}</span>
             <span class="ai-ready-text"><strong>${escapeHtml(i.label)}</strong>${i.done ? "" : `<span>${escapeHtml(i.hint)}</span>`}</span>
-            ${i.done ? "" : `<button type="button" class="link-btn ai-ready-go" data-field="${escapeHtml(i.field)}">Completar</button>`}
+            ${i.done ? "" : i.action === "import-catalog"
+              ? '<button type="button" class="link-btn ai-ready-import">Importar mi catálogo</button>'
+              : `<button type="button" class="link-btn ai-ready-go" data-field="${escapeHtml(i.field)}">Completar</button>`}
           </li>`
         )
         .join("");
@@ -2853,6 +2855,10 @@
   }
 
   function goToReadinessField(fieldId) {
+    if (fieldId === "inventory") {
+      switchPanelMode("inventory");
+      return;
+    }
     if (state.panelMode !== "ai") switchPanelMode("ai");
     const target = (fieldId && $(fieldId)) || $("ai-ready-card");
     target.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2884,6 +2890,65 @@
     badge.classList.toggle("hidden", !open || !state.canManageGlobal);
   }
 
+  const PHOTO_WORDS = /fot|imag|pic|se ve|luce/i;
+
+  function asksForPhotos(q) {
+    return PHOTO_WORDS.test(`${q.topic} ${q.question || ""}`);
+  }
+
+  function plainWords(text) {
+    return (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/\w{3,}/g) || [];
+  }
+
+  function guessProductFor(q) {
+    const said = new Set(plainWords(`${q.topic} ${q.question || ""}`));
+    let best = null;
+    let bestScore = 0;
+    for (const p of state.products || []) {
+      const score = plainWords(p.name).filter((w) => said.has(w)).length;
+      if (score > bestScore) [best, bestScore] = [p, score];
+    }
+    return best;
+  }
+
+  function aiQuestionPhotoBlock(q) {
+    const products = state.products || [];
+    if (!products.length) {
+      return `<p class="ai-question-photo muted small">¿Pidió fotos? Agrega ese producto en <button type="button" class="link-btn ai-question-inventory">Inventario</button> y súbelas ahí: la IA las mandará sola.</p>`;
+    }
+    const guess = guessProductFor(q);
+    const options = products
+      .map((p) => `<option value="${escapeHtml(p.id)}"${guess?.id === p.id ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
+      .join("");
+    return `
+      <div class="ai-question-photo">
+        <span class="small">Responde con fotos: quedan guardadas en</span>
+        <select class="ai-question-product" aria-label="Producto de la foto">${options}</select>
+        <label class="btn ghost small ai-question-photo-btn">📷 Subir foto
+          <input type="file" class="ai-question-photo-input" accept="image/jpeg,image/png,image/webp" hidden />
+        </label>
+      </div>`;
+  }
+
+  async function answerQuestionWithPhoto(item, file) {
+    const productId = item.querySelector(".ai-question-product")?.value;
+    if (!file || !productId) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("product_id", productId);
+    item.querySelectorAll("button, select, input").forEach((el) => { el.disabled = true; });
+    setAiQuestionsStatus("Subiendo foto…");
+    try {
+      await api(`/ai-questions/${item.dataset.id}/photo`, { method: "POST", body: fd }, 30000);
+      setAiQuestionsStatus("✓ Listo — la próxima vez que la pidan, la IA manda la foto sola");
+      state.products = await api("/products").catch(() => state.products);
+      await loadAiQuestions();
+    } catch (err) {
+      setAiQuestionsStatus(err.message);
+      item.querySelectorAll("button, select, input").forEach((el) => { el.disabled = false; });
+    }
+  }
+
   function aiQuestionRow(q) {
     const ro = !state.canManageGlobal;
     const learned = q.status === "answered";
@@ -2895,6 +2960,7 @@
           ${times ? `<span class="ai-question-times">${times}</span>` : ""}
         </div>
         ${q.question ? `<p class="ai-question-quote">«${escapeHtml(q.question)}»</p>` : ""}
+        ${!learned && !ro && asksForPhotos(q) ? aiQuestionPhotoBlock(q) : ""}
         <textarea rows="2" maxlength="1000" placeholder="Escribe la respuesta como se la darías a un cliente" ${ro ? "disabled" : ""}>${escapeHtml(q.answer || "")}</textarea>
         <div class="ai-question-actions">
           <button type="button" class="btn primary small ai-question-save" ${ro ? "disabled" : ""}>${learned ? "Actualizar" : "Enseñar a la IA"}</button>
@@ -2922,6 +2988,10 @@
     } catch (err) {
       if (!badgeOnly) setAiQuestionsStatus(err.message);
       return;
+    }
+    const needsProducts = state.aiQuestions.some((q) => q.status === "open" && asksForPhotos(q));
+    if (!badgeOnly && needsProducts && !state.products && state.canManageGlobal) {
+      state.products = await api("/products").catch(() => []);
     }
     if (badgeOnly) renderAiQuestionsBadge();
     else renderAiQuestions();
@@ -3165,7 +3235,78 @@
         <input type="number" class="product-stock" min="0" step="1" placeholder="Sin contar" aria-label="Cuántos quedan" value="${p.stock ?? ""}"${ro} />
         <input type="text" class="product-details" maxlength="500" placeholder="Tallas, colores, sabores…" aria-label="Detalles" value="${escapeHtml(p.details || "")}"${ro} />
         <button type="button" class="alert-remove product-remove" aria-label="Quitar producto" title="Quitar"${ro}>×</button>
+        <div class="product-photos">${productPhotosHtml(p)}</div>
       </div>`;
+  }
+
+  const MAX_PRODUCT_PHOTOS = 4;
+
+  function productPhotosHtml(p) {
+    const photos = p.photos || [];
+    const thumbs = photos
+      .map((name) => `
+        <span class="product-photo">
+          <img src="${API}/outbound/assets/${encodeURIComponent(name)}" alt="" loading="lazy" />
+          ${state.canManageGlobal ? `<button type="button" class="product-photo-remove" data-name="${escapeHtml(name)}" aria-label="Quitar foto" title="Quitar foto">×</button>` : ""}
+        </span>`)
+      .join("");
+    const canAdd = state.canManageGlobal && photos.length < MAX_PRODUCT_PHOTOS;
+    const add = canAdd
+      ? `<label class="product-photo-add" title="La IA la manda cuando el cliente pida verlo">📷 ${photos.length ? "Otra foto" : "Agregar foto"}
+          <input type="file" class="product-photo-input" accept="image/jpeg,image/png,image/webp" multiple hidden />
+        </label>`
+      : "";
+    return thumbs + add;
+  }
+
+  function renderProductPhotos(row, product) {
+    row.querySelector(".product-photos").innerHTML = productPhotosHtml(product);
+  }
+
+  function upsertProduct(saved) {
+    const items = state.products || [];
+    const at = items.findIndex((p) => p.id === saved.id);
+    state.products = at >= 0 ? items.map((p) => (p.id === saved.id ? saved : p)) : [...items, saved];
+  }
+
+  async function uploadProductPhotos(row, files) {
+    await row._saving;
+    const id = row.dataset.id;
+    if (!id) {
+      setProductsStatus("Escribe el nombre del producto antes de subir la foto");
+      return;
+    }
+    let product = (state.products || []).find((p) => p.id === id);
+    const room = MAX_PRODUCT_PHOTOS - (product?.photos?.length || 0);
+    const queue = [...files].slice(0, room);
+    for (const [i, file] of queue.entries()) {
+      setProductsStatus(queue.length > 1 ? `Subiendo foto ${i + 1} de ${queue.length}…` : "Subiendo foto…");
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        product = await api(`/products/${id}/photos`, { method: "POST", body: fd }, 30000);
+      } catch (err) {
+        setProductsStatus(err.message);
+        break;
+      }
+      upsertProduct(product);
+      renderProductPhotos(row, product);
+    }
+    if (files.length > room) setProductsStatus(`Cada producto puede tener hasta ${MAX_PRODUCT_PHOTOS} fotos`);
+    else if (product) setProductsStatus(`✓ Listo — si piden fotos de ${product.name}, la IA las manda sola`);
+    renderProductsSummary();
+  }
+
+  async function removeProductPhoto(row, name) {
+    try {
+      const product = await api(`/products/${row.dataset.id}/photos/${encodeURIComponent(name)}`, { method: "DELETE" });
+      upsertProduct(product);
+      renderProductPhotos(row, product);
+      renderProductsSummary();
+      setProductsStatus("Foto quitada");
+    } catch (err) {
+      setProductsStatus(err.message);
+    }
   }
 
   function renderProducts() {
@@ -3190,9 +3331,15 @@
     const items = state.products || [];
     const out = items.filter((p) => p.stock === 0).length;
     const low = items.filter((p) => p.stock != null && p.stock > 0 && p.stock <= 3).length;
+    const unpriced = items.filter((p) => !p.price_cop).length;
     const parts = [`${items.length} producto${items.length === 1 ? "" : "s"}`];
+    if (unpriced) {
+      parts.push(`<span class="products-out">${unpriced} sin precio: la IA no puede cotizar${unpriced === 1 ? "lo" : "los"}</span>`);
+    }
     if (out) parts.push(`<span class="products-out">${out} agotado${out === 1 ? "" : "s"}</span>`);
     if (low) parts.push(`<span class="products-low">${low} con pocas unidades</span>`);
+    const noPhoto = items.filter((p) => !(p.photos || []).length).length;
+    if (noPhoto) parts.push(`<span class="products-muted">${noPhoto} sin foto</span>`);
     el.innerHTML = parts.join(" · ");
     el.classList.toggle("hidden", !items.length);
   }
@@ -3240,7 +3387,7 @@
         body: JSON.stringify(body),
       });
       row.dataset.id = saved.id;
-      state.products = [...(state.products || []).filter((p) => p.id !== saved.id), saved];
+      upsertProduct(saved);
       row.classList.toggle("is-out", saved.stock === 0);
       row.classList.toggle("is-low", stockClass(saved.stock) === " is-low");
       renderProductsSummary();
@@ -3288,11 +3435,17 @@
           ? `✓ Agregamos ${res.created} producto${res.created === 1 ? "" : "s"} de tu catálogo. Revisa los precios y pon cuántos quedan.`
           : "No encontramos productos nuevos con precio en tu catálogo.",
       );
+      refreshReadinessSoon();
     } catch (err) {
       setProductsStatus(err.message);
     } finally {
       btn.disabled = false;
     }
+  }
+
+  async function importCatalogFromReadiness() {
+    switchPanelMode("inventory");
+    await importProductsFromCatalog();
   }
 
   async function saveAiSetup() {
@@ -4569,6 +4722,10 @@
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
   $("ai-ready-banner-btn").addEventListener("click", () => goToReadinessField(null));
   $("ai-ready-list").addEventListener("click", (e) => {
+    if (e.target.closest(".ai-ready-import")) {
+      if (state.canManageGlobal) importCatalogFromReadiness();
+      return;
+    }
     const btn = e.target.closest(".ai-ready-go");
     if (btn) goToReadinessField(btn.dataset.field);
   });
@@ -4577,6 +4734,11 @@
     if (!item || !state.canManageGlobal) return;
     if (e.target.closest(".ai-question-save")) saveAiQuestion(item);
     else if (e.target.closest(".ai-question-delete")) deleteAiQuestion(item);
+    else if (e.target.closest(".ai-question-inventory")) switchPanelMode("inventory");
+  });
+  $("ai-questions-card").addEventListener("change", (e) => {
+    const input = e.target.closest(".ai-question-photo-input");
+    if (input && state.canManageGlobal) answerQuestionWithPhoto(input.closest(".ai-question"), input.files[0]);
   });
   $("business-name-cta").addEventListener("click", openBusinessNameSetup);
   $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
@@ -4591,11 +4753,23 @@
   $("products-import-btn")?.addEventListener("click", importProductsFromCatalog);
   $("products-list")?.addEventListener("change", (e) => {
     const row = e.target.closest(".product-row");
-    if (row && state.canManageGlobal) queueProductSave(row);
+    if (!row || !state.canManageGlobal) return;
+    const photoInput = e.target.closest(".product-photo-input");
+    if (photoInput) {
+      uploadProductPhotos(row, photoInput.files);
+      return;
+    }
+    queueProductSave(row);
   });
   $("products-list")?.addEventListener("click", (e) => {
+    if (!state.canManageGlobal) return;
+    const photo = e.target.closest(".product-photo-remove");
+    if (photo) {
+      removeProductPhoto(photo.closest(".product-row"), photo.dataset.name);
+      return;
+    }
     const btn = e.target.closest(".product-remove");
-    if (btn && state.canManageGlobal) removeProductRow(btn.closest(".product-row"));
+    if (btn) removeProductRow(btn.closest(".product-row"));
   });
   $("shortcuts-add-btn").addEventListener("click", () => {
     if (state.shortcutsDraft.length >= 12) return;

@@ -7,12 +7,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from fastapi import UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.application.outbound.tenant_asset_service import save_product_photo
 from app.domain.entities import Product
 
 MAX_PRODUCTS = 300
+MAX_PHOTOS = 4
 _PROMPT_MAX_CHARS = 7000
 _MAX_QTY = 999
 
@@ -44,7 +47,45 @@ def product_to_dict(product: Product) -> dict:
         "price_cop": product.price_cop,
         "stock": product.stock,
         "details": product.details or "",
+        "photos": [path.rsplit("/", 1)[-1] for path in product.photos or []],
     }
+
+
+def find_by_ref(products: list[Product], ref: Optional[str]) -> Optional[Product]:
+    return next((p for p in products if ref and product_ref(p) == ref), None)
+
+
+def add_photo(db: Session, product: Product, path: str) -> Product:
+    photos = list(product.photos or [])
+    if len(photos) >= MAX_PHOTOS:
+        raise ValueError(f"Cada producto puede tener hasta {MAX_PHOTOS} fotos. Quita una para subir otra.")
+    # Lista nueva: JSONB no detecta cambios hechos sobre la misma lista.
+    product.photos = [*photos, path]
+    db.flush()
+    return product
+
+
+def attach_uploaded_photo(db: Session, product: Product, upload: UploadFile) -> Product:
+    if len(product.photos or []) >= MAX_PHOTOS:
+        raise ValueError(f"Cada producto puede tener hasta {MAX_PHOTOS} fotos. Quita una para subir otra.")
+    return add_photo(db, product, save_product_photo(product.tenant_id, upload))
+
+
+def remove_photo(db: Session, product: Product, name: str) -> Optional[str]:
+    """Quita la foto por nombre de archivo. Devuelve su ruta para borrar el archivo."""
+    photos = list(product.photos or [])
+    path = next((p for p in photos if p.rsplit("/", 1)[-1] == name), None)
+    if path is None:
+        return None
+    product.photos = [p for p in photos if p != path]
+    db.flush()
+    return path
+
+
+def photo_caption(product: Product) -> str:
+    if product.price_cop is None:
+        return product.name
+    return f"{product.name} — {format_cop(product.price_cop)}"
 
 
 def _clean_name(name: str) -> str:
@@ -195,17 +236,31 @@ def products_prompt_block(products: list[Product], *, selling: bool) -> str:
         line = f"- ref={product_ref(product)} | {product.name} | {price} | {_availability(product)}"
         if product.details:
             line += f" | {product.details}"
+        if product.photos:
+            line += f" | 📷 {len(product.photos)} foto{'' if len(product.photos) == 1 else 's'}"
         used += len(line)
         if used > _PROMPT_MAX_CHARS:
             break
         lines.append(line)
     rules = [
-        "- Esta lista está al día: no necesitas confirmar con nadie si hay. Manda sobre el catálogo si algo no coincide.",
+        "- Precios: cotiza SIEMPRE con el precio de esta lista. Si el catálogo, la carta o los rangos de precios "
+        "dicen otra cosa, manda esta lista (el catálogo puede estar desactualizado).",
+        "- Esta lista está al día: no necesitas confirmar con nadie si hay.",
         "- Ofrece y vende solo lo disponible. Si algo está AGOTADO, dilo y ofrece lo más parecido de la lista.",
         "- Si piden más unidades de las que quedan, ofrece las que hay.",
         "- El total es precio × cantidad (más el envío, si el negocio lo cobra y sabes cuánto es).",
         "- Si piden algo que no está en la lista, no lo inventes: di que lo confirmas por aquí.",
     ]
+    if any(p.photos for p in products):
+        rules.append(
+            "- Fotos: si piden fotos o ver un producto marcado con 📷, pon su ref en photo_ref y escribe algo breve "
+            "(«¡Claro! Mira 👇»): las fotos salen aparte con el nombre y el precio. Si ya las enviaste en este chat, "
+            "no las repitas salvo que las pidan de nuevo."
+        )
+    rules.append(
+        "- Si piden fotos de algo sin 📷 y ningún atajo las tiene, no prometas enviarlas: descríbelo con lo que "
+        "sabes y pon en missing «fotos de <producto>»."
+    )
     if selling:
         rules.append(
             '- Cuando llenes order, agrega "lines" con cada producto de la lista que lleva: '
