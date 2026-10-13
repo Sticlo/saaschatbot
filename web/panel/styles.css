@@ -1435,6 +1435,16 @@ textarea { resize: vertical; min-height: 44px; }
 .appointments-ai-toggle input { margin-top: 0.2rem; }
 .appointments-ai-toggle > span { display: grid; gap: 0.15rem; }
 
+.appointments-ai-off {
+  margin: -0.4rem 0 1rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(249, 171, 0, 0.15);
+  border: 1px solid rgba(249, 171, 0, 0.35);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .appointments-schedule-grid label {
   display: grid;
   gap: 0.35rem;

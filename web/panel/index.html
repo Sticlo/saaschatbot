@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=58" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=59" />
 </head>
 <body>
   <div id="app">
@@ -471,9 +471,10 @@
                 <input type="checkbox" id="schedule-ai-booking" />
                 <span>
                   <strong>La IA agenda citas sola</strong>
-                  <span class="muted small">Para reservas, consultas o turnos: la IA mira los horarios libres, ofrece opciones y agenda. Déjalo apagado si vendes productos.</span>
+                  <span class="muted small">Para citas, turnos o reservas: la IA mira los horarios libres, ofrece opciones y agenda. Si también vendes productos, déjalo prendido: la IA agenda y vende en el mismo chat.</span>
                 </span>
               </label>
+              <p id="schedule-ai-off" class="appointments-ai-off hidden">La IA no está agendando: cuando un cliente pide cita, el chat te llega a ti. Prende «La IA agenda citas sola».</p>
               <button type="button" id="schedule-save-btn" class="btn primary small">Guardar horario</button>
               <p id="schedule-save-status" class="appointments-status muted small"></p>
             </section>
@@ -735,6 +736,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=130"></script>
+  <script src="/static/panel/app.js?v=131"></script>
 </body>
 </html>

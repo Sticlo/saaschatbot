@@ -548,3 +548,38 @@ def test_schedule_api_toggles_ai_booking(client: TestClient):
     assert saved.status_code == 200, saved.text
     assert saved.json()["ai_booking_enabled"] is True
     assert client.get("/api/v1/appointments/schedule", headers=headers).json()["ai_booking_enabled"] is True
+
+
+@requires_db
+def test_first_team_member_turns_on_ai_booking_but_never_overrides_the_owner(client: TestClient):
+    tag = uuid.uuid4().hex[:8]
+    res = client.post(
+        "/api/v1/auth/register",
+        json={
+            "business_name": f"Barbería {tag}",
+            "owner_name": "Dueño",
+            "email": f"barber-{tag}@test.com",
+            "password": "password123",
+            "accept_legal": True,
+        },
+    )
+    headers = {"Authorization": f"Bearer {res.json()['access_token']}"}
+    schedule = "/api/v1/appointments/schedule"
+    assert client.get(schedule, headers=headers).json()["ai_booking_enabled"] is False
+
+    first = client.post(
+        "/api/v1/appointments/staff", headers=headers, json={"name": "Mateo", "work_days": [0, 1, 2, 3, 4, 5]}
+    )
+    assert first.status_code == 201, first.text
+    assert client.get(schedule, headers=headers).json()["ai_booking_enabled"] is True
+
+    client.put(
+        schedule,
+        headers=headers,
+        json={"open_time": "09:00", "close_time": "19:00", "slot_minutes": 60, "ai_booking_enabled": False},
+    )
+    second = client.post(
+        "/api/v1/appointments/staff", headers=headers, json={"name": "Juan", "work_days": [0, 1, 2, 3, 4, 5]}
+    )
+    assert second.status_code == 201, second.text
+    assert client.get(schedule, headers=headers).json()["ai_booking_enabled"] is False

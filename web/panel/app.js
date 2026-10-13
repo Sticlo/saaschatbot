@@ -1306,9 +1306,9 @@
         mode: "ai",
         target: () => $("mode-appointments"),
         title: "¿Das citas?",
-        text: "Si das turnos o reservas, la IA puede agendarlas sola. Si vendes productos, sáltate esto.",
+        text: "Si das turnos o reservas, la IA puede agendarlas sola, aunque también vendas productos: hace las dos cosas.",
         next: "Sí, doy citas",
-        secondary: { label: "No, vendo productos", goTo: "bye" },
+        secondary: { label: "No doy citas", goTo: "bye" },
         advanceOnClick: true,
       });
       steps.push({
@@ -2381,6 +2381,13 @@
     if ($("schedule-staff-label") && schedule.staff_label !== undefined) {
       $("schedule-staff-label").value = schedule.staff_label || "";
     }
+    renderBookingOffHint();
+  }
+
+  function renderBookingOffHint() {
+    const box = $("schedule-ai-booking");
+    const off = !!box && !box.disabled && !box.checked && (state.staff || []).length > 0;
+    $("schedule-ai-off")?.classList.toggle("hidden", !off);
   }
 
   const WEEKDAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -2459,6 +2466,7 @@
       setScheduleStatus(err.message);
     }
     renderStaffList();
+    renderBookingOffHint();
   }
 
   function renderStaffChips(dayPayload) {
@@ -2727,8 +2735,17 @@
         : await api("/appointments/staff", { method: "POST", body: JSON.stringify(payload) });
       hideStaffModal();
       if (!id) state.appointmentsStaffId = saved.id;
+      const bookingWasOn = !!state.onboarding.bookingEnabled;
+      if (!id) fillScheduleForm(await api("/appointments/schedule").catch(() => null));
       await refreshAfterStaffChange();
-      setScheduleStatus(id ? `✓ ${saved.name} actualizado` : `✓ ${saved.name} agregado al equipo`);
+      const bookingTurnedOn = !id && !bookingWasOn && !!state.onboarding.bookingEnabled;
+      setScheduleStatus(
+        id
+          ? `✓ ${saved.name} actualizado`
+          : bookingTurnedOn
+            ? `✓ ${saved.name} agregado · la IA ya agenda citas con tu equipo`
+            : `✓ ${saved.name} agregado al equipo`
+      );
     } catch (err) {
       showStaffFormError(err.message);
     } finally {
@@ -4900,6 +4917,7 @@
   $("mode-inventory").addEventListener("click", () => switchPanelMode("inventory"));
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
   $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
+  $("schedule-ai-booking")?.addEventListener("change", () => saveAppointmentSchedule());
   $("appointments-prev-day")?.addEventListener("click", () => {
     loadAppointmentsDay(shiftDateISO(state.appointmentsDate, -1));
   });

@@ -152,16 +152,24 @@ def post_staff_member(
     current: RequireOwner,
     db: Session = Depends(get_db),
 ):
+    first_member = not all_staff(db, current.tenant_id)
     try:
         staff = create_staff(db, tenant_id=current.tenant_id, **body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Armar el equipo es decir «damos citas»: sin esto la IA le pasa al dueño a quien pide cita.
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    booking_turned_on = (
+        first_member and not profile.ai_booking_enabled and _booking_allowed(db, current.tenant_id)
+    )
+    if booking_turned_on:
+        profile.ai_booking_enabled = True
     log_audit(
         db,
         tenant_id=current.tenant_id,
         user_id=current.id,
         action="appointments.staff_created",
-        details={"staff_id": str(staff.id), "name": staff.name},
+        details={"staff_id": str(staff.id), "name": staff.name, "ai_booking_turned_on": booking_turned_on},
         ip_address=request.client.host if request.client else None,
     )
     db.commit()
