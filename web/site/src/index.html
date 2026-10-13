@@ -2,11 +2,20 @@
 <html lang="es" data-theme="light">
 <head>
   <meta charset="utf-8">
-  <title>Omitel</title>
+  <script>
+    (function () {
+      var host = location.hostname;
+      if (host === 'omitel.net' || (host === 'www.omitel.net' && location.protocol !== 'https:')) {
+        location.replace('https://www.omitel.net' + location.pathname + location.search + location.hash);
+      }
+    })();
+  </script>
+  <title>Omitel — WhatsApp con IA para vender</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <meta name="description" content="Omitel — WhatsApp con IA para vender y atender mejor.">
+  <link rel="canonical" href="https://www.omitel.net/">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
