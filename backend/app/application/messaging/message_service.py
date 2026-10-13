@@ -1236,17 +1236,22 @@ def handle_qrcode_update(db: Session, session: WhatsAppSession, tenant: Tenant, 
     elif isinstance(qr, str):
         base64 = qr
     if base64:
+        from app.application.realtime.realtime_service import publish_whatsapp_status
+        from app.application.whatsapp.whatsapp_service import extract_pairing_code, store_pairing_code
+
+        pairing_code = extract_pairing_code(data)
+        store_pairing_code(tenant.id, pairing_code)
         session.qr_base64 = base64
         session.qr_updated_at = datetime.now(timezone.utc)
         session.status = WhatsAppStatus.CONNECTING.value
         tenant.whatsapp_status = WhatsAppStatus.CONNECTING.value
-        from app.application.realtime.realtime_service import publish_whatsapp_status
 
         publish_whatsapp_status(
             tenant.id,
             status=WhatsAppStatus.CONNECTING.value,
             qr_base64=base64,
             phone_number=session.phone_number,
+            pairing_code=pairing_code,
         )
         db.flush()
 

@@ -9,12 +9,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.shared.core.phone import format_contact_display_phone, resolve_display_name
 
 
+class WhatsAppConnectRequest(BaseModel):
+    # Con número se vincula con código de 8 letras en vez de QR.
+    phone: Optional[str] = Field(default=None, max_length=32)
+
+
 class WhatsAppConnectResponse(BaseModel):
     instance_name: str
     status: str
     qr_base64: Optional[str] = None
     qr_updated_at: Optional[datetime] = None
     phone_number: Optional[str] = None
+    pairing_code: Optional[str] = None
 
 
 class WhatsAppStatusResponse(BaseModel):
@@ -23,6 +29,7 @@ class WhatsAppStatusResponse(BaseModel):
     phone_number: Optional[str] = None
     qr_base64: Optional[str] = None
     qr_updated_at: Optional[datetime] = None
+    pairing_code: Optional[str] = None
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None
     chatwoot_inbox_url: Optional[str] = None

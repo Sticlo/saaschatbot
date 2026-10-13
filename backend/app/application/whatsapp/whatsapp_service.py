@@ -101,6 +101,53 @@ def whatsapp_connect_lock(tenant_id: uuid.UUID) -> Iterator[bool]:
             pass
 
 
+PAIRING_CODE_TTL_SECONDS = 10 * 60
+PAIRING_CODE_WAIT_SECONDS = 12
+
+
+def pairing_number(raw: str) -> Optional[str]:
+    """Número con indicativo y sin «+», como lo pide WhatsApp para vincular con código."""
+    phone = normalize_phone(raw or "")
+    if not is_valid_whatsapp_phone(phone):
+        return None
+    return phone_to_evolution_number(phone)
+
+
+def _pairing_key(tenant_id) -> str:
+    return f"wa:pairing_code:{tenant_id}"
+
+
+def store_pairing_code(tenant_id, code: Optional[str]) -> None:
+    try:
+        if code:
+            get_redis().set(_pairing_key(tenant_id), code, ex=PAIRING_CODE_TTL_SECONDS)
+        else:
+            get_redis().delete(_pairing_key(tenant_id))
+    except Exception:
+        log.warning("No se pudo guardar el código de vinculación tenant=%s", tenant_id)
+
+
+def pairing_code_for(tenant_id) -> Optional[str]:
+    try:
+        raw = get_redis().get(_pairing_key(tenant_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+
+def extract_pairing_code(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for source in (payload, payload.get("qrcode")):
+        if isinstance(source, dict):
+            code = source.get("pairingCode")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    return None
+
+
 def _trusted_lid_alt_phone(
     alt_phone: str,
     *,
@@ -303,6 +350,7 @@ def _reset_gateway_instance_credentials(
     *,
     webhook_url: str,
     webhook_secret: str,
+    number: Optional[str] = None,
 ) -> None:
     """Borra credenciales atascadas. Logout falla si Evolution está en 'connecting'."""
     name = session.instance_name
@@ -324,7 +372,7 @@ def _reset_gateway_instance_credentials(
         purge_instance_stored_data(settings.evolution_database_url, name)
 
     try:
-        gateway_create_instance(name, webhook_url, webhook_secret)
+        gateway_create_instance(name, webhook_url, webhook_secret, number=number)
         log.info("Instancia %s recreada para QR limpio", name)
     except WhatsAppGatewayError as exc:
         if exc.status_code in (400, 403, 409) and gateway_instance_exists(name):
@@ -344,6 +392,7 @@ def _prepare_instance_for_new_qr(
     webhook_url: str,
     webhook_secret: str,
     force: bool = False,
+    number: Optional[str] = None,
 ) -> None:
     """Logout/borrado en Evolution para vincular otro celular sin error en el QR."""
     meta = None
@@ -376,6 +425,7 @@ def _prepare_instance_for_new_qr(
             session,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
+            number=number,
         )
 
     session.phone_number = None
@@ -383,7 +433,7 @@ def _prepare_instance_for_new_qr(
     session.qr_base64 = None
 
 
-def reconnect_session(db: Session, tenant: Tenant) -> WhatsAppSession:
+def reconnect_session(db: Session, tenant: Tenant, *, pairing_phone: Optional[str] = None) -> WhatsAppSession:
     """Reconexión: regenera QR si Evolution no está vinculado."""
     session = get_or_create_session(db, tenant)
     try:
@@ -392,11 +442,25 @@ def reconnect_session(db: Session, tenant: Tenant) -> WhatsAppSession:
         pass
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         return session
-    return start_connection(db, tenant)
+    return start_connection(db, tenant, pairing_phone=pairing_phone)
 
 
-def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
+def _wait_for_pairing_code(instance_name: str, number: str, connect_data: Any) -> Optional[str]:
+    """Evolution pide el código a WhatsApp un momento después de crear la conexión."""
+    code = extract_pairing_code(connect_data)
+    deadline = time.monotonic() + PAIRING_CODE_WAIT_SECONDS
+    while code is None and time.monotonic() < deadline:
+        time.sleep(2)
+        code = extract_pairing_code(gateway_connect(instance_name, number=number))
+    return code
+
+
+def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str] = None) -> WhatsAppSession:
+    """`pairing_phone`: vincular con código de 8 letras en vez de QR (el dueño solo tiene el celular)."""
     session = get_or_create_session(db, tenant)
+    number = pairing_number(pairing_phone) if pairing_phone else None
+    if pairing_phone and number is None:
+        raise WhatsAppGatewayError("Ese número no parece de WhatsApp. Escríbelo con indicativo, ej. +57 300 123 4567")
 
     try:
         refresh_session_status(db, tenant, session)
@@ -407,7 +471,9 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
     # Lo que sigue son varios segundos de llamadas a Evolution: sin soltar las filas del
     # negocio y la sesión, el webhook y el sondeo de estado se cruzan con esta transacción.
     db.commit()
+    store_pairing_code(tenant.id, None)
 
+    created_with_number = False
     try:
         if not gateway_instance_exists(session.instance_name):
             try:
@@ -415,7 +481,9 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
                     session.instance_name,
                     _webhook_url(tenant.id),
                     evolution_webhook_secret_for(tenant.id),
+                    number=number,
                 )
+                created_with_number = number is not None
             except WhatsAppGatewayError as exc:
                 if exc.status_code not in (400, 403, 409):
                     raise
@@ -433,19 +501,24 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
             gateway_ensure_realtime(session.instance_name)
         except Exception:
             pass
+        # Evolution solo toma el número al abrir la conexión: con una ya abierta para QR,
+        # hay que empezar de cero para que pida el código.
         _prepare_instance_for_new_qr(
             session,
             tenant,
             webhook_url=_webhook_url(tenant.id),
             webhook_secret=evolution_webhook_secret_for(tenant.id),
+            force=number is not None and not created_with_number,
+            number=number,
         )
     except WhatsAppGatewayError:
         raise
 
-    connect_data = gateway_connect(session.instance_name)
+    connect_data = gateway_connect(session.instance_name, number=number)
     qr = _extract_qr(connect_data if isinstance(connect_data, dict) else {})
     if not qr and isinstance(connect_data, dict):
         qr = _extract_qr(connect_data.get("qrcode", {}))
+    pairing_code = _wait_for_pairing_code(session.instance_name, number, connect_data) if number else None
 
     # Evolution puede restaurar sesión sin QR (celular ya vinculado).
     try:
@@ -472,6 +545,7 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
     session.qr_updated_at = datetime.now(timezone.utc) if qr else None
     tenant.whatsapp_status = WhatsAppStatus.CONNECTING.value
     db.flush()
+    store_pairing_code(tenant.id, pairing_code)
     from app.application.realtime.realtime_service import publish_whatsapp_status
 
     publish_whatsapp_status(
@@ -479,7 +553,10 @@ def start_connection(db: Session, tenant: Tenant) -> WhatsAppSession:
         status=WhatsAppStatus.CONNECTING.value,
         qr_base64=qr,
         phone_number=session.phone_number,
+        pairing_code=pairing_code,
     )
+    if number and not pairing_code:
+        raise WhatsAppGatewayError("WhatsApp no entregó el código de vinculación. Intenta de nuevo o usa el código QR.")
     return session
 
 

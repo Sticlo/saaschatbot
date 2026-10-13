@@ -426,6 +426,7 @@ input[type="email"],
 input[type="password"],
 input[type="text"],
 input[type="search"],
+input[type="tel"],
 textarea {
   display: block;
   width: 100%;
@@ -443,6 +444,7 @@ input[type="email"]:focus,
 input[type="password"]:focus,
 input[type="text"]:focus,
 input[type="search"]:focus,
+input[type="tel"]:focus,
 textarea:focus {
   outline: none;
   border-color: var(--field-focus-border);
@@ -1237,6 +1239,62 @@ textarea { resize: vertical; min-height: 44px; }
 }
 
 .qr-loading { padding: 2rem; color: var(--muted); }
+
+.wa-setup-alt { display: block; margin: 0.85rem auto 0; }
+
+.qr-mode-switch { display: block; margin: 1rem auto 0; }
+
+.pair-form {
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.pair-form label { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+
+.pair-form input[type="tel"] {
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+.pair-form-hint { margin: 0.5rem 0 1rem; font-size: 0.8rem; line-height: 1.4; }
+
+.pair-form .btn { width: 100%; }
+
+.pair-result { margin-top: 1rem; }
+
+.pair-code {
+  display: block;
+  width: 100%;
+  padding: 0.9rem 0.5rem;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: 700 2rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 120ms ease-out;
+}
+
+.pair-code:active { transform: scale(0.98); }
+
+.pair-copied { margin: 0.5rem 0 0.75rem; font-size: 0.82rem; }
+
+.pair-steps {
+  margin: 0 0 0.75rem;
+  padding-left: 1.2rem;
+  text-align: left;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.pair-steps li + li { margin-top: 0.35rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pair-code { transition: none; }
+}
 
 .btn.small { padding: 0.35rem 0.75rem; font-size: 0.8rem; width: auto; }
 

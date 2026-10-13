@@ -88,11 +88,13 @@ class EvolutionClient:
         instance_name: str,
         webhook_url: str,
         webhook_secret: str,
+        number: Optional[str] = None,
     ) -> dict:
         payload = {
             "instanceName": instance_name,
             "integration": "WHATSAPP-BAILEYS",
             "qrcode": True,
+            **({"number": number} if number else {}),
             "syncFullHistory": False,
             "webhook": {
                 "url": webhook_url,
@@ -149,8 +151,14 @@ class EvolutionClient:
             timeout=90.0,
         )
 
-    def connect_instance(self, instance_name: str) -> dict:
-        return self._request("GET", f"/instance/connect/{instance_name}", timeout=60.0)
+    def connect_instance(self, instance_name: str, number: Optional[str] = None) -> dict:
+        """Con `number`, Evolution además entrega `pairingCode` (vincular sin escanear)."""
+        return self._request(
+            "GET",
+            f"/instance/connect/{instance_name}",
+            params={"number": number} if number else None,
+            timeout=60.0,
+        )
 
     def connection_state(self, instance_name: str) -> dict:
         return self._request("GET", f"/instance/connectionState/{instance_name}")

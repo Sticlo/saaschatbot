@@ -81,7 +81,7 @@ def instance_exists(name: str) -> bool:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
-def create_instance(name: str, webhook_url: str, webhook_secret: str) -> dict:
+def create_instance(name: str, webhook_url: str, webhook_secret: str, number: Optional[str] = None) -> dict:
     if uses_waha():
         from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
 
@@ -92,7 +92,7 @@ def create_instance(name: str, webhook_url: str, webhook_secret: str) -> dict:
     from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 
     try:
-        return evolution_client.create_instance(name, webhook_url, webhook_secret)
+        return evolution_client.create_instance(name, webhook_url, webhook_secret, number=number)
     except EvolutionAPIError as exc:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
@@ -184,10 +184,12 @@ def delete_instance(name: str) -> dict:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
-def connect_instance(name: str) -> dict:
+def connect_instance(name: str, number: Optional[str] = None) -> dict:
     if uses_waha():
         from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
 
+        if number:
+            raise WhatsAppGatewayError("La vinculación con código no está disponible en este servidor")
         try:
             if not waha_client.session_exists(name):
                 waha_client.create_session(name, engine=settings.waha_engine)
@@ -201,7 +203,7 @@ def connect_instance(name: str) -> dict:
     from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 
     try:
-        return evolution_client.connect_instance(name)
+        return evolution_client.connect_instance(name, number=number)
     except EvolutionAPIError as exc:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.domain.entities import Tenant, WhatsAppSession
 from app.domain.entities.enums import WhatsAppStatus
 from app.presentation.schemas.whatsapp import (
     WhatsAppChatsDebugResponse,
+    WhatsAppConnectRequest,
     WhatsAppConnectResponse,
     WhatsAppStatusResponse,
     WhatsAppSyncDebugResponse,
@@ -26,6 +28,8 @@ from app.application.whatsapp.whatsapp_service import (
     EvolutionAPIError,
     disconnect_session,
     get_or_create_session,
+    pairing_code_for,
+    pairing_number,
     reconnect_session,
     refresh_session_status,
     start_connection,
@@ -63,6 +67,12 @@ def _gateway_http_error(exc: EvolutionAPIError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=message)
 
 
+def _session_pairing_code(session: WhatsAppSession) -> Optional[str]:
+    if session.status != WhatsAppStatus.CONNECTING.value:
+        return None
+    return pairing_code_for(session.tenant_id)
+
+
 def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
     from app.application.chatwoot.chatwoot_service import chatwoot_panel_url
 
@@ -72,6 +82,7 @@ def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
         phone_number=session.phone_number,
         qr_base64=session.qr_base64,
         qr_updated_at=session.qr_updated_at,
+        pairing_code=_session_pairing_code(session),
         last_connected_at=session.last_connected_at,
         last_disconnected_at=session.last_disconnected_at,
         chatwoot_inbox_url=chatwoot_panel_url(session),
@@ -85,7 +96,20 @@ def _connect_response(session: WhatsAppSession) -> WhatsAppConnectResponse:
         qr_base64=session.qr_base64,
         qr_updated_at=session.qr_updated_at,
         phone_number=session.phone_number,
+        pairing_code=_session_pairing_code(session),
     )
+
+
+def _pairing_phone(body: Optional[WhatsAppConnectRequest]) -> Optional[str]:
+    phone = (body.phone or "").strip() if body else ""
+    if not phone:
+        return None
+    if pairing_number(phone) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Ese número no parece de WhatsApp. Escríbelo con indicativo, ej. +57 300 123 4567",
+        )
+    return phone
 
 
 def _result_of_concurrent_connect(db: Session, tenant_id: uuid.UUID) -> WhatsAppConnectResponse:
@@ -102,20 +126,24 @@ def connect_whatsapp(
     request: Request,
     current: RequireViewer,
     db: Session = Depends(get_db),
+    body: Optional[WhatsAppConnectRequest] = None,
 ):
+    pairing_phone = _pairing_phone(body)
     with whatsapp_connect_lock(current.tenant_id) as owns_connect:
         if not owns_connect:
             return _result_of_concurrent_connect(db, current.tenant_id)
-        return _connect_whatsapp(request, current, db)
+        return _connect_whatsapp(request, current, db, pairing_phone=pairing_phone)
 
 
-def _connect_whatsapp(request: Request, current, db: Session) -> WhatsAppConnectResponse:
+def _connect_whatsapp(
+    request: Request, current, db: Session, *, pairing_phone: Optional[str] = None
+) -> WhatsAppConnectResponse:
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
     try:
-        session = start_connection(db, tenant)
+        session = start_connection(db, tenant, pairing_phone=pairing_phone)
         log_audit(
             db,
             tenant_id=tenant.id,
@@ -144,21 +172,25 @@ def reconnect_whatsapp(
     request: Request,
     current: RequireViewer,
     db: Session = Depends(get_db),
+    body: Optional[WhatsAppConnectRequest] = None,
 ):
     """Regenera QR cuando la sesión cayó (desconectado, restringido o baneado)."""
+    pairing_phone = _pairing_phone(body)
     with whatsapp_connect_lock(current.tenant_id) as owns_connect:
         if not owns_connect:
             return _result_of_concurrent_connect(db, current.tenant_id)
-        return _reconnect_whatsapp(request, current, db)
+        return _reconnect_whatsapp(request, current, db, pairing_phone=pairing_phone)
 
 
-def _reconnect_whatsapp(request: Request, current, db: Session) -> WhatsAppConnectResponse:
+def _reconnect_whatsapp(
+    request: Request, current, db: Session, *, pairing_phone: Optional[str] = None
+) -> WhatsAppConnectResponse:
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
     try:
-        session = reconnect_session(db, tenant)
+        session = reconnect_session(db, tenant, pairing_phone=pairing_phone)
         log_audit(
             db,
             tenant_id=tenant.id,

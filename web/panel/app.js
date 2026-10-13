@@ -55,6 +55,10 @@
 
   const tour = { active: false, autoChecked: false, steps: [], index: 0, root: null, target: null, cleanup: null, raf: 0 };
   const diag = { data: null, timer: 0, polls: 0, wasConnected: false, loading: false };
+  // El QR no se puede escanear con el mismo celular que lo muestra: ahí se vincula con código.
+  const waLink = { mode: "qr", editingPhone: false };
+  const PAIR_PHONE_KEY = "omitel.pairPhone";
+  let waConnectInFlight = null;
 
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
   const mediaCache = new Map();
@@ -829,14 +833,21 @@
     state.wa = {
       status,
       qr_base64: wa.qr_base64 ?? null,
+      pairing_code: wa.pairing_code ?? null,
       phone_number: nextPhone,
       chatwoot_inbox_url: wa.chatwoot_inbox_url ?? null,
     };
     updateWaBadge(state.wa.status);
     sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
     messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
-    if (state.wa.qr_base64 && state.wa.status === "connecting") {
-      showQrImage(state.wa.qr_base64);
+    if (state.wa.status === "connecting") {
+      if (waLink.mode === "code") {
+        if (state.wa.pairing_code && !waConnectInFlight && !waLink.editingPhone) {
+          showPairCode(state.wa.pairing_code);
+        }
+      } else if (state.wa.qr_base64) {
+        showQrImage(state.wa.qr_base64);
+      }
     }
     if (state.wa.status === "connected") {
       hideQrModal();
@@ -902,10 +913,17 @@
     const dropped = needsConnect && state.conversations.length > 0;
     const setupTitle = $("wa-setup-title");
     if (setupTitle) {
+      const onPhone = preferredWaMode() === "code";
       setupTitle.textContent = dropped ? "WhatsApp se desconectó" : "Conecta tu WhatsApp";
       $("wa-setup-text").innerHTML = dropped
-        ? "Estamos intentando reconectar solos y tus chats se conservan. Si en un par de minutos no vuelve, escanea el código QR otra vez."
-        : "Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.";
+        ? "Estamos intentando reconectar solos y tus chats se conservan. Si en un par de minutos no vuelve, vincúlalo otra vez."
+        : onPhone
+          ? "Conéctalo desde este mismo celular con un código. En un minuto la IA empieza a atender a tus clientes."
+          : "Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.";
+      $("wa-setup-btn").textContent = onPhone ? "Conectar con código" : "Mostrar código QR";
+      $("wa-setup-alt-btn").textContent = onPhone
+        ? "Prefiero escanear un código QR"
+        : "¿Solo tienes este celular? Conéctate con un código";
     }
     $("empty-ready")?.classList.toggle("hidden", !connected);
     if (connected && !diag.wasConnected) {
@@ -923,10 +941,31 @@
     }
   }
 
+  function preferredWaMode() {
+    return window.matchMedia("(pointer: coarse) and (max-width: 820px)").matches ? "code" : "qr";
+  }
+
+  function formatPairCode(code) {
+    const clean = String(code || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    return clean.length === 8 ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+  }
+
+  function setWaLinkMode(mode) {
+    waLink.mode = mode;
+    const code = mode === "code";
+    $("qr-hint").classList.toggle("hidden", code);
+    $("qr-image").classList.add("hidden");
+    $("pair-form").classList.add("hidden");
+    $("pair-result").classList.add("hidden");
+    $("qr-mode-switch").textContent = code
+      ? "Prefiero escanear un código QR"
+      : "¿Solo tienes este celular? Conéctate con un código";
+  }
+
   function showQrModal() {
+    setWaLinkMode("qr");
     $("qr-modal").classList.remove("hidden");
     $("qr-loading").classList.remove("hidden");
-    $("qr-image").classList.add("hidden");
     $("qr-error").classList.add("hidden");
     $("qr-phone").classList.add("hidden");
   }
@@ -946,19 +985,91 @@
   function showQrError(msg) {
     $("qr-loading").classList.add("hidden");
     $("qr-image").classList.add("hidden");
+    $("pair-result").classList.add("hidden");
+    if (waLink.mode === "code") {
+      waLink.editingPhone = true;
+      $("pair-form").classList.remove("hidden");
+    }
     const err = $("qr-error");
     err.textContent = msg;
     err.classList.remove("hidden");
   }
 
-  let waConnectInFlight = null;
+  function showPairForm() {
+    setWaLinkMode("code");
+    waLink.editingPhone = true;
+    $("qr-modal").classList.remove("hidden");
+    $("qr-loading").classList.add("hidden");
+    $("qr-error").classList.add("hidden");
+    $("qr-phone").classList.add("hidden");
+    $("pair-form").classList.remove("hidden");
+    const input = $("pair-phone");
+    if (!input.value) input.value = localStorage.getItem(PAIR_PHONE_KEY) || "";
+    input.focus();
+  }
 
-  function connectWhatsApp() {
+  function showPairCode(code) {
+    $("qr-loading").classList.add("hidden");
+    $("qr-error").classList.add("hidden");
+    $("pair-form").classList.add("hidden");
+    const btn = $("pair-code");
+    const next = formatPairCode(code);
+    if (btn.textContent !== next) {
+      btn.textContent = next;
+      $("pair-copied").textContent = "Toca el código para copiarlo";
+    }
+    $("pair-result").classList.remove("hidden");
+  }
+
+  async function copyPairCode() {
+    const code = $("pair-code").textContent.replace(/-/g, "");
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      $("pair-copied").textContent = "¡Copiado! Pégalo en WhatsApp";
+    } catch {
+      $("pair-copied").textContent = "Escríbelo tal cual en WhatsApp";
+    }
+  }
+
+  function connectWhatsApp(mode = preferredWaMode()) {
     if (waConnectInFlight) {
       $("qr-modal").classList.remove("hidden");
       return waConnectInFlight;
     }
+    if (mode === "code") {
+      showPairForm();
+      return Promise.resolve();
+    }
     waConnectInFlight = requestWhatsAppQr().finally(() => {
+      waConnectInFlight = null;
+    });
+    return waConnectInFlight;
+  }
+
+  function requestPairCode(phone) {
+    if (waConnectInFlight) return waConnectInFlight;
+    waConnectInFlight = (async () => {
+      setWaLinkMode("code");
+      waLink.editingPhone = false;
+      $("qr-error").classList.add("hidden");
+      $("qr-loading").textContent = "Pidiendo el código a WhatsApp… puede tardar hasta 30 segundos";
+      $("qr-loading").classList.remove("hidden");
+      $("wa-setup-error").classList.add("hidden");
+      try {
+        const wa = await api(
+          "/whatsapp/connect",
+          { method: "POST", body: JSON.stringify({ phone }) },
+          90000
+        );
+        localStorage.setItem(PAIR_PHONE_KEY, phone);
+        applyWaSession(wa);
+        if (wa.pairing_code) showPairCode(wa.pairing_code);
+        else if (wa.status !== "connected") showQrError("WhatsApp no entregó el código. Intenta de nuevo en unos segundos.");
+      } catch (err) {
+        showQrError(humanizeWaError(err.message || "No pudimos pedir el código"));
+      }
+    })().finally(() => {
       waConnectInFlight = null;
     });
     return waConnectInFlight;
@@ -4142,6 +4253,7 @@
         applyWaSession({
           status: event.status,
           qr_base64: event.qr_base64,
+          pairing_code: event.pairing_code,
           phone_number: event.phone_number,
         });
         break;
@@ -4459,6 +4571,24 @@
   $("wa-setup-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     connectWhatsApp();
+  });
+  $("wa-setup-alt-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    connectWhatsApp(preferredWaMode() === "code" ? "qr" : "code");
+  });
+  $("qr-mode-switch").addEventListener("click", () => {
+    connectWhatsApp(waLink.mode === "code" ? "qr" : "code");
+  });
+  $("pair-other-number").addEventListener("click", showPairForm);
+  $("pair-code").addEventListener("click", copyPairCode);
+  $("pair-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const phone = $("pair-phone").value.trim();
+    if (phone.replace(/\D/g, "").length < 10) {
+      showQrError("Escribe el número completo, ej. 300 123 4567");
+      return;
+    }
+    requestPairCode(phone);
   });
   $("guide-btn")?.addEventListener("click", (e) => {
     e.preventDefault();

@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=56" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=57" />
 </head>
 <body>
   <div id="app">
@@ -167,6 +167,7 @@
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
               <p id="wa-setup-text" class="muted">Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.</p>
               <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
+              <button type="button" id="wa-setup-alt-btn" class="link-btn wa-setup-alt">¿Solo tienes este celular? Conéctate con un código</button>
               <p id="wa-setup-error" class="error hidden"></p>
             </div>
             <div id="empty-ready" class="empty-ready hidden">
@@ -699,16 +700,33 @@
       <div class="modal-card">
         <button id="qr-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
         <h3>Vincular WhatsApp</h3>
-        <p class="muted">WhatsApp → Dispositivos vinculados → Vincular dispositivo</p>
+        <p id="qr-hint" class="muted">WhatsApp → Dispositivos vinculados → Vincular dispositivo</p>
+        <form id="pair-form" class="pair-form hidden" novalidate>
+          <label for="pair-phone">Número de WhatsApp del negocio</label>
+          <input type="tel" id="pair-phone" inputmode="tel" autocomplete="tel" placeholder="300 123 4567" maxlength="32" />
+          <p class="muted pair-form-hint">El del celular donde tienes ese WhatsApp. Te damos un código para escribirlo allá, sin escanear nada. Si no es de Colombia, escríbelo con + e indicativo.</p>
+          <button type="submit" id="pair-submit" class="btn primary">Pedir código</button>
+        </form>
         <div id="qr-loading" class="qr-loading">Generando QR…</div>
         <img id="qr-image" class="qr-image hidden" alt="Código QR WhatsApp" />
+        <div id="pair-result" class="pair-result hidden">
+          <button type="button" id="pair-code" class="pair-code" aria-label="Copiar código"></button>
+          <p id="pair-copied" class="muted pair-copied">Toca el código para copiarlo</p>
+          <ol class="pair-steps">
+            <li>En WhatsApp abre <strong>Dispositivos vinculados</strong> (en Configuración o en el menú ⋮).</li>
+            <li>Toca <strong>Vincular un dispositivo</strong> y luego <strong>Vincular con el número de teléfono</strong>.</li>
+            <li>Escribe el código. Aquí te avisamos cuando quede conectado.</li>
+          </ol>
+          <button type="button" id="pair-other-number" class="link-btn">Usar otro número</button>
+        </div>
         <p id="qr-error" class="error hidden"></p>
         <p id="qr-phone" class="muted hidden"></p>
+        <button type="button" id="qr-mode-switch" class="link-btn qr-mode-switch"></button>
         <p class="diag-fine">Al vincular, revisamos tus últimos días de WhatsApp solo para mostrarte un diagnóstico de tu atención. No guardamos esos mensajes ni se los enviamos a ninguna IA. <a href="https://www.omitel.net/privacidad#historial" target="_blank" rel="noopener">Más información</a></p>
       </div>
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=128"></script>
+  <script src="/static/panel/app.js?v=129"></script>
 </body>
 </html>
