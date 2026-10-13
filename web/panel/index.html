@@ -2,13 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Omitel — Panel</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=57" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=58" />
 </head>
 <body>
   <div id="app">
@@ -101,11 +101,16 @@
           <span id="sync-status" class="sync-status" title="Estado de sincronización con el celular">Sync: —</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
           <button type="button" id="wa-connect-btn" class="btn primary small">Conectar WhatsApp</button>
-          <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
-          <a id="wa-chatwoot-link" class="btn ghost small hidden" href="#" target="_blank" rel="noopener noreferrer">Chatwoot</a>
-          <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
+          <div class="topbar-wa-actions">
+            <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
+            <a id="wa-chatwoot-link" class="btn ghost small hidden" href="#" target="_blank" rel="noopener noreferrer">Chatwoot</a>
+            <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
+          </div>
+          <button type="button" id="topbar-menu-btn" class="topbar-menu-btn" aria-label="Menú" aria-expanded="false" aria-controls="topbar-menu">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
         </div>
-        <div class="topbar-right">
+        <div class="topbar-right" id="topbar-menu">
           <button type="button" id="guide-btn" class="btn ghost small hidden" title="Repetir el recorrido guiado">Guía</button>
           <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
             <span id="plan-status-label" class="plan-status-label"></span>
@@ -180,6 +185,9 @@
 
           <div id="active-chat" class="hidden">
             <div class="chat-header">
+              <button type="button" id="chat-back-btn" class="chat-back-btn" aria-label="Volver a los chats">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5l-7 7 7 7"/></svg>
+              </button>
               <div class="chat-header-main">
                 <h3 id="chat-title">—</h3>
                 <span id="chat-phone" class="chat-contact-phone muted"></span>
@@ -727,6 +735,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=129"></script>
+  <script src="/static/panel/app.js?v=130"></script>
 </body>
 </html>

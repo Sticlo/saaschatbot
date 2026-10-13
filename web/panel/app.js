@@ -945,6 +945,10 @@
     return window.matchMedia("(pointer: coarse) and (max-width: 820px)").matches ? "code" : "qr";
   }
 
+  function isPhoneLayout() {
+    return window.matchMedia("(max-width: 768px)").matches;
+  }
+
   function formatPairCode(code) {
     const clean = String(code || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
     return clean.length === 8 ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
@@ -4034,6 +4038,7 @@
     const conv = state.conversations.find((c) => c.id === id);
     if (!conv) return;
 
+    if (isPhoneLayout() && !history.state?.omitelChat) history.pushState({ omitelChat: true }, "");
     emptyChat.classList.add("hidden");
     activeChat.classList.remove("hidden");
     $("chat-title").textContent = convTitle(conv);
@@ -4851,6 +4856,44 @@
   $("tab-chats-interested").addEventListener("click", () => switchChatTab("interested"));
   $("tab-chats-not-interested").addEventListener("click", () => switchChatTab("not_interested"));
   $("tab-chats-all").addEventListener("click", () => switchChatTab("all"));
+
+  function closeActiveChat() {
+    if (!state.activeId) return;
+    if (pendingImage) clearPendingImage();
+    state.activeId = null;
+    state.messages = [];
+    state._messagesSig = "";
+    emptyChat.classList.remove("hidden");
+    activeChat.classList.add("hidden");
+    renderConversationList();
+    renderQuickShortcuts();
+  }
+
+  $("chat-back-btn").addEventListener("click", () => {
+    if (history.state?.omitelChat) history.back();
+    else closeActiveChat();
+  });
+  window.addEventListener("popstate", () => {
+    if (!history.state?.omitelChat) closeActiveChat();
+  });
+
+  const topbar = document.querySelector(".topbar");
+  function setTopbarMenu(open) {
+    topbar.classList.toggle("menu-open", open);
+    $("topbar-menu-btn").setAttribute("aria-expanded", String(open));
+  }
+  $("topbar-menu-btn").addEventListener("click", () => setTopbarMenu(!topbar.classList.contains("menu-open")));
+  topbar.addEventListener("click", (e) => {
+    if (e.target.closest(".topbar-right button, .topbar-right a, .topbar-wa-actions button, .topbar-wa-actions a")) {
+      setTopbarMenu(false);
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (topbar.classList.contains("menu-open") && !topbar.contains(e.target)) setTopbarMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && topbar.classList.contains("menu-open")) setTopbarMenu(false);
+  });
 
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
   $("mode-appointments").addEventListener("click", () => switchPanelMode("appointments"));

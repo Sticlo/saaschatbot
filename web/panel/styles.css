@@ -145,11 +145,13 @@ body {
   background: var(--bg);
   color: var(--text);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
 #app {
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -157,6 +159,7 @@ body {
 
 .view {
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -506,11 +509,31 @@ textarea { resize: vertical; min-height: 44px; }
   flex-wrap: wrap;
 }
 
-.topbar-left, .topbar-right {
+.topbar-left, .topbar-right, .topbar-wa-actions {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
+
+.topbar-wa-actions:not(:has(> :not(.hidden))) { display: none; }
+
+.topbar-menu-btn,
+.chat-back-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.topbar-menu-btn:active,
+.chat-back-btn:active { background: var(--surface2); }
 
 .business-name-cta {
   border: 1px dashed var(--accent);
@@ -567,11 +590,6 @@ textarea { resize: vertical; min-height: 44px; }
   grid-template-columns: 320px 1fr;
   flex: 1;
   min-height: 0;
-}
-
-@media (max-width: 768px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
 }
 
 .sidebar {
@@ -3809,4 +3827,177 @@ textarea { resize: vertical; min-height: 44px; }
     grid-column: 2;
     justify-self: start;
   }
+}
+
+/* —— Celular: una pantalla a la vez, como WhatsApp —— */
+@media (max-width: 768px) {
+  /* iOS hace zoom al enfocar campos con letra de menos de 16px. */
+  #app :is(input, select, textarea) { font-size: 16px; }
+
+  .topbar {
+    position: relative;
+    gap: 0.5rem;
+    padding: 0.45rem 0.4rem 0.45rem 0.85rem;
+  }
+  .topbar-left { display: contents; }
+  #business-name {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .business-name-cta { order: 1; }
+  #ws-status, #sync-status { display: none; }
+  #wa-status { order: 2; max-width: 9.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #wa-connect-btn { order: 3; }
+  .topbar:has(#wa-connect-btn:not(.hidden)) #wa-status,
+  #panel-view:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #wa-connect-btn { display: none; }
+  #panel-view:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #wa-status { display: inline-block; }
+  .topbar-menu-btn { display: inline-flex; order: 4; }
+  .topbar-right, .topbar-wa-actions { display: none; }
+
+  .topbar.menu-open .topbar-right {
+    display: flex;
+    order: 6;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    margin-right: 0.45rem;
+    border-top: 1px solid var(--border);
+  }
+  .topbar.menu-open .topbar-right > * {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar.menu-open .topbar-right > :last-child { border-bottom: none; }
+  .topbar.menu-open #user-label { order: -1; min-height: 40px; font-size: 0.8rem; }
+  .topbar.menu-open .topbar-right > .btn {
+    width: 100%;
+    padding: 0;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.95rem;
+    text-align: left;
+  }
+  .topbar.menu-open #logout-btn { color: var(--danger); }
+  .topbar.menu-open .toggle-row { font-size: 0.95rem; }
+  .topbar.menu-open .toggle-row input { width: 1.3rem; height: 1.3rem; }
+  .topbar.menu-open .plan-status-bar { padding: 0.5rem 0; flex-wrap: wrap; gap: 0.5rem; }
+  .topbar.menu-open .topbar-wa-actions:has(> :not(.hidden)) {
+    display: flex;
+    order: 5;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-right: 0.45rem;
+    padding: 0.6rem 0 0.25rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .ai-alert-banner {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    text-align: left;
+  }
+
+  /* Lista de chats a pantalla completa; al abrir uno, el chat ocupa todo. */
+  .layout { display: flex; flex-direction: column; }
+  .sidebar { flex: 1; min-height: 0; border-right: none; }
+  .chat-area { display: none; flex: 1; }
+
+  .layout:has(.chat-area:is(.ai-setup-mode, .appointments-mode)) .sidebar,
+  .layout:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) .sidebar { flex: none; }
+  .layout:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #sidebar-chats { display: none; }
+  .layout:has(.chat-area:is(.ai-setup-mode, .appointments-mode)) .chat-area,
+  .layout:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) .chat-area,
+  .layout:has(.chat-area:not(.ai-setup-mode, .appointments-mode) > #active-chat:not(.hidden)) .chat-area { display: flex; }
+  .layout:has(.chat-area:not(.ai-setup-mode, .appointments-mode) > #active-chat:not(.hidden)) .sidebar,
+  #panel-view:has(.chat-area:not(.ai-setup-mode, .appointments-mode) > #active-chat:not(.hidden)) :is(.topbar, .ai-alert-banner) { display: none; }
+
+  /* Con WhatsApp conectado y sin chat abierto, solo se ve el aviso del diagnóstico. */
+  .layout:has(#empty-chat:not(.hidden) :is(#diag-open, #diag-analyzing):not(.hidden)) .chat-area {
+    display: flex;
+    flex: none;
+    border-top: 1px solid var(--border);
+  }
+  .layout:has(#empty-chat:not(.hidden) :is(#diag-open, #diag-analyzing):not(.hidden)) .empty-state { flex: none; padding: 0.6rem 0.75rem; }
+  .empty-ready > h3,
+  .empty-ready > p.muted { display: none; }
+  .empty-ready { max-width: none; width: 100%; }
+  .empty-ready .diag-entry, .empty-ready .diag-analyzing { margin: 0; width: 100%; }
+
+  .sidebar-mode-tabs {
+    margin: 0.5rem 0.5rem 0;
+    padding: 0.3rem;
+    gap: 0.2rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sidebar-mode-tabs::-webkit-scrollbar { display: none; }
+  .sidebar-mode-tab {
+    flex: 1 0 auto;
+    white-space: nowrap;
+    font-size: 0.8rem;
+    padding: 0.6rem 0.55rem;
+  }
+  .sidebar-header { padding: 0.5rem 0.85rem; border-bottom: none; }
+  .search-box { padding: 0 0.75rem 0.5rem; border-bottom: none; }
+  .search-box input { padding: 0.55rem 0.85rem; }
+  .chat-tab { font-size: 0.82rem; padding: 0.55rem 0.35rem; }
+  .conversation-item { padding: 0.8rem 0.95rem; }
+  .conversation-item:hover { background: transparent; }
+  .conversation-item:active { background: var(--surface2); }
+  .conversation-item.active { background: transparent; border-left: none; }
+
+  .chat-header {
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.4rem 0.75rem 0.55rem 0.3rem;
+  }
+  .chat-back-btn { display: inline-flex; }
+  .chat-header h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-contact-phone { font-size: 0.78rem; margin-top: 0.1rem; }
+  .chat-ai-hint { margin: 0.2rem 0 0; }
+  .chat-header-actions {
+    flex-basis: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-left: 0.45rem;
+  }
+  .chat-toggles { gap: 0.85rem; justify-content: flex-start; }
+  .chat-interest-btns { justify-content: flex-start; }
+  .interest-btn { padding: 0.4rem 0.8rem; }
+
+  .messages { padding: 0.75rem 0.6rem; }
+  .msg { max-width: 85%; }
+  .media-img, .media-video, .media-caption, .media-transcript { max-width: min(260px, 100%); }
+  .media-audio { width: min(240px, 100%); }
+
+  .composer { gap: 0.4rem; padding: 0.5rem; }
+  .composer textarea { min-width: 0; max-height: 30dvh; resize: none; }
+  .composer .btn { min-width: 0; padding-inline: 0.95rem; }
+
+  .modal-card {
+    width: calc(100vw - 1.5rem);
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+  }
+  .appointments-panel { padding: 1rem 0.85rem 2rem; }
+
+  .ai-ready-item { flex-wrap: wrap; }
+  .ai-ready-text { flex-basis: calc(100% - 1.95rem); }
+  .ai-ready-item > .link-btn { margin-left: 1.95rem; padding: 0.2rem 0; }
 }
