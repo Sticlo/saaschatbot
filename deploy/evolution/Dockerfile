@@ -18,6 +18,12 @@ RUN git apply /tmp/omitel-evolution.patch
 
 RUN npm ci
 
+# Baileys 6.7.12 manda companion_platform_id '49' (código ASCII de "1") y WhatsApp rechaza en
+# silencio el código de vinculación: no llega la notificación y el celular dice "No se pudo vincular".
+RUN f=node_modules/baileys/lib/Utils/generics.js && \
+    sed -i "s/platformType.toString().charCodeAt(0).toString() : '49'/platformType.toString() : '1'/" "$f" && \
+    grep -q "platformType.toString() : '1'" "$f"
+
 RUN cp .env.example .env && chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
 RUN ./Docker/scripts/generate_database.sh
