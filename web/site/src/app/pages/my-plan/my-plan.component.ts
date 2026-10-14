@@ -22,6 +22,7 @@ import {
   tokenizeCard,
   waitForNequiApproval,
 } from '../../core/wompi-tokenizer';
+import { whatsappUrl } from '../../core/contact';
 import { ShellComponent } from '../../layout/shell/shell.component';
 
 type MethodTab = 'CARD' | 'NEQUI' | 'WOMPI';
@@ -148,6 +149,19 @@ export class MyPlanComponent implements OnInit, OnDestroy {
   }
 
   // —— Presentación ——
+
+  get paymentsOnline(): boolean {
+    return this.config?.enabled !== false;
+  }
+
+  get manualActivationHref(): string {
+    const plan = this.subscription?.plan;
+    const email = this.session.snapshot()?.email;
+    const price = plan?.price_cop ? ` (${this.formatCop(plan.price_cop)}/mes)` : '';
+    return whatsappUrl(
+      `Hola, quiero activar el ${plan?.name || 'plan'} de Omitel${price}.${email ? ` Mi cuenta es ${email}.` : ''} ¿Cómo pago?`,
+    );
+  }
 
   get autoRenewAvailable(): boolean {
     return !!this.config?.auto_renew_enabled && !!this.config?.public_key && !!this.config?.api_base;

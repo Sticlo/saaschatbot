@@ -45,6 +45,7 @@ export class PricingComponent implements OnInit, OnDestroy {
 
   plans: Plan[] = [];
   loggedIn = false;
+  userEmail = '';
   billingEnabled = false;
   billingSandbox = false;
   subscription: SubscriptionSummary | null = null;
@@ -98,6 +99,7 @@ export class PricingComponent implements OnInit, OnDestroy {
         return;
       }
       this.loggedIn = !!user;
+      this.userEmail = user?.email ?? '';
       this.subscription = subscription;
       this.billingEnabled = billingEnabled;
       if (this.loggedIn) {
@@ -176,6 +178,9 @@ export class PricingComponent implements OnInit, OnDestroy {
     if (!this.loggedIn || !this.pendingPlanSlug || this.checkoutLoading || !this.configLoaded) {
       return;
     }
+    if (!this.billingEnabled) {
+      return;
+    }
     const plan = this.plans.find((p) => p.slug === this.pendingPlanSlug);
     if (!plan || this.isCurrentPlan(plan)) {
       return;
@@ -211,6 +216,9 @@ export class PricingComponent implements OnInit, OnDestroy {
     if (this.subscription?.is_paid && this.subscription.plan.slug === plan.slug) {
       return 'Plan activo';
     }
+    if (this.loggedIn && !this.billingEnabled) {
+      return 'Activar por WhatsApp';
+    }
     if (this.loggedIn) {
       return this.subscription?.is_trial ? 'Activar plan' : 'Cambiar a este plan';
     }
@@ -226,7 +234,6 @@ export class PricingComponent implements OnInit, OnDestroy {
   canSelectPlan(plan: Plan): boolean {
     if (this.checkoutLoading) return false;
     if (this.isCurrentPlan(plan)) return false;
-    if (this.loggedIn && !this.billingEnabled) return false;
     return true;
   }
 
@@ -238,7 +245,19 @@ export class PricingComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (!this.billingEnabled) {
+      window.open(this.manualActivationUrl(plan), '_blank', 'noopener');
+      return;
+    }
+
     this.goToPlan(plan.slug);
+  }
+
+  private manualActivationUrl(plan: Plan): string {
+    const account = this.userEmail ? ` Mi cuenta es ${this.userEmail}.` : '';
+    return whatsappUrl(
+      `Hola, quiero activar el ${plan.name} de Omitel (${this.formatCop(plan.price_cop)}/mes).${account} ¿Cómo pago?`,
+    );
   }
 
   private async startCheckout(planSlug: string): Promise<void> {

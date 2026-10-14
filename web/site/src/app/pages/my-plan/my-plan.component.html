@@ -92,7 +92,7 @@
           }
         </dl>
 
-        @if (canRenewInWompi) {
+        @if (canRenewInWompi && paymentsOnline) {
           <div class="wompi-pay">
             <a class="btn btn-ghost" routerLink="/precios" [queryParams]="{ plan: subscription.plan.slug, once: 1 }">
               Renovar 30 días en Wompi · {{ formatCop(subscription.plan.price_cop) }}
@@ -131,7 +131,15 @@
           }
         </div>
 
-        @if (!autoRenewAvailable) {
+        @if (!paymentsOnline) {
+          <p class="muted">
+            Activa o renueva tu plan por WhatsApp: te enviamos los datos para pagar por Nequi o transferencia
+            y lo activamos apenas confirmemos el pago.
+          </p>
+          <a class="btn btn-primary" [href]="manualActivationHref" target="_blank" rel="noopener noreferrer">
+            Activar por WhatsApp
+          </a>
+        } @else if (!autoRenewAvailable) {
           <p class="muted">
             El cobro automático estará disponible muy pronto. Mientras tanto puedes pagar desde
             <a routerLink="/precios">Precios</a>.
