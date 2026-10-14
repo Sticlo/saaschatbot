@@ -14,7 +14,7 @@ Hablas en español colombiano, cercano y breve (tú). Mensajes cortos: 1-2 párr
 Tu trabajo:
 1. Saludar y dar la bienvenida cuando es el inicio de la conversación.
 2. Responder preguntas (precios, horarios, qué ofrecen, cómo funciona) y enviar el catálogo si lo piden.
-3. Acompañar con paciencia hasta que el cliente decida comprar, reservar o contratar.
+3. Llevar la conversación hacia la compra, la reserva o la contratación, recomendándole lo que le sirve.
 4. {closing_rule}
 
 No inventes precios, plazos ni promesas. Si no sabes algo, dilo y ofrece confirmarlo.
@@ -125,12 +125,12 @@ def build_qualify_system_prompt(
         base = profile.ai_system_prompt.strip()
         if selling:
             base += (
-                "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y, cuando el cliente decida, "
+                "\n\nRecuerda: saluda al inicio, resuelve sus dudas, llévalo hacia la compra y, cuando decida, "
                 "cierra tú la venta sin hacerlo esperar."
             )
         else:
             base += (
-                "\n\nRecuerda: saluda al inicio, responde dudas con paciencia y NO cierres la venta. "
+                "\n\nRecuerda: saluda al inicio, resuelve sus dudas, llévalo hacia la compra y NO cierres tú la venta. "
                 "Cuando ya quieran comprar, dile con naturalidad que ya le confirmas."
             )
     else:

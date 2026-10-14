@@ -15,6 +15,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.application.ai.ai_conversation_service import (
+    SALES_PLAYBOOK,
     SAFETY_RULES,
     build_system_prompt,
     date_context,
@@ -54,9 +55,11 @@ SKIP = "NO"
 
 _ENDED_REPLIES = frozenset(CLOSING_HOLD_REPLIES)
 
-FOLLOWUP_INSTRUCTION = """El cliente dejó de responder hace unas {hours} horas. Escríbele UN solo mensaje corto (una o dos frases) para retomar la conversación donde quedó y preguntarle si sigue interesado o si le ayudas con algo más.
-- Menciona con naturalidad lo último que estaban hablando (el producto, el servicio o su duda).
+FOLLOWUP_INSTRUCTION = """El cliente dejó de responder. Escríbele UN solo mensaje corto (una o dos frases) que lo acerque a comprar, retomando la conversación donde quedó.
+- Retoma con algo concreto: lo que estaba mirando, una opción que le sirva según lo que te dijo o el siguiente paso (apartarlo, agendarlo, enviárselo).
+- Termina con una pregunta fácil de responder (sí o no, o elegir entre dos opciones). No preguntes «¿sigues interesado?» ni «¿te ayudo con algo más?».
 - Sin presionar: no inventes descuentos, urgencia ni cupos limitados.
+- No afirmes nada que no esté en la conversación o en la información del negocio: ni que hay existencias, ni su ciudad, ni plazos de entrega.
 - No lo saludes como si fuera la primera vez ni repitas lo que ya le dijiste.
 - Si la conversación ya terminó (se despidió, ya compró, pagó o agendó, dijo que no le interesa, pidió que no le escriban, quedó esperando que el negocio le confirme algo, o no es un cliente), responde solo: {skip}
 Responde únicamente con el texto del mensaje, sin comillas ni JSON."""
@@ -157,11 +160,11 @@ def generate_followup(tenant: Tenant, conversation: Conversation, history: list[
     if name and not name.startswith("+"):
         system += f"\n\nNombre del contacto: {name}"
     messages = [
-        {"role": "system", "content": system + date_context() + SAFETY_RULES},
+        {"role": "system", "content": system + SALES_PLAYBOOK + date_context() + SAFETY_RULES},
         *format_history(history, limit=HISTORY_TURNS),
         {
             "role": "system",
-            "content": FOLLOWUP_INSTRUCTION.format(hours=profile.followup_hours, skip=SKIP),
+            "content": FOLLOWUP_INSTRUCTION.format(skip=SKIP),
         },
     ]
     return _clean(chat_completion(messages, temperature=0.6, max_tokens=160))
