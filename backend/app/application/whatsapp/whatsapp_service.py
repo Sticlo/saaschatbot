@@ -707,6 +707,14 @@ def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) ->
     db.flush()
 
 
+def typing_delay_ms(text: str) -> int:
+    """Lo que tardaría una persona rápida en escribirlo: un mensaje instantáneo delata al bot."""
+    cap = settings.ai_typing_max_ms
+    if cap <= 0:
+        return 0
+    return min(cap, 1200 + 25 * len(text.strip()))
+
+
 def send_text_message(
     db: Session,
     *,
@@ -733,7 +741,8 @@ def send_text_message(
         conversation=conversation,
     )
 
-    result = gateway_send_text(session.instance_name, recipient, text)
+    typing_ms = typing_delay_ms(text) if source == MessageSource.BOT.value else 0
+    result = gateway_send_text(session.instance_name, recipient, text, typing_ms=typing_ms)
     from app.application.messaging.message_service import extract_whatsapp_message_id
 
     evolution_id = extract_whatsapp_message_id(result)

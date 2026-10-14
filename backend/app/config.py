@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     ai_trial_daily_classify_limit: int = 500
     ai_paid_daily_classify_limit: int = 0  # 0 = ilimitado (clasificar no cuesta casi nada)
     ai_classify_delay_seconds: float = 0.3
+    # «Escribiendo…» antes de cada mensaje de la IA, según su largo. 0 = sin espera.
+    ai_typing_max_ms: int = 4500
     ai_maps_plans_per_day: int = 5
 
     # Workers — en producción la API no arranca workers (procesos separados).
