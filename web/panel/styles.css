@@ -1383,11 +1383,6 @@ textarea { resize: vertical; min-height: 44px; }
   margin-bottom: 1.5rem;
 }
 
-.appointments-hero-icon {
-  font-size: 2rem;
-  margin-bottom: 0.5rem;
-}
-
 .appointments-hero h2 {
   margin: 0 0 0.45rem;
   font-size: 1.4rem;
@@ -2053,13 +2048,6 @@ textarea { resize: vertical; min-height: 44px; }
   padding: 0 0.5rem;
 }
 
-.ai-setup-hero-icon {
-  font-size: 2rem;
-  line-height: 1;
-  margin-bottom: 0.65rem;
-  opacity: 0.9;
-}
-
 .ai-setup-hero h2 {
   margin: 0 0 0.5rem;
   font-size: 1.45rem;
@@ -2365,6 +2353,8 @@ textarea { resize: vertical; min-height: 44px; }
 .media-placeholder.loading { opacity: 0.7; }
 .media-placeholder.failed  { opacity: 0.45; cursor: default; font-style: italic; }
 .media-type-label { font-size: 0.82rem; opacity: 0.8; }
+.media-icon { flex-shrink: 0; opacity: 0.75; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }
 
 .media-img {
   max-width: 260px;

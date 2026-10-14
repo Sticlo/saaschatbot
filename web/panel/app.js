@@ -129,7 +129,7 @@
     const options = PHONE_COUNTRIES.map(
       (c) => `<option value="${c.iso}"${c.iso === selected ? " selected" : ""}>${c.flag} +${c.dial} ${c.name}</option>`
     );
-    options.push(`<option value="${PHONE_OTHER}"${selected === PHONE_OTHER ? " selected" : ""}>🌐 Otro país</option>`);
+    options.push(`<option value="${PHONE_OTHER}"${selected === PHONE_OTHER ? " selected" : ""}>Otro país</option>`);
     return options.join("");
   }
 
@@ -1267,7 +1267,7 @@
     const steps = [
       {
         key: "hello",
-        title: "¡Hola! Soy Omi 👋",
+        title: "Hola, soy Omi",
         text: "Solo tres cosas: conectar WhatsApp, decirle a la IA qué vendes y poner tu número para que te avise cuando alguien quiera comprar.",
         next: "Empezar",
       },
@@ -1323,7 +1323,7 @@
     steps.push({
       key: "bye",
       mode: "chats",
-      title: "Ya está 🎉",
+      title: "Listo",
       text: "Pídele a alguien que le escriba a tu WhatsApp. Aquí ves los chats; en «Interesados», a los que quieren comprar. Si te pierdes, toca «Guía».",
       next: "Entendido",
     });
@@ -1631,7 +1631,7 @@
     if (kind === "after_hours") {
       return `<strong>${pluralEs(d.after_hours, "persona", "personas")}</strong> te ${d.after_hours === 1 ? "escribió" : "escribieron"} fuera de tu horario`;
     }
-    return "Le respondiste a todos los que te preguntaron 👏";
+    return "Le respondiste a todos los que te preguntaron.";
   }
 
   function diagMoneyHtml(d, ticket) {
@@ -1958,14 +1958,20 @@
     const type = detectMediaType(body);
     if (!type) return body;
     const name = { image: "Foto", sticker: "Sticker", video: "Video", audio: "Audio", ptt: "Nota de voz", document: "Archivo" }[type];
-    return `${mediaIcon(type)} ${mediaCaption(body).replace(/\s+/g, " ") || name}`;
+    const caption = mediaCaption(body).replace(/\s+/g, " ");
+    return caption ? `${name} · ${caption}` : name;
   }
 
   function mediaIcon(type) {
-    return {
-      image: "🖼️", sticker: "🎭", video: "🎬",
-      audio: "🎵", ptt: "🎤", document: "📄",
-    }[type] || "📎";
+    const paths = {
+      image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9.5h.01",
+      sticker: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9.5h.01",
+      video: "M4 6h12v12H4zM16 10l4-2.5v9L16 14",
+      audio: "M12 4a3 3 0 013 3v5a3 3 0 01-6 0V7a3 3 0 013-3zM6 11a6 6 0 0012 0M12 17v3",
+      ptt: "M12 4a3 3 0 013 3v5a3 3 0 01-6 0V7a3 3 0 013-3zM6 11a6 6 0 0012 0M12 17v3",
+    };
+    const d = paths[type] || "M7 3h7l5 5v13H7zM14 3v5h5";
+    return `<svg class="media-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="${d}"/></svg>`;
   }
 
   function mediaLabel(type) {
@@ -1999,7 +2005,7 @@
       el = document.createElement("a");
       el.href = src;
       el.download = `archivo.${mimetype.split("/")[1] || "bin"}`;
-      el.textContent = "⬇ Descargar archivo";
+      el.textContent = "Descargar archivo";
       el.className = "media-download";
     }
     return el;
@@ -2017,7 +2023,7 @@
     }
     if (m.transcript) {
       const isVoice = type === "audio" || type === "ptt";
-      const text = isVoice ? `🎤 “${escapeHtml(m.transcript)}”` : `👁️ ${escapeHtml(m.transcript)}`;
+      const text = isVoice ? `“${escapeHtml(m.transcript)}”` : `La IA ve: ${escapeHtml(m.transcript)}`;
       const title = isVoice ? "Transcripción de la nota de voz" : "Lo que la IA entendió de la imagen";
       timeHtml = `<p class="media-transcript" title="${title}">${text}</p>${timeHtml}`;
     }
@@ -2183,7 +2189,7 @@
 
     return `<section class="results-card" aria-label="Resultados de Omitel">
       <div class="results-head">
-        <span class="results-kicker">💰 Lo que Omitel hizo por ti en ${escapeHtml(data.month_name || "este mes")}</span>
+        <span class="results-kicker">Lo que Omitel hizo por ti en ${escapeHtml(data.month_name || "este mes")}</span>
         ${roi}
       </div>
       <div class="results-headline">${resultsHeadlineHtml(month, ticket, hasActivity)}</div>
@@ -2429,7 +2435,7 @@
       .map((m) => {
         const tags = [
           !m.is_active ? '<span class="staff-tag staff-tag-off">No disponible</span>' : "",
-          m.phone ? '<span class="staff-tag" title="Recibe aviso de sus citas por WhatsApp">📲 Aviso</span>' : "",
+          m.phone ? '<span class="staff-tag" title="Recibe aviso de sus citas por WhatsApp">Aviso</span>' : "",
           m.upcoming_count
             ? `<span class="staff-tag">${m.upcoming_count} cita${m.upcoming_count === 1 ? "" : "s"}</span>`
             : "",
@@ -2956,7 +2962,7 @@
     card.classList.toggle("hidden", !r);
     if (r) {
       card.classList.toggle("is-ready", r.ready);
-      $("ai-ready-title").textContent = r.ready ? "✅ Tu IA está lista para vender" : "¿Tu IA está lista para vender?";
+      $("ai-ready-title").textContent = r.ready ? "Tu IA está lista para vender" : "¿Tu IA está lista para vender?";
       $("ai-ready-count").textContent = `${r.done} de ${r.total}`;
       $("ai-ready-note").textContent = r.ready
         ? "Tiene lo que necesita para responder y cerrar sin dejar a nadie esperando. Si te preguntan algo nuevo, te lo anotamos abajo para que se lo enseñes."
@@ -3058,7 +3064,7 @@
       <div class="ai-question-photo">
         <span class="small">Responde con fotos: quedan guardadas en</span>
         <select class="ai-question-product" aria-label="Producto de la foto">${options}</select>
-        <label class="btn ghost small ai-question-photo-btn">📷 Subir foto
+        <label class="btn ghost small ai-question-photo-btn">Subir foto
           <input type="file" class="ai-question-photo-input" accept="image/jpeg,image/png,image/webp" hidden />
         </label>
       </div>`;
@@ -3110,7 +3116,7 @@
     const learned = rows.filter((q) => q.status === "answered");
     $("ai-questions-list").innerHTML = open.length
       ? open.map(aiQuestionRow).join("")
-      : '<li class="muted">Por ahora la IA ha podido responder todo lo que le preguntan 👌</li>';
+      : '<li class="muted">Por ahora la IA ha podido responder todo lo que le preguntan.</li>';
     $("ai-learned-wrap").classList.toggle("hidden", !learned.length);
     $("ai-learned-summary").textContent = `Lo que la IA ya aprendió (${learned.length})`;
     $("ai-learned-list").innerHTML = learned.map(aiQuestionRow).join("");
@@ -3392,7 +3398,7 @@
       .join("");
     const canAdd = state.canManageGlobal && photos.length < MAX_PRODUCT_PHOTOS;
     const add = canAdd
-      ? `<label class="product-photo-add" title="La IA la manda cuando el cliente pida verlo">📷 ${photos.length ? "Otra foto" : "Agregar foto"}
+      ? `<label class="product-photo-add" title="La IA la manda cuando el cliente pida verlo">${photos.length ? "Otra foto" : "Agregar foto"}
           <input type="file" class="product-photo-input" accept="image/jpeg,image/png,image/webp" multiple hidden />
         </label>`
       : "";
@@ -3710,12 +3716,12 @@
 
     const items = state.quickShortcuts || [];
     const pills = items.map((s) => {
-      const icon = s.type === "image" ? "🖼 " : s.type === "document" ? "📄 " : "";
+      const icon = s.type === "image" ? "Foto · " : s.type === "document" ? "PDF · " : "";
       return `<button type="button" class="quick-shortcut-pill" data-shortcut-id="${escapeHtml(s.id)}" title="Enviar ${escapeHtml(s.label)}">${icon}${escapeHtml(s.label)}</button>`;
     }).join("");
 
     const editBtn = state.canManageGlobal
-      ? `<button type="button" class="quick-shortcut-pill quick-shortcut-edit" id="edit-shortcuts-btn" title="Configurar atajos (todos los chats)">⚙ Atajos</button>`
+      ? `<button type="button" class="quick-shortcut-pill quick-shortcut-edit" id="edit-shortcuts-btn" title="Configurar atajos (todos los chats)">Atajos</button>`
       : "";
 
     bar.innerHTML = pills + editBtn;
@@ -3771,11 +3777,11 @@
       const preview = type === "image" && s.image_url
         ? `<img src="${escapeHtml(s.image_url)}" class="shortcut-thumb" alt="" />`
         : type === "document" && s.file_path
-          ? `<span class="small">📄 ${escapeHtml(s.file_name || "catalogo.pdf")}</span>`
+          ? `<span class="small">${escapeHtml(s.file_name || "catalogo.pdf")}</span>`
           : "";
       const uploadLabel = s.uploading
-        ? "⏳ Leyendo archivo…"
-        : type === "image" ? "📷 Subir foto" : "📄 Subir PDF";
+        ? "Leyendo archivo…"
+        : type === "image" ? "Subir foto" : "Subir PDF";
       const accept = type === "image"
         ? "image/jpeg,image/png,image/webp,image/gif"
         : "application/pdf,.pdf";
