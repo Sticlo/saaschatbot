@@ -61,6 +61,33 @@ def test_prices_come_from_the_inventory():
     assert "action" not in _item(readiness_from(COMPLETE, []), "prices")
 
 
+def test_booking_business_does_not_need_inventory_or_delivery():
+    barber = {
+        "products_services": "Corte $25.000, barba $15.000, corte + barba 35 mil",
+        "payment_methods": "Pagas en el local: efectivo o Nequi",
+        "location_hours": "Bogotá, Kennedy — lun a sáb 9am-8pm",
+    }
+    assert readiness_from(barber, [])["ready"] is False
+    ready = readiness_from(barber, [], booking=True)
+    assert ready["ready"] is True
+    assert [i["key"] for i in ready["items"]] == ["products", "prices", "payments", "location"]
+    assert _item(ready, "prices")["label"] == "Precios de tus servicios"
+
+    no_prices = readiness_from({**barber, "products_services": "Cortes y barba"}, [], booking=True)
+    assert _missing_keys_of(no_prices) == ["prices"]
+    assert "Corte $25.000" in _item(no_prices, "prices")["hint"]
+
+    # Agenda y además vende productos: el inventario y los envíos vuelven a contar.
+    cera = SimpleNamespace(name="Cera para cabello", price_cop=None)
+    mixed = readiness_from(barber, [cera], booking=True)
+    assert _missing_keys_of(mixed) == ["prices", "delivery"]
+    assert _item(mixed, "prices")["hint"].startswith("Sin precio: Cera para cabello.")
+
+
+def _missing_keys_of(readiness: dict) -> list[str]:
+    return [i["key"] for i in readiness["items"] if not i["done"]]
+
+
 def test_inventory_price_wins_over_the_catalog():
     from app.application.products.product_service import products_prompt_block
 

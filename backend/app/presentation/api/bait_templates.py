@@ -85,7 +85,10 @@ def _profile_response(db: Session, tenant: Tenant, profile) -> BusinessProfileRe
     answers = _answers_from_profile(profile)
     return BusinessProfileResponse(
         readiness=readiness_from(
-            answers, list_products(db, tenant.id), has_catalog=has_catalog_text(db, tenant.id)
+            answers,
+            list_products(db, tenant.id),
+            has_catalog=has_catalog_text(db, tenant.id),
+            booking=bool(getattr(profile, "ai_booking_enabled", False)),
         ),
         delivery_info=answers.get("delivery_info"),
         business_name=tenant.business_name,

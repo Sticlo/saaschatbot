@@ -2739,6 +2739,7 @@
       if (!id) fillScheduleForm(await api("/appointments/schedule").catch(() => null));
       await refreshAfterStaffChange();
       const bookingTurnedOn = !id && !bookingWasOn && !!state.onboarding.bookingEnabled;
+      if (bookingTurnedOn) refreshReadinessSoon();
       setScheduleStatus(
         id
           ? `✓ ${saved.name} actualizado`
@@ -2815,6 +2816,7 @@
       const saved = await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
       fillScheduleForm(saved);
       setScheduleStatus(saved.ai_booking_enabled ? "✓ Guardado · la IA agenda citas" : "✓ Horario guardado");
+      refreshReadinessSoon();
       await loadAppointmentsDay(state.appointmentsDate);
     } catch (err) {
       setScheduleStatus(err.message);
