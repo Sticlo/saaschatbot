@@ -1905,7 +1905,7 @@
       else if (c.interest_status === "not_interested") tags.push('<span class="interest-tag not">no interesado</span>');
       if (c.imported_legacy && !c.bait_sent) tags.push('<span class="personal-tag">personal</span>');
       if (c.mode === "manual") tags.push('<span class="mode-tag">manual</span>');
-      if (c.ai_active) tags.push('<span class="ai-tag">IA</span>');
+      if (c.ai_active && aiAllowedInChat(c)) tags.push('<span class="ai-tag">IA</span>');
       const subtitle = convSubtitle(c);
       li.innerHTML = `
         <div class="row">
@@ -3904,10 +3904,25 @@
     }
   }
 
+  function aiAllowedInChat(conv) {
+    return !state.tenant || !!state.tenant.ai_global_enabled || !!conv?.ai_override_global;
+  }
+
+  function onAiGlobalChanged(enabled) {
+    // Al prender la global, el backend borra las excepciones por chat.
+    if (enabled) state.conversations.forEach((c) => (c.ai_override_global = false));
+    renderAiAlerts();
+    renderConversationList();
+    if (state.activeId) {
+      const conv = state.conversations.find((c) => c.id === state.activeId);
+      if (conv) syncChatToggles(conv);
+    }
+  }
+
   function aiBlockReasonForConv(conv) {
     if (!conv) return "";
-    if (state.tenant && !state.tenant.ai_global_enabled) {
-      return "Activa «IA global» arriba a la derecha para que la IA pueda responder.";
+    if (!aiAllowedInChat(conv)) {
+      return "IA global apagada. Activa «IA activa» para que responda solo en este chat.";
     }
     if (!conv.ai_active) {
       if (conv.imported_legacy && !conv.bait_sent) {
@@ -3983,7 +3998,7 @@
     const banner = $("ai-alert-banner");
     const parts = [];
     if (state.tenant && !state.tenant.ai_global_enabled) {
-      parts.push("IA global apagada — los chats con IA activa no responderán solos.");
+      parts.push("IA global apagada — solo responde en los chats donde actives «IA activa».");
     }
     if (state.aiNotice) parts.push(state.aiNotice.text);
     if (!parts.length) {
@@ -4000,12 +4015,12 @@
 
   function syncChatToggles(conv) {
     $("toggle-mode-manual").checked = conv.mode === "manual";
-    $("toggle-ai-chat").checked = !!conv.ai_active;
+    $("toggle-ai-chat").checked = !!conv.ai_active && aiAllowedInChat(conv);
     const canEdit = state.canWrite && state.wa.status === "connected";
     $("toggle-mode-manual").disabled = !canEdit;
     $("toggle-ai-chat").disabled = !canEdit;
     syncInterestButtons(conv);
-    const canRetry = state.canWrite && conv.ai_active && state.tenant?.ai_global_enabled && conv.mode !== "manual";
+    const canRetry = state.canWrite && conv.ai_active && aiAllowedInChat(conv) && conv.mode !== "manual";
     $("ai-retry-btn").classList.toggle("hidden", !canRetry);
     $("ai-retry-btn").disabled = !canRetry;
     const hint = aiBlockReasonForConv(conv);
@@ -4292,12 +4307,8 @@
           setBusinessName(event.business_name, event.business_name_is_placeholder);
           state.tenant.ai_global_enabled = event.ai_global_enabled;
           $("toggle-ai-global").checked = event.ai_global_enabled;
-          renderAiAlerts();
           renderReadyBanner();
-          if (state.activeId) {
-            const conv = state.conversations.find((c) => c.id === state.activeId);
-            if (conv) syncChatToggles(conv);
-          }
+          onAiGlobalChanged(event.ai_global_enabled);
         }
         if (event.whatsapp_status) {
           applyWaSession({
@@ -5307,11 +5318,7 @@
         body: JSON.stringify({ ai_global_enabled: e.target.checked }),
       });
       state.tenant = tenant;
-      renderAiAlerts();
-      if (state.activeId) {
-        const conv = state.conversations.find((c) => c.id === state.activeId);
-        if (conv) syncChatToggles(conv);
-      }
+      onAiGlobalChanged(tenant.ai_global_enabled);
     } catch (err) {
       alert(err.message);
       e.target.checked = !e.target.checked;

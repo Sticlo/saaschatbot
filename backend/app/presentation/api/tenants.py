@@ -52,6 +52,13 @@ def update_my_tenant(
         if not readiness["ready"]:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=not_ready_message(readiness))
     if body.ai_global_enabled is not None:
+        if body.ai_global_enabled and not tenant.ai_global_enabled:
+            from app.domain.entities import Conversation
+
+            db.query(Conversation).filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.ai_override_global.is_(True),
+            ).update({Conversation.ai_override_global: False}, synchronize_session=False)
         tenant.ai_global_enabled = body.ai_global_enabled
         cache_delete(tenant_cache_key(str(tenant.id), "ai_global"))
 

@@ -328,23 +328,22 @@ def recover_pending_ai_replies() -> None:
 
         db = SessionLocal()
         try:
-            tenants = db.query(Tenant).filter(Tenant.ai_global_enabled.is_(True)).all()
+            tenants = db.query(Tenant).all()
             scheduled = 0
             for tenant in tenants:
                 if _cancelled():
                     return
                 if tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
                     continue
-                conversations = (
-                    db.query(Conversation)
-                    .filter(
-                        Conversation.tenant_id == tenant.id,
-                        Conversation.ai_active.is_(True),
-                        Conversation.mode == ConversationMode.AUTO.value,
-                        Conversation.status != ConversationStatus.EXCLUDED.value,
-                    )
-                    .all()
+                query = db.query(Conversation).filter(
+                    Conversation.tenant_id == tenant.id,
+                    Conversation.ai_active.is_(True),
+                    Conversation.mode == ConversationMode.AUTO.value,
+                    Conversation.status != ConversationStatus.EXCLUDED.value,
                 )
+                if not tenant.ai_global_enabled:
+                    query = query.filter(Conversation.ai_override_global.is_(True))
+                conversations = query.all()
                 for conversation in conversations:
                     if _cancelled():
                         return

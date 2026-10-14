@@ -649,6 +649,7 @@ def update_conversation_mode(
     conversation.mode = body.mode
     if body.mode == ConversationMode.MANUAL.value:
         conversation.ai_active = False
+        conversation.ai_override_global = False
         conversation.ai_set_by_agent = True
     db.commit()
     clear_awaiting_human(conversation.id)
@@ -675,8 +676,10 @@ def update_conversation_ai(
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     conversation.ai_active = body.ai_active
     conversation.ai_set_by_agent = True
+    conversation.ai_override_global = bool(body.ai_active and tenant and not tenant.ai_global_enabled)
     if body.ai_active:
         conversation.mode = ConversationMode.AUTO.value
     db.commit()
@@ -722,6 +725,7 @@ def update_conversation_interest(
     conversation.interest_status = body.interest_status
     if body.interest_status:
         conversation.ai_active = False
+        conversation.ai_override_global = False
         conversation.mode = ConversationMode.MANUAL.value
         conversation.ai_set_by_agent = True
     db.commit()

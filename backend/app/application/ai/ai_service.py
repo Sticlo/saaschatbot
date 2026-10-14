@@ -156,12 +156,16 @@ UNREADABLE_AUDIO_REPLY = "No logré escuchar bien tu audio 🙈 ¿Me lo escribes
 UNREADABLE_IMAGE_REPLY = "No me cargó bien la imagen 🙈 ¿Me cuentas qué estás buscando?"
 
 
+def ai_allowed_in_chat(tenant: Tenant, conversation: Conversation) -> bool:
+    return bool(tenant.ai_global_enabled or conversation.ai_override_global)
+
+
 def ai_block_reason(tenant: Tenant, conversation: Conversation) -> Optional[str]:
     if not tenant.is_active:
         return "Empresa suspendida"
     if not feature_allowed(tenant, "ai_replies"):
         return "IA pausada por soporte de Omitel"
-    if not tenant.ai_global_enabled:
+    if not ai_allowed_in_chat(tenant, conversation):
         return "IA global apagada en el panel"
     if not conversation.ai_active:
         return "IA desactivada en este chat"
@@ -465,7 +469,7 @@ def rescue_unanswered_handoff(
     )
     blocked_by_owner = (
         not tenant.is_active
-        or not tenant.ai_global_enabled
+        or not ai_allowed_in_chat(tenant, conversation)
         or not feature_allowed(tenant, "ai_replies")
         or conversation.status == ConversationStatus.EXCLUDED.value
     )

@@ -43,6 +43,8 @@ class Conversation(Base):
     )
     ai_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ai_set_by_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Prendida a mano con la IA global apagada: este chat responde aunque los demás no.
+    ai_override_global: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     bait_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     imported_legacy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(

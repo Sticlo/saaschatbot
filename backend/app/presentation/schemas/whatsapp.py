@@ -53,6 +53,7 @@ class ConversationResponse(BaseModel):
     contact_name: str
     mode: str
     ai_active: bool
+    ai_override_global: bool = False
     bait_sent: bool
     imported_legacy: bool = False
     status: str

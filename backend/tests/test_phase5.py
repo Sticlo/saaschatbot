@@ -17,6 +17,7 @@ class _FakeTenant:
 
 class _FakeConversation:
     ai_active = True
+    ai_override_global = False
     mode = ConversationMode.AUTO.value
     status = ConversationStatus.ACTIVE.value
 
@@ -37,6 +38,16 @@ def test_should_ai_respond_when_global_off():
     tenant = _FakeTenant()
     tenant.ai_global_enabled = False
     assert should_ai_respond(tenant, _FakeConversation()) is False
+
+
+def test_chat_turned_on_by_owner_answers_with_global_off():
+    tenant = _FakeTenant()
+    tenant.ai_global_enabled = False
+    conv = _FakeConversation()
+    conv.ai_override_global = True
+    assert should_ai_respond(tenant, conv) is True
+    conv.mode = ConversationMode.MANUAL.value
+    assert should_ai_respond(tenant, conv) is False
 
 
 def test_should_ai_respond_ok():
