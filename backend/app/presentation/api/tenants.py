@@ -10,6 +10,7 @@ from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, TenantProfile
 from app.infrastructure.cache.redis_client import cache_delete, tenant_cache_key
 from app.presentation.schemas.auth import (
+    FollowupSettings,
     InterestAlertResponse,
     InterestAlertSettings,
     TenantProfileResponse,
@@ -180,6 +181,38 @@ def update_interest_alert(
     db.commit()
     db.refresh(profile)
     return _interest_alert_response(db, profile)
+
+
+@router.get("/me/followup", response_model=FollowupSettings)
+def get_followup(current: RequireViewer, db: Session = Depends(get_db)):
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    db.commit()
+    return FollowupSettings(followup_hours=profile.followup_hours)
+
+
+@router.put("/me/followup", response_model=FollowupSettings)
+def update_followup(
+    body: FollowupSettings,
+    request: Request,
+    current: RequireOwner,
+    db: Session = Depends(get_db),
+):
+    from app.application.ai.ai_followup_service import FOLLOWUP_HOURS_CHOICES
+
+    if body.followup_hours not in FOLLOWUP_HOURS_CHOICES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Elige una de las opciones")
+    profile = get_or_create_tenant_profile(db, current.tenant_id)
+    profile.followup_hours = body.followup_hours
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="tenant.followup_updated",
+        details={"followup_hours": body.followup_hours},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return FollowupSettings(followup_hours=profile.followup_hours)
 
 
 @router.post("/me/interest-alert/test", status_code=status.HTTP_204_NO_CONTENT)

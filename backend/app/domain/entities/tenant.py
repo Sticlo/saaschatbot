@@ -104,6 +104,8 @@ class TenantProfile(Base):
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     alert_threshold: Mapped[int] = mapped_column(nullable=False, default=10)
+    # Horas sin respuesta del cliente antes de que la IA le escriba una vez más. 0 = nunca.
+    followup_hours: Mapped[int] = mapped_column(nullable=False, default=4, server_default="4")
     # Lo que vale en promedio un servicio o venta: convierte las citas de la IA en plata.
     avg_ticket_cop: Mapped[Optional[int]] = mapped_column(nullable=True)
     # Mes ("2026-09") del último resumen de resultados enviado al dueño.

@@ -2128,6 +2128,7 @@ textarea { resize: vertical; min-height: 44px; }
 }
 
 .ai-field input,
+.ai-field select,
 .ai-field textarea,
 .ai-question textarea {
   width: 100%;
@@ -2142,6 +2143,7 @@ textarea { resize: vertical; min-height: 44px; }
 }
 
 .ai-field input:focus,
+.ai-field select:focus,
 .ai-field textarea:focus,
 .ai-question textarea:focus {
   outline: none;

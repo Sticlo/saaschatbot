@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=60" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=61" />
 </head>
 <body>
   <div id="app">
@@ -408,6 +408,26 @@
               </div>
               <p id="alert-save-status" class="ai-save-status muted small"></p>
             </section>
+
+            <section id="followup-card" class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Seguimiento a clientes que no responden</h3>
+                <p class="muted small">Si un cliente deja de contestar, la IA le escribe <strong>una sola vez</strong> retomando lo que hablaban y le pregunta si sigue interesado. No insiste más hasta que el cliente vuelva a escribir, y solo escribe de 8 a. m. a 8 p. m. dentro de tu horario.</p>
+              </div>
+              <label class="ai-field">
+                <span>Escribirle cuando lleve sin responder</span>
+                <select id="followup-hours">
+                  <option value="0">Nunca (apagado)</option>
+                  <option value="1">1 hora</option>
+                  <option value="2">2 horas</option>
+                  <option value="4">4 horas</option>
+                  <option value="8">8 horas</option>
+                  <option value="12">12 horas</option>
+                  <option value="24">24 horas</option>
+                </select>
+              </label>
+              <p id="followup-status" class="ai-save-status muted small"></p>
+            </section>
           </div>
 
           <div id="inventory-panel" class="appointments-panel inventory-panel hidden">
@@ -733,6 +753,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=134"></script>
+  <script src="/static/panel/app.js?v=135"></script>
 </body>
 </html>

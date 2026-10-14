@@ -3191,7 +3191,7 @@
       if (el) el.disabled = ro;
     });
     if ($("biz-save-btn")) $("biz-save-btn").disabled = ro;
-    ["alert-threshold", "alert-save-btn", "alert-test-btn"].forEach((id) => {
+    ["alert-threshold", "alert-save-btn", "alert-test-btn", "followup-hours"].forEach((id) => {
       const el = $(id);
       if (el) el.disabled = ro;
     });
@@ -3310,6 +3310,44 @@
     }
   }
 
+  function setFollowupStatus(text) {
+    const el = $("followup-status");
+    if (el) el.textContent = text || "";
+  }
+
+  async function loadFollowup() {
+    setFollowupStatus("");
+    try {
+      const cfg = await api("/tenants/me/followup");
+      $("followup-hours").value = String(cfg.followup_hours);
+    } catch (err) {
+      setFollowupStatus(err.message);
+    }
+  }
+
+  async function saveFollowup() {
+    if (!state.canManageGlobal) return;
+    const select = $("followup-hours");
+    select.disabled = true;
+    setFollowupStatus("Guardando…");
+    try {
+      const cfg = await api("/tenants/me/followup", {
+        method: "PUT",
+        body: JSON.stringify({ followup_hours: Number(select.value) }),
+      });
+      select.value = String(cfg.followup_hours);
+      const h = cfg.followup_hours;
+      setFollowupStatus(
+        h ? `✓ Guardado — le escribe una vez a las ${h} hora${h === 1 ? "" : "s"} sin respuesta` : "✓ Seguimiento apagado"
+      );
+    } catch (err) {
+      setFollowupStatus(err.message);
+      await loadFollowup();
+    } finally {
+      updateAiSetupControls();
+    }
+  }
+
   async function testInterestAlert() {
     if (!state.canManageGlobal) return;
     $("alert-test-btn").disabled = true;
@@ -3339,7 +3377,7 @@
       setBizSaveStatus(err.message);
       fillBizForm(null);
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadAiQuestions()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions()]);
     renderAiShortcutsSummary();
   }
 
@@ -4987,6 +5025,7 @@
   $("business-name-cta").addEventListener("click", openBusinessNameSetup);
   $("alert-save-btn").addEventListener("click", () => saveInterestAlert());
   $("alert-test-btn").addEventListener("click", () => testInterestAlert());
+  $("followup-hours").addEventListener("change", () => saveFollowup());
   $("alert-add-btn").addEventListener("click", () => addAlertRecipient());
   $("alert-recipients").addEventListener("click", (e) => {
     const btn = e.target.closest(".alert-remove");

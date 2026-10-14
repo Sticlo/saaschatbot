@@ -376,10 +376,12 @@ def start_ai_worker() -> None:
     ]
     for thread in _worker_threads:
         thread.start()
+    from app.application.ai.ai_followup_service import start_followup_sweeper
     from app.application.conversations.interest_alert_service import start_interest_alert_sweeper
     from app.application.whatsapp.whatsapp_reconnect_service import start_whatsapp_reconnect_watchdog
 
     start_interest_alert_sweeper()
+    start_followup_sweeper()
     start_whatsapp_reconnect_watchdog()
     if is_configured():
         log.info(
@@ -394,11 +396,13 @@ def start_ai_worker() -> None:
 
 
 def stop_ai_worker() -> None:
+    from app.application.ai.ai_followup_service import stop_followup_sweeper
     from app.application.conversations.interest_alert_service import stop_interest_alert_sweeper
     from app.application.whatsapp.whatsapp_reconnect_service import stop_whatsapp_reconnect_watchdog
 
     global _worker_generation
     stop_interest_alert_sweeper()
+    stop_followup_sweeper()
     stop_whatsapp_reconnect_watchdog()
     _worker_generation += 1
     _worker_stop.set()

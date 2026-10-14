@@ -137,6 +137,10 @@ class InterestAlertResponse(InterestAlertSettings):
     pending_count: int = 0
 
 
+class FollowupSettings(BaseModel):
+    followup_hours: int = Field(ge=0, le=24)
+
+
 class InviteUserRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=2, max_length=255)
