@@ -220,6 +220,7 @@ def _disable_rate_limits_in_tests(monkeypatch):
     from app.application.billing import subscription_sweeper
 
     monkeypatch.setattr(subscription_sweeper, "send_monthly_reports", lambda db, now=None: 0)
+    monkeypatch.setattr(subscription_sweeper, "send_daily_radar", lambda db, now=None, force=False: False)
 
 
 @pytest.fixture()

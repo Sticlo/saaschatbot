@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.application.billing.auto_renew_service import process_auto_renewals
 from app.application.billing.subscription_service import expire_lapsed_subscriptions
+from app.application.platform.daily_radar import send_daily_radar
 from app.application.results.monthly_report import send_monthly_reports
 from app.infrastructure.persistence.database import SessionLocal
 
@@ -36,6 +37,12 @@ def _loop() -> None:
                 log.info("Resúmenes mensuales de resultados enviados: %s", reports)
         except Exception:
             log.exception("Error enviando los resúmenes mensuales de resultados")
+        try:
+            with SessionLocal() as db:
+                if send_daily_radar(db):
+                    log.info("Radar diario enviado")
+        except Exception:
+            log.exception("Error enviando el radar diario")
         _stop.wait(SWEEP_INTERVAL_SECONDS)
 
 
