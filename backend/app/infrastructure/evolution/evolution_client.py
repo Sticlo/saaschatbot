@@ -194,10 +194,10 @@ class EvolutionClient:
         return None
 
     def logout_instance(self, instance_name: str) -> dict:
-        return self._request("DELETE", f"/instance/logout/{instance_name}")
+        return self._request("DELETE", f"/instance/logout/{instance_name}", timeout=20.0)
 
     def delete_instance(self, instance_name: str) -> dict:
-        return self._request("DELETE", f"/instance/delete/{instance_name}")
+        return self._request("DELETE", f"/instance/delete/{instance_name}", timeout=20.0)
 
     def send_text(self, instance_name: str, number: str, text: str, *, typing_ms: int = 0) -> dict:
         payload: dict = {"number": number, "text": text}

@@ -32,6 +32,7 @@ from app.application.whatsapp.whatsapp_service import (
     pairing_number,
     reconnect_session,
     refresh_session_status,
+    release_whatsapp_link,
     start_connection,
     whatsapp_connect_lock,
 )
@@ -575,15 +576,18 @@ def disconnect_whatsapp(
     if tenant is None or session is None:
         raise HTTPException(status_code=404, detail="Sesión WhatsApp no encontrada")
 
-    disconnect_session(db, tenant, session)
     from app.application.realtime.realtime_service import publish_whatsapp_status
 
+    # Primero se corta en Omitel y se guarda: si Evolution tarda, el sondeo ya no reconecta.
+    release_whatsapp_link(tenant, session)
+    db.commit()
     publish_whatsapp_status(
         tenant.id,
         status=session.status,
         qr_base64=None,
-        phone_number=session.phone_number,
+        phone_number=None,
     )
+    disconnect_session(db, tenant, session)
     log_audit(
         db,
         tenant_id=tenant.id,

@@ -1161,6 +1161,7 @@ def handle_connection_update(
 ) -> None:
     from app.application.conversations.whatsapp_conversation_service import (
         needs_new_whatsapp_binding,
+        should_ignore_stale_open_session,
         start_new_whatsapp_binding,
     )
 
@@ -1169,6 +1170,19 @@ def handle_connection_update(
         state = state.get("state")
     mapped = resolve_whatsapp_status(str(state or ""), data)
     owner = data.get("owner") or data.get("wuid")
+
+    if should_ignore_stale_open_session(session, tenant, mapped):
+        apply_session_status(session, tenant, WhatsAppStatus.DISCONNECTED.value)
+        from app.application.realtime.realtime_service import publish_whatsapp_status
+
+        publish_whatsapp_status(
+            tenant.id,
+            status=WhatsAppStatus.DISCONNECTED.value,
+            qr_base64=None,
+            phone_number=None,
+        )
+        db.flush()
+        return
 
     if needs_new_whatsapp_binding(
         session,

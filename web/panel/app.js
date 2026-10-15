@@ -938,7 +938,8 @@
       loadDiagnostic();
     }
     diag.wasConnected = connected;
-    $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
+    $("wa-disconnect-btn")?.classList.toggle("hidden", !connected || !state.canManageGlobal);
+    $("wa-unlink-ready-btn")?.classList.toggle("hidden", !connected || !state.canManageGlobal);
     $("wa-reset-chats-btn")?.classList.toggle("hidden", !connected || !state.canConnectWa);
     const cwLink = $("wa-chatwoot-link");
     if (cwLink) {
@@ -4953,16 +4954,34 @@
     e.preventDefault();
     startTour();
   });
-  $("wa-disconnect-btn").addEventListener("click", async () => {
-    if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel.")) return;
+  async function unlinkWhatsApp() {
+    if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel y dejará de atender hasta que lo vuelvas a conectar.")) return;
+    const buttons = ["wa-disconnect-btn", "wa-unlink-ready-btn"].map((id) => $(id)).filter(Boolean);
+    buttons.forEach((btn) => {
+      btn.disabled = true;
+      btn.dataset.prev = btn.textContent;
+      btn.textContent = "Desvinculando…";
+    });
     try {
-      await api("/whatsapp/disconnect", { method: "POST" }, 15000);
+      await api("/whatsapp/disconnect", { method: "POST" }, 45000);
       clearConversations();
       await refreshWaStatus();
     } catch (err) {
-      alert(err.message);
+      await refreshWaStatus();
+      if (state.wa.status === "disconnected") {
+        clearConversations();
+        return;
+      }
+      alert(err.message || "No se pudo desvincular. Intenta de nuevo.");
+    } finally {
+      buttons.forEach((btn) => {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.prev || "Desvincular";
+      });
     }
-  });
+  }
+  $("wa-disconnect-btn").addEventListener("click", () => unlinkWhatsApp());
+  $("wa-unlink-ready-btn")?.addEventListener("click", () => unlinkWhatsApp());
   $("wa-reset-chats-btn").addEventListener("click", async () => {
     if (!confirm("¿Borrar chats importados de otro celular y empezar limpio?")) return;
     try {

@@ -150,6 +150,55 @@ def test_drop_and_reconnect_keeps_chats(monkeypatch):
 
 
 @requires_db
+def test_unlinking_does_not_come_back_from_a_stale_open_session(monkeypatch):
+    """Desvincular corta Omitel: si Evolution sigue 'open' unos segundos, no se reconecta solo."""
+    from app.application.conversations.whatsapp_conversation_service import whatsapp_link_released
+    from app.application.messaging.message_service import handle_connection_update
+    from app.application.whatsapp import whatsapp_service
+    from app.application.whatsapp.whatsapp_service import release_whatsapp_link
+    from app.infrastructure.persistence.database import SessionLocal
+
+    monkeypatch.setattr("app.config.settings.evolution_database_url", "")
+    monkeypatch.setattr(
+        "app.infrastructure.evolution.evolution_client.evolution_client.set_settings",
+        lambda *_a, **_kw: None,
+    )
+
+    with SessionLocal() as db:
+        tenant, session, connection_id = _linked_tenant(db)
+        release_whatsapp_link(tenant, session)
+        db.flush()
+        assert whatsapp_link_released(session) is True
+        assert tenant.whatsapp_status == "disconnected"
+
+        handle_connection_update(db, tenant=tenant, session=session, data={"state": "open", "wuid": OWNER})
+        assert tenant.whatsapp_status == "disconnected"
+        assert session.active_connection_id is None
+        assert _chat_count(db, tenant) == 1
+
+        monkeypatch.setattr(
+            whatsapp_service,
+            "gateway_connection_state",
+            lambda _name: {"instance": {"state": "open", "owner": OWNER}},
+        )
+        monkeypatch.setattr(
+            whatsapp_service,
+            "gateway_fetch_instance",
+            lambda _name: {"connectionStatus": "open", "ownerJid": OWNER},
+        )
+        whatsapp_service.refresh_session_status(db, tenant, session)
+        assert tenant.whatsapp_status == "disconnected"
+        assert session.bound_owner_jid is None
+
+        tenant.whatsapp_status = "connecting"
+        handle_connection_update(db, tenant=tenant, session=session, data={"state": "open", "wuid": OWNER})
+        assert tenant.whatsapp_status == "connected"
+        assert session.active_connection_id is not None
+        assert session.active_connection_id != connection_id
+        db.rollback()
+
+
+@requires_db
 def test_status_poll_never_purges_on_drop(monkeypatch):
     from app.application.whatsapp import whatsapp_service
     from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError

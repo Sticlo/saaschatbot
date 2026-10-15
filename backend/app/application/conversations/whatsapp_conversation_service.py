@@ -220,6 +220,21 @@ def _owner_user_part(jid: str) -> str:
     return str(jid).split("@")[0].split(":")[0]
 
 
+def whatsapp_link_released(session: WhatsAppSession) -> bool:
+    """El dueño desvinculó desde el panel: no hay sesión que restaurar sola."""
+    return session.active_connection_id is None and not session.bound_owner_jid
+
+
+def should_ignore_stale_open_session(session: WhatsAppSession, tenant: Tenant, mapped_status: str) -> bool:
+    """Tras desvincular, Evolution puede seguir 'open' unos segundos: no reconectar por eso.
+    Solo se acepta un 'open' nuevo cuando el dueño está vinculando otra vez (QR o código)."""
+    return (
+        mapped_status == WhatsAppStatus.CONNECTED.value
+        and whatsapp_link_released(session)
+        and tenant.whatsapp_status != WhatsAppStatus.CONNECTING.value
+    )
+
+
 def needs_new_whatsapp_binding(
     session: WhatsAppSession,
     *,

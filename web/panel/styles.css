@@ -750,6 +750,13 @@ textarea { resize: vertical; min-height: 44px; }
 
 .empty-ready h3 { color: var(--text); margin: 0 0 0.5rem; }
 
+.wa-unlink-ready {
+  display: inline-block;
+  margin-top: 1.1rem;
+  font-size: 0.86rem;
+}
+.wa-unlink-ready.hidden { display: none; }
+
 .empty-state {
   overflow-y: auto;
   justify-content: safe center;
@@ -4125,6 +4132,12 @@ textarea { resize: vertical; min-height: 44px; }
   .empty-ready > p.muted { display: none; }
   .empty-ready { max-width: none; width: 100%; }
   .empty-ready .diag-entry, .empty-ready .diag-analyzing { margin: 0; width: 100%; }
+  .empty-ready .wa-unlink-ready {
+    display: block;
+    margin: 0.75rem auto 0;
+    padding: 0.7rem 0;
+  }
+  .empty-ready .wa-unlink-ready.hidden { display: none; }
 
   .sidebar-mode-tabs {
     margin: 0.5rem 0.5rem 0;

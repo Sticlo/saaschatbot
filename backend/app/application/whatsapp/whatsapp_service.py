@@ -462,6 +462,9 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
     if pairing_phone and number is None:
         raise WhatsAppGatewayError("Ese número no parece de WhatsApp. Escríbelo con indicativo, ej. +57 300 123 4567")
 
+    from app.application.conversations.whatsapp_conversation_service import whatsapp_link_released
+
+    released = whatsapp_link_released(session)
     try:
         refresh_session_status(db, tenant, session)
     except EvolutionAPIError:
@@ -475,7 +478,8 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
 
     created_with_number = False
     try:
-        if not gateway_instance_exists(session.instance_name):
+        instance_existed = gateway_instance_exists(session.instance_name)
+        if not instance_existed:
             try:
                 gateway_create_instance(
                     session.instance_name,
@@ -488,6 +492,7 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
                 if exc.status_code not in (400, 403, 409):
                     raise
                 log.info("Instancia %s ya existe, reconectando", session.instance_name)
+                instance_existed = True
         else:
             try:
                 gateway_ensure_webhook(
@@ -508,7 +513,7 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
             tenant,
             webhook_url=_webhook_url(tenant.id),
             webhook_secret=evolution_webhook_secret_for(tenant.id),
-            force=number is not None and not created_with_number,
+            force=(number is not None and not created_with_number) or (released and instance_existed),
             number=number,
         )
     except WhatsAppGatewayError:
@@ -622,9 +627,20 @@ def refresh_session_status(
     mapped = resolve_whatsapp_status(str(state), state_payload if isinstance(state_payload, dict) else {})
     from app.application.conversations.whatsapp_conversation_service import (
         needs_new_whatsapp_binding,
+        should_ignore_stale_open_session,
         start_new_whatsapp_binding,
         ensure_whatsapp_binding_ready,
     )
+
+    if should_ignore_stale_open_session(session, tenant, mapped):
+        session.status = WhatsAppStatus.DISCONNECTED.value
+        tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
+        session.qr_base64 = None
+        db.flush()
+        return SessionRefreshResult(
+            session=session,
+            status_changed=previous_status != WhatsAppStatus.DISCONNECTED.value,
+        )
 
     if needs_new_whatsapp_binding(
         session,
@@ -678,13 +694,19 @@ def refresh_session_status(
     return result
 
 
-def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) -> None:
-    from app.application.conversations.whatsapp_conversation_service import (
-        purge_ephemeral_whatsapp_data,
-    )
+def release_whatsapp_link(tenant: Tenant, session: WhatsAppSession) -> None:
+    """Corta la vinculación en Omitel ya: el sondeo de estado no debe reconectar mientras Evolution cierra."""
+    session.active_connection_id = None
+    session.connection_started_at = None
+    session.bound_owner_jid = None
+    session.phone_number = None
+    session.qr_base64 = None
+    session.status = WhatsAppStatus.DISCONNECTED.value
+    session.last_disconnected_at = datetime.now(timezone.utc)
+    tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
 
-    purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
 
+def _teardown_gateway_instance(session: WhatsAppSession) -> None:
     try:
         gateway_logout_instance(session.instance_name)
     except WhatsAppGatewayError as exc:
@@ -698,12 +720,16 @@ def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) ->
         if exc.status_code != 404:
             log.warning("WhatsApp delete instance failed for %s: %s", session.instance_name, exc)
 
-    session.status = WhatsAppStatus.DISCONNECTED.value
-    session.qr_base64 = None
-    session.bound_owner_jid = None
-    session.phone_number = None
-    session.last_disconnected_at = datetime.now(timezone.utc)
-    tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
+
+def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) -> None:
+    from app.application.conversations.whatsapp_conversation_service import (
+        purge_ephemeral_whatsapp_data,
+    )
+
+    release_whatsapp_link(tenant, session)
+    db.flush()
+    purge_ephemeral_whatsapp_data(db, tenant=tenant, session=session, notify=True)
+    _teardown_gateway_instance(session)
     db.flush()
 
 
