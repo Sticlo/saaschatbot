@@ -221,6 +221,9 @@ def _disable_rate_limits_in_tests(monkeypatch):
 
     monkeypatch.setattr(subscription_sweeper, "send_monthly_reports", lambda db, now=None: 0)
     monkeypatch.setattr(subscription_sweeper, "send_daily_radar", lambda db, now=None, force=False: False)
+    from app.application.ai import ai_service
+
+    monkeypatch.setattr(ai_service, "is_personal_chat", lambda lines, business_name="": False)
 
 
 @pytest.fixture()

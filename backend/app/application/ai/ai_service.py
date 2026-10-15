@@ -36,8 +36,8 @@ from app.application.ai.ai_appointment_service import (
     stalls_on_agenda,
     try_create_booking,
 )
-from app.application.ai.ai_auto_enable_service import owner_messages
-from app.application.ai.ai_classifier_service import classify_inbound_message
+from app.application.ai.ai_auto_enable_service import owner_messages, owner_wrote_in_chat
+from app.application.ai.ai_classifier_service import classify_inbound_message, is_personal_chat
 from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
@@ -141,6 +141,9 @@ BOOKING_TIP = (
     "la IA revisa tus horarios libres y agenda sin preguntarte."
 )
 BOOKING_DAYS_AHEAD = 14
+PERSONAL_CHECK_MESSAGES = 14
+PERSONAL_VERDICT_TTL_SECONDS = 30 * 24 * 3600
+BUSINESS_VERDICT_TTL_SECONDS = 24 * 3600
 BOOKING_DATE_LOOKBACK = 16  # últimos mensajes (cliente e IA) donde buscamos fechas de las que se habló
 CLIENT_TURN_MAX_MESSAGES = 15
 HOLDING_REPLIES_FIRST_CONTACT = (
@@ -327,6 +330,63 @@ def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation)
     db.flush()
     publish_conversation_updated(tenant.id, conversation)
     log.info("El dueño tomó el chat: la IA se aparta conv=%s", conversation.id)
+    return True
+
+
+def _personal_key(conversation_id: uuid.UUID) -> str:
+    return f"ai:personal_chat:{conversation_id}"
+
+
+def _personal_verdict(conversation_id: uuid.UUID) -> Optional[tuple[bool, float]]:
+    try:
+        raw = _redis_text(get_redis().get(_personal_key(conversation_id)))
+        verdict, at = (raw or "").split(":", 1)
+        return verdict == "personal", float(at)
+    except Exception:
+        return None
+
+
+def _is_personal_chat(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
+    """Novia, mamá, amigos: el dueño les escribe desde el número del negocio y la IA no se mete.
+    Si el dueño la prende otra vez después de que se apartó, manda él."""
+    if not owner_wrote_in_chat(db, conversation.id):
+        return False
+    cached = _personal_verdict(conversation.id)
+    if cached is not None:
+        personal, at = cached
+        enabled_at = _ai_enabled_by_owner_at(conversation.id)
+        if personal and enabled_at is not None and enabled_at.timestamp() > at:
+            return False
+        return personal
+    rows = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.desc())
+        .limit(PERSONAL_CHECK_MESSAGES)
+        .all()
+    )
+    lines = [(m.source, text_for_ai(m)) for m in reversed(rows) if not _detect_media_type_from_body(m.body or "")]
+    personal = is_personal_chat(lines, business_name=tenant.business_name)
+    try:
+        get_redis().set(
+            _personal_key(conversation.id),
+            f"{'personal' if personal else 'business'}:{time.time()}",
+            ex=PERSONAL_VERDICT_TTL_SECONDS if personal else BUSINESS_VERDICT_TTL_SECONDS,
+        )
+    except Exception:
+        pass
+    return personal
+
+
+def _step_aside_from_personal_chat(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
+    if not _is_personal_chat(db, tenant=tenant, conversation=conversation):
+        return False
+    conversation.ai_active = False
+    conversation.mode = ConversationMode.MANUAL.value
+    clear_awaiting_human(conversation.id)
+    db.flush()
+    publish_conversation_updated(tenant.id, conversation)
+    log.info("Chat personal del dueño: la IA se aparta conv=%s", conversation.id)
     return True
 
 
@@ -2060,6 +2120,8 @@ def process_ai_reply(
     if not should_ai_respond(tenant, conversation):
         return True
     if _owner_took_over(db, tenant=tenant, conversation=conversation):
+        return True
+    if not classify_mode and _step_aside_from_personal_chat(db, tenant=tenant, conversation=conversation):
         return True
     if not is_target():
         return True

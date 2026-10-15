@@ -145,6 +145,37 @@ def _classify_with_llm(text: str, *, business_name: str = "") -> dict[str, Any]:
     return _adjust_classification(text, _parse_classifier_json(raw))
 
 
+PERSONAL_CHAT_SYSTEM = """Filtras los chats de la IA que vende por WhatsApp para «{business}».
+El dueño usa el mismo número para su vida personal. Lee el chat y di si es PERSONAL: pareja, familia
+o amigos del dueño (cariño, coqueteo, planes, chismes, «¿qué haces?»), sin pedirle nada al negocio.
+NO es personal si el contacto pregunta por productos, precios, pedidos, envíos, pagos, citas o servicios,
+aunque hable informal o diga «amor», «mi vida» o «veci». Si dudas, NO es personal.
+Responde SOLO JSON: {{"personal": true}} o {{"personal": false}}"""
+
+_SPEAKERS = {"contact": "Contacto", "agent": "Dueño", "bot": "IA", "bait": "IA"}
+
+
+def is_personal_chat(lines: list[tuple[str, str]], *, business_name: str = "") -> bool:
+    """lines: (fuente, texto) del más viejo al más nuevo. Ante cualquier error, no es personal."""
+    if not is_configured() or not lines:
+        return False
+    chat = "\n".join(f"{_SPEAKERS.get(source, 'Contacto')}: {text[:300]}" for source, text in lines if text)
+    try:
+        raw = chat_completion(
+            [
+                {"role": "system", "content": PERSONAL_CHAT_SYSTEM.format(business=business_name or "el negocio")},
+                {"role": "user", "content": chat},
+            ],
+            temperature=0.0,
+            max_tokens=20,
+            timeout=12.0,
+        )
+        return bool(json.loads(re.search(r"\{.*\}", raw, re.DOTALL).group(0)).get("personal") is True)
+    except (DeepSeekError, ValueError, AttributeError) as exc:
+        log.warning("No se pudo revisar si el chat es personal: %s", exc)
+        return False
+
+
 def classify_inbound_message(text: str, *, business_name: str = "") -> dict[str, Any]:
     """Clasifica mensajes. Por defecto usa reglas locales (0 costo); LLM solo si está activado."""
     cleaned = (text or "").strip()

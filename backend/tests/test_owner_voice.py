@@ -115,6 +115,56 @@ def test_owner_turned_the_ai_on_after_writing(_sleep, mock_generate, mock_send):
 
 
 @requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_ai_stays_out_of_the_owners_personal_chats(_sleep, mock_generate, mock_send, monkeypatch):
+    """La novia del dueño escribe 20 min después de que él le habló: la IA no le contesta «jajaja»."""
+    from app.application.ai import ai_service
+    from app.application.ai.ai_service import mark_ai_enabled_by_owner
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _run, _seed
+
+    seen: list = []
+    monkeypatch.setattr(ai_service, "is_personal_chat", lambda lines, business_name="": seen.append(lines) or True)
+    mock_generate.return_value = AiGeneratedReply(message="Jajajajaja")
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="Un poco interactiva ando")
+        msg.created_at = _now()
+        _add(db, conv, direction="out", source="agent", body="Dale amor nos vemos", at=_now() - timedelta(minutes=30))
+        _add(db, conv, direction="out", source="agent", body="Del oficio que haces", at=_now() - timedelta(minutes=21))
+        db.commit()
+        # Tocó «IA activa» sin querer: lo que él escribió antes ya no la aparta.
+        mark_ai_enabled_by_owner(conv.id)
+        assert _run(db, tenant, conv, msg) is True
+        assert conv.ai_active is False and conv.mode == "manual"
+
+        # Si la vuelve a prender a propósito, manda él y no se le pregunta otra vez a la IA.
+        conv.ai_active, conv.mode = True, "auto"
+        db.commit()
+        mark_ai_enabled_by_owner(conv.id)
+        assert _run(db, tenant, conv, msg) is True
+
+    assert len(seen) == 1
+    assert ("agent", "Dale amor nos vemos") in seen[0] and ("contact", "Un poco interactiva ando") in seen[0]
+    mock_send.assert_called_once()
+
+
+def test_personal_chat_check_reads_who_said_what(monkeypatch):
+    from app.application.ai import ai_classifier_service as svc
+
+    sent: list = []
+    monkeypatch.setattr(svc, "is_configured", lambda: True)
+    monkeypatch.setattr(svc, "chat_completion", lambda messages, **kw: sent.append(messages) or '{"personal": true}')
+    assert svc.is_personal_chat([("agent", "Dale amor"), ("contact", "Un poco interactiva ando")], business_name="Rino")
+    assert sent[0][1]["content"] == "Dueño: Dale amor\nContacto: Un poco interactiva ando"
+    assert "«Rino»" in sent[0][0]["content"]
+
+    monkeypatch.setattr(svc, "chat_completion", lambda messages, **kw: "no sé")
+    assert svc.is_personal_chat([("contact", "hola amor, ¿cuánto vale la torta?")]) is False
+
+
+@requires_db
 @patch("app.application.ai.ai_auto_enable_service.classify_inbound_message")
 def test_ai_does_not_switch_itself_on_where_the_owner_writes(mock_classify):
     from app.application.ai.ai_auto_enable_service import maybe_auto_enable_ai_for_inbound
