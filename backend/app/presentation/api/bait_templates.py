@@ -11,7 +11,8 @@ from app.application.ai.ai_business_profile_service import (
     build_ai_system_prompt_from_answers,
     business_summary_lines,
 )
-from app.application.ai.ai_readiness_service import has_catalog_text, readiness_from
+from app.application.ai.ai_readiness_service import has_catalog_text, readiness_from, tenant_sales_tips
+from app.application.ai.ai_trial_service import TrialError, try_reply
 from app.application.billing.tenant_service import is_placeholder_business_name, log_audit
 from app.application.products.product_service import list_products
 from app.application.outbound.bait_template_service import (
@@ -44,6 +45,8 @@ from app.presentation.schemas.bait_templates import (
     BusinessProfileUpdate,
     GenerateBaitTemplateRequest,
     GenerateBaitTemplateResponse,
+    TryAiRequest,
+    TryAiResponse,
 )
 from app.shared.core.deps import RequireAgent, RequireOwner, RequireViewer
 
@@ -90,6 +93,7 @@ def _profile_response(db: Session, tenant: Tenant, profile) -> BusinessProfileRe
             has_catalog=has_catalog_text(db, tenant.id),
             booking=bool(getattr(profile, "ai_booking_enabled", False)),
         ),
+        tips=tenant_sales_tips(db, tenant.id, profile),
         delivery_info=answers.get("delivery_info"),
         business_name=tenant.business_name,
         business_name_is_placeholder=is_placeholder_business_name(tenant.business_name),
@@ -117,6 +121,22 @@ def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
     profile = get_or_create_tenant_profile(db, tenant.id)
     db.commit()
     return _profile_response(db, tenant, profile)
+
+
+@router.post("/try-ai", response_model=TryAiResponse)
+def try_ai(body: TryAiRequest, current: RequireAgent, db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    turns = [{"from": t.from_, "text": t.text} for t in body.turns]
+    try:
+        result = try_reply(db, tenant, turns)
+    except TrialError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=503, detail="La IA no respondió. Intenta otra vez en un momento.") from exc
+    db.rollback()
+    return TryAiResponse(reply=result.reply, photos=result.photos, attachment=result.attachment, notes=result.notes)
 
 
 @router.put("/business-profile", response_model=BusinessProfileResponse)

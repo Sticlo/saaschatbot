@@ -56,11 +56,8 @@ from app.application.ai.ai_shortcut_service import (
     AiGeneratedReply,
     OrderSummary,
     annotate_sent_shortcuts,
-    infer_photo_ref,
-    infer_promised_shortcut,
-    photo_choice_message,
+    attach_promised_media,
     send_reply_with_shortcut,
-    shows_photos,
     wants_photos_again,
     without_internal_refs,
 )
@@ -1422,21 +1419,13 @@ def _deliver_reply(
             log.warning("IA dijo que agendó con la agenda apagada; se pasa al equipo conv=%s", conversation.id)
             reply = replace(reply, message=BOOKING_HANDOFF_MESSAGE, book_slot=None, stage=STAGE_CLOSING)
 
-    if reply.photo_ref is None and reply.shortcut_id is None and shows_photos(reply.message, _turn_text(message)):
-        shown = infer_photo_ref(
-            reply.message, _turn_text(message), products or [], _recent_texts(db, conversation.id)
-        )
-        if shown:
-            log.info("IA dijo que mostraba fotos sin photo_ref; se adjuntan conv=%s", conversation.id)
-            reply = replace(reply, photo_ref=shown)
-        elif any(p.photos for p in products or []):
-            log.info("IA dijo que mostraba fotos sin decir de cuál; se pregunta conv=%s", conversation.id)
-            reply = replace(reply, message=photo_choice_message(products or []))
-    if reply.shortcut_id is None and reply.photo_ref is None:
-        promised = infer_promised_shortcut(reply.message, _turn_text(message), shortcuts)
-        if promised:
-            log.info("IA prometió un atajo sin adjuntarlo; se adjunta conv=%s", conversation.id)
-            reply = replace(reply, shortcut_id=promised)
+    reply = attach_promised_media(
+        reply,
+        client_text=_turn_text(message),
+        products=products or [],
+        shortcuts=shortcuts,
+        recent=_recent_texts(db, conversation.id),
+    )
 
     # Solo cambia lo que lee el cliente: la etapa se decide con la promesa original (avisa al dueño).
     outgoing = replace(reply, message=without_internal_refs(without_wait_promise(reply.message), products or []))

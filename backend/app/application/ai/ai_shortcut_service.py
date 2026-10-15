@@ -5,7 +5,7 @@ import logging
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy.orm import Session
@@ -421,6 +421,31 @@ def photo_choice_message(products: list) -> str:
     names = [p.name for p in products if p.photos][:6]
     listed = ", ".join(names[:-1]) + f" o {names[-1]}" if len(names) > 1 else names[0]
     return f"¡Claro! ¿De cuál quieres ver fotos: {listed}? 📸"
+
+
+def attach_promised_media(
+    reply: "AiGeneratedReply",
+    *,
+    client_text: str,
+    products: list,
+    shortcuts: list[dict],
+    recent: tuple[str, ...] = (),
+) -> "AiGeneratedReply":
+    """«Mira 👇» o «te lo envío» sin adjunto: se adjunta lo prometido o se pregunta cuál."""
+    if reply.photo_ref is None and reply.shortcut_id is None and shows_photos(reply.message, client_text):
+        shown = infer_photo_ref(reply.message, client_text, products, recent)
+        if shown:
+            log.info("IA dijo que mostraba fotos sin photo_ref; se adjuntan")
+            return replace(reply, photo_ref=shown)
+        if any(p.photos for p in products):
+            log.info("IA dijo que mostraba fotos sin decir de cuál; se pregunta")
+            return replace(reply, message=photo_choice_message(products))
+    if reply.shortcut_id is None and reply.photo_ref is None:
+        promised = infer_promised_shortcut(reply.message, client_text, shortcuts)
+        if promised:
+            log.info("IA prometió un atajo sin adjuntarlo; se adjunta")
+            return replace(reply, shortcut_id=promised)
+    return reply
 
 
 def asks_to_resend(client_text: str) -> bool:

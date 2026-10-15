@@ -120,3 +120,20 @@ class BusinessProfileResponse(BaseModel):
     bait_message_template: Optional[str] = None
     ai_summary: list[str] = Field(default_factory=list)
     readiness: Optional[dict] = None
+    tips: list[dict] = Field(default_factory=list)
+
+
+class TryAiTurn(BaseModel):
+    from_: str = Field(alias="from", pattern="^(client|ai)$")
+    text: str = Field(max_length=1000)
+
+
+class TryAiRequest(BaseModel):
+    turns: list[TryAiTurn] = Field(min_length=1, max_length=20)
+
+
+class TryAiResponse(BaseModel):
+    reply: str
+    photos: list[str] = Field(default_factory=list)
+    attachment: Optional[dict] = None
+    notes: list[str] = Field(default_factory=list)

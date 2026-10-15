@@ -3,7 +3,9 @@ envíos y dónde/cuándo atiende. Sin esto la IA deja preguntas a medias y gasta
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -131,6 +133,126 @@ def tenant_readiness(db: Session, tenant_id: uuid.UUID) -> dict:
         list_products(db, tenant_id),
         has_catalog=has_catalog_text(db, tenant_id),
         booking=bool(profile is not None and profile.ai_booking_enabled),
+    )
+
+
+# «Ropa unisex», «Buzos hombre», «Tortas»: una categoría, no algo que el cliente pueda pedir.
+_GENERIC_NAME_RE = re.compile(
+    r"^(?:ropa|productos?|varios|surtidos?|accesorios|catalogo|mercancia|articulos|referencias|prendas|\w{3,}s)\b"
+)
+_SHIPS_RE = re.compile(r"env[ií]o|domicilio|interrapid|servientrega|coordinadora|transportadora|encomienda", re.IGNORECASE)
+GENERIC_CATALOG_MAX = 3
+
+
+def _tip(key: str, label: str, hint: str, action: str) -> dict:
+    return {"key": key, "label": label, "hint": hint, "action": action}
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _plain_name(name: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", name or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower().strip()
+
+
+def sales_tips(
+    *,
+    answers: dict,
+    products: list[Product],
+    recipients: list[dict],
+    own_number: bool,
+    booking: bool,
+    tried: bool,
+) -> list[dict]:
+    """Lo que no impide prender la IA pero le hace perder ventas al negocio sin que se entere."""
+    tips: list[dict] = []
+    if own_number:
+        tips.append(
+            _tip(
+                "alerts-own",
+                "Tus alertas van al número del negocio",
+                "Te llegan como un mensaje a ti mismo, sin sonar. Pon tu WhatsApp personal o el de quien despacha.",
+                "alerts",
+            )
+        )
+    elif not recipients:
+        tips.append(
+            _tip(
+                "alerts",
+                "Nadie recibe el aviso cuando alguien quiere comprar",
+                "Pon tu WhatsApp personal en Alertas: te escribimos apenas la IA cierre un pedido o llegue un comprobante.",
+                "alerts",
+            )
+        )
+    no_photo = [p for p in products if not p.photos]
+    if no_photo:
+        tips.append(
+            _tip(
+                "photos",
+                _plural(len(no_photo), "producto sin foto", "productos sin foto"),
+                "Casi todos piden ver antes de comprar. Sube al menos una foto por producto: la IA la manda sola.",
+                "inventory",
+            )
+        )
+    generic = [p for p in products if _GENERIC_NAME_RE.match(_plain_name(p.name))]
+    if products and len(products) <= GENERIC_CATALOG_MAX and generic:
+        tips.append(
+            _tip(
+                "catalog",
+                "Tu catálogo es muy general",
+                f"«{generic[0].name}» es una categoría. Si vendes varias referencias, sube cada una aparte con su foto, "
+                "precio y detalles (tallas, colores, medidas): así la IA recomienda algo concreto y cierra.",
+                "inventory",
+            )
+        )
+    else:
+        no_details = [p for p in products if not (p.details or "").strip()]
+        if no_details:
+            tips.append(
+                _tip(
+                    "details",
+                    _plural(len(no_details), "producto sin detalles", "productos sin detalles"),
+                    "Escribe tallas, colores, medidas o sabores en Detalles: es lo primero que preguntan.",
+                    "inventory",
+                )
+            )
+    if booking and products and _SHIPS_RE.search(answers.get("delivery_info") or ""):
+        tips.append(
+            _tip(
+                "booking",
+                "Tienes las citas activadas",
+                "La IA les ofrece horarios a tus clientes. Si no atiendes con cita (por ejemplo, una tienda que envía), apágalas.",
+                "booking-off",
+            )
+        )
+    if not tried:
+        tips.append(
+            _tip(
+                "try",
+                "Prueba tu IA antes de que te escriban",
+                "Escríbele como si fueras un cliente: pregunta precios, pide fotos y compra. Verás lo mismo que ellos.",
+                "try-ai",
+            )
+        )
+    return tips
+
+
+def tenant_sales_tips(db: Session, tenant_id: uuid.UUID, profile: Optional[TenantProfile]) -> list[dict]:
+    from app.application.ai.ai_trial_service import has_tried
+    from app.application.conversations.interest_alert_service import alert_recipients, own_number_recipients
+    from app.domain.entities import WhatsAppSession
+
+    session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
+    recipients = alert_recipients(profile)
+    return sales_tips(
+        answers=answers_from_profile(profile) if profile is not None else {},
+        products=list_products(db, tenant_id),
+        recipients=recipients,
+        own_number=bool(own_number_recipients(recipients, session)),
+        booking=bool(profile is not None and profile.ai_booking_enabled),
+        tried=has_tried(tenant_id),
     )
 
 

@@ -3071,6 +3071,102 @@ textarea { resize: vertical; min-height: 44px; }
 
 .ai-ready-text span { color: var(--muted); font-size: 0.82rem; }
 .ai-ready-item.is-done .ai-ready-text strong { color: var(--muted); font-weight: 500; }
+.ai-ready-item.is-tip .ai-ready-mark { background: var(--warning); }
+
+.ai-tips {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--panel-card-border);
+}
+
+.ai-tips h4 { margin: 0 0 0.6rem; font-size: 0.9rem; }
+
+.try-ai-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 0.75rem 0;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--panel-card-border);
+}
+
+.try-ai-msg { white-space: pre-wrap; }
+.try-ai-typing { color: var(--muted); font-style: italic; }
+
+.try-ai-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-self: flex-start;
+}
+
+.try-ai-photos img {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--panel-card-border);
+}
+
+.try-ai-note {
+  align-self: stretch;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 10px;
+  border: 1px dashed var(--warning);
+  color: var(--warning);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.try-ai-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.try-ai-chip {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-card-border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.try-ai-chip:hover { border-color: var(--accent); }
+
+.try-ai-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.try-ai-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--panel-card-border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.try-ai-form .btn { flex: 0 0 auto; width: auto; }
+
+.try-ai-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
 
 .ai-ready-banner {
   display: flex;

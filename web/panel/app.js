@@ -469,6 +469,8 @@
     state.subscription = null;
     state.panelMode = "chats";
     state.aiProfile = null;
+    tryAi.turns = [];
+    renderTryAi();
     state.quickShortcuts = [];
     state.shortcutsDraft = [];
     state.results = null;
@@ -1268,12 +1270,11 @@
   }
 
   function buildTourSteps() {
-    const p = state.aiProfile || {};
     const steps = [
       {
         key: "hello",
         title: "Hola, soy Omi",
-        text: "Solo tres cosas: conectar WhatsApp, decirle a la IA qué vendes y poner tu número para que te avise cuando alguien quiera comprar.",
+        text: "En 10 minutos dejamos tu IA vendiendo: conectas WhatsApp, le cuentas qué vendes y cómo te pagan, subes tus productos con foto, pones tu número para los avisos y la pruebas tú primero.",
         next: "Empezar",
       },
     ];
@@ -1293,8 +1294,16 @@
       target: () => document.querySelector(".ai-setup-form-card"),
       focus: () => $("biz-name"),
       title: "Cuéntale de tu negocio",
-      text: "Con el nombre, a qué te dedicas y qué vendes alcanza. Luego toca «Guardar mi negocio». Lo demás es opcional.",
-      done: () => !p.business_name_is_placeholder && !!$("biz-industry")?.value?.trim() && !!$("biz-products")?.value?.trim(),
+      text: "Lo que más preguntan los clientes: qué vendes, cómo te pagan (con el número de la cuenta), si haces envíos y dónde estás. Sin eso la IA tiene que decir «te confirmo». Luego toca «Guardar mi negocio».",
+      done: () => !!state.aiProfile?.readiness?.ready,
+    });
+    steps.push({
+      key: "products",
+      mode: "inventory",
+      target: () => $("products-card"),
+      title: "Sube lo que vendes, con foto",
+      text: "Un producto por cada cosa que vendes (no «Ropa» en general), con su precio y al menos una foto. Cuando un cliente pida verlo, la IA se la manda sola. Si solo das servicios, sigue.",
+      done: () => (state.products || []).some((x) => (x.photos || []).length),
     });
     steps.push({
       key: "alerts",
@@ -1311,9 +1320,10 @@
         mode: "ai",
         target: () => $("mode-appointments"),
         title: "¿Das citas?",
-        text: "Si das turnos o reservas, la IA puede agendarlas sola, aunque también vendas productos: hace las dos cosas.",
-        next: "Sí, doy citas",
-        secondary: { label: "No doy citas", goTo: "bye" },
+        text: "Solo si atiendes con turno o reserva (barbería, consultorio, spa…). Si vendes productos y los envías, no las necesitas: la IA ofrecería horarios a tus clientes.",
+        next: "No doy citas",
+        nextGoTo: "try",
+        secondary: { label: "Sí, doy citas", goTo: "citas" },
         advanceOnClick: true,
       });
       steps.push({
@@ -1326,10 +1336,19 @@
       });
     }
     steps.push({
+      key: "try",
+      mode: "ai",
+      target: () => $("try-ai-card"),
+      focus: () => $("try-ai-input"),
+      title: "Pruébala tú primero",
+      text: "Escríbele como si fueras un cliente: pregunta precios, pide fotos y compra algo. No se le envía nada a nadie. Si algo no te gusta, ajústalo arriba y vuelve a probar.",
+      done: () => tryAi.turns.some((t) => t.from === "ai"),
+    });
+    steps.push({
       key: "bye",
       mode: "chats",
       title: "Listo",
-      text: "Pídele a alguien que le escriba a tu WhatsApp. Aquí ves los chats; en «Interesados», a los que quieren comprar. Si te pierdes, toca «Guía».",
+      text: "Aquí ves los chats; en «Interesados», a los que quieren comprar. Si usas este WhatsApp también para cosas personales, apaga «IA activa» en esos chats para que no les responda. Si te pierdes, toca «Guía».",
       next: "Entendido",
     });
     return steps;
@@ -1367,7 +1386,11 @@
     document.body.appendChild(root);
     root.querySelector(".tour-skip").addEventListener("click", () => endTour());
     root.querySelector(".tour-back").addEventListener("click", () => tourGo(tour.index - 1));
-    root.querySelector(".tour-next").addEventListener("click", () => tourGo(tour.index + 1));
+    root.querySelector(".tour-next").addEventListener("click", () => {
+      const goTo = tour.steps[tour.index]?.nextGoTo;
+      const i = goTo ? tour.steps.findIndex((s) => s.key === goTo) : -1;
+      tourGo(i >= 0 ? i : tour.index + 1);
+    });
     root.querySelector(".tour-secondary").addEventListener("click", () => {
       const goTo = tour.steps[tour.index]?.secondary?.goTo;
       const i = tour.steps.findIndex((s) => s.key === goTo);
@@ -2990,7 +3013,114 @@
         )
         .join("");
     }
+    renderSalesTips();
     renderReadyBanner();
+  }
+
+  const TIP_ACTIONS = {
+    alerts: "Poner mi número",
+    inventory: "Ir a Inventario",
+    "booking-off": "Apagar citas",
+    "try-ai": "Probar ahora",
+  };
+
+  function renderSalesTips() {
+    const tips = state.canManageGlobal ? state.aiProfile?.tips || [] : [];
+    $("ai-tips").classList.toggle("hidden", !tips.length);
+    $("ai-tips-list").innerHTML = tips
+      .map(
+        (t) => `
+        <li class="ai-ready-item is-tip">
+          <span class="ai-ready-mark" aria-hidden="true">!</span>
+          <span class="ai-ready-text"><strong>${escapeHtml(t.label)}</strong><span>${escapeHtml(t.hint)}</span></span>
+          <button type="button" class="link-btn ai-tip-go" data-action="${escapeHtml(t.action)}">${escapeHtml(TIP_ACTIONS[t.action] || "Revisar")}</button>
+        </li>`
+      )
+      .join("");
+  }
+
+  async function onSalesTip(action, btn) {
+    if (action === "alerts") return goToReadinessField("alerts-card");
+    if (action === "inventory") return switchPanelMode("inventory");
+    if (action === "try-ai") return goToReadinessField("try-ai-input");
+    if (action !== "booking-off") return;
+    if (!confirm("¿Apagar las citas? La IA dejará de ofrecer horarios. Puedes volver a prenderlas en Citas.")) return;
+    btn.disabled = true;
+    try {
+      const s = await api("/appointments/schedule");
+      const saved = await api("/appointments/schedule", {
+        method: "PUT",
+        body: JSON.stringify({
+          open_time: s.open_time,
+          close_time: s.close_time,
+          slot_minutes: s.slot_minutes,
+          ai_booking_enabled: false,
+        }),
+      });
+      fillScheduleForm(saved);
+      refreshReadinessSoon();
+    } catch (err) {
+      btn.disabled = false;
+      alert(err.message);
+    }
+  }
+
+  const tryAi = { turns: [], busy: false };
+
+  function tryAiAttachmentHtml(a) {
+    if (!a) return "";
+    if (a.type === "image") return `<div class="try-ai-photos"><img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.label)}" loading="lazy" /></div>`;
+    if (a.type === "text") return `<div class="msg in try-ai-msg">${escapeHtml(a.text)}</div>`;
+    return `<div class="msg in try-ai-msg">📄 ${escapeHtml(a.file_name || a.label)}</div>`;
+  }
+
+  function renderTryAi() {
+    const box = $("try-ai-messages");
+    box.innerHTML =
+      tryAi.turns
+        .map((t) => {
+          if (t.from === "client") return `<div class="msg out try-ai-msg">${escapeHtml(t.text)}</div>`;
+          const photos = (t.photos || []).map((u) => `<img src="${escapeHtml(u)}" alt="" loading="lazy" />`).join("");
+          return (
+            `<div class="msg in try-ai-msg">${escapeHtml(t.text)}</div>` +
+            (photos ? `<div class="try-ai-photos">${photos}</div>` : "") +
+            tryAiAttachmentHtml(t.attachment) +
+            (t.notes || []).map((n) => `<p class="try-ai-note">${escapeHtml(n)}</p>`).join("")
+          );
+        })
+        .join("") + (tryAi.busy ? '<div class="msg in try-ai-msg try-ai-typing">Escribiendo…</div>' : "");
+    box.classList.toggle("hidden", !box.innerHTML);
+    box.scrollTop = box.scrollHeight;
+    $("try-ai-reset").classList.toggle("hidden", !tryAi.turns.length || tryAi.busy);
+    $("try-ai-send").disabled = tryAi.busy;
+  }
+
+  async function sendTryAi(raw) {
+    const text = (raw || "").trim();
+    if (!text || tryAi.busy) return;
+    const input = $("try-ai-input");
+    tryAi.turns.push({ from: "client", text });
+    tryAi.busy = true;
+    input.value = "";
+    $("try-ai-status").textContent = "";
+    renderTryAi();
+    try {
+      const res = await api(
+        "/outbound/try-ai",
+        { method: "POST", body: JSON.stringify({ turns: tryAi.turns.slice(-20).map((t) => ({ from: t.from, text: t.text })) }) },
+        60000
+      );
+      tryAi.turns.push({ from: "ai", text: res.reply, photos: res.photos, attachment: res.attachment, notes: res.notes });
+      if ((state.aiProfile?.tips || []).some((t) => t.key === "try")) refreshReadinessSoon();
+    } catch (err) {
+      tryAi.turns.pop();
+      input.value = text;
+      $("try-ai-status").textContent = err.message || "No se pudo probar. Intenta otra vez.";
+    } finally {
+      tryAi.busy = false;
+      renderTryAi();
+      input.focus({ preventScroll: true });
+    }
   }
 
   function renderReadyBanner() {
@@ -3309,6 +3439,7 @@
         }),
       });
       fillInterestAlert(cfg);
+      refreshReadinessSoon();
       const n = (cfg.recipients || []).length;
       setAlertStatus(
         n
@@ -3650,6 +3781,7 @@
     if (files.length > room) setProductsStatus(`Cada producto puede tener hasta ${MAX_PRODUCT_PHOTOS} fotos`);
     else if (product) setProductsStatus(`✓ Listo — si piden fotos de ${product.name}, la IA las manda sola`);
     renderProductsSummary();
+    refreshReadinessSoon();
   }
 
   async function removeProductPhoto(row, name) {
@@ -3658,6 +3790,7 @@
       upsertProduct(product);
       renderProductPhotos(row, product);
       renderProductsSummary();
+      refreshReadinessSoon();
       setProductsStatus("Foto quitada");
     } catch (err) {
       setProductsStatus(err.message);
@@ -5159,6 +5292,23 @@
     }
     const btn = e.target.closest(".ai-ready-go");
     if (btn) goToReadinessField(btn.dataset.field);
+  });
+  $("ai-tips-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".ai-tip-go");
+    if (btn) onSalesTip(btn.dataset.action, btn);
+  });
+  $("try-ai-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendTryAi($("try-ai-input").value);
+  });
+  $("try-ai-card").addEventListener("click", (e) => {
+    const chip = e.target.closest(".try-ai-chip");
+    if (chip) sendTryAi(chip.textContent);
+  });
+  $("try-ai-reset").addEventListener("click", () => {
+    tryAi.turns = [];
+    $("try-ai-status").textContent = "";
+    renderTryAi();
   });
   $("ai-questions-card").addEventListener("click", (e) => {
     const item = e.target.closest(".ai-question");
