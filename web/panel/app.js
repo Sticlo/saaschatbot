@@ -486,10 +486,15 @@
     $("ai-setup-panel").classList.add("hidden");
     $("appointments-panel").classList.add("hidden");
     $("inventory-panel").classList.add("hidden");
+    $("orders-panel").classList.add("hidden");
     $("ai-ready-banner").classList.add("hidden");
     $("ai-questions-badge").classList.add("hidden");
+    $("orders-badge").classList.add("hidden");
+    $("mode-orders").classList.add("hidden");
+    state.orders = [];
     $("sidebar-chats").classList.remove("hidden");
     $("mode-chats").classList.add("active");
+    $("mode-orders").classList.remove("active");
     $("mode-appointments").classList.remove("active");
     $("mode-inventory").classList.remove("active");
     $("mode-ai").classList.remove("active");
@@ -2273,18 +2278,21 @@
     const isChats = mode === "chats";
     const isAppointments = mode === "appointments";
     const isInventory = mode === "inventory";
+    const isOrders = mode === "orders";
     const isAi = mode === "ai";
 
     $("mode-chats").classList.toggle("active", isChats);
+    $("mode-orders").classList.toggle("active", isOrders);
     $("mode-appointments").classList.toggle("active", isAppointments);
     $("mode-inventory").classList.toggle("active", isInventory);
     $("mode-ai").classList.toggle("active", isAi);
     $("sidebar-chats").classList.toggle("hidden", !isChats);
     $("chat-area").classList.toggle("ai-setup-mode", isAi);
-    $("chat-area").classList.toggle("appointments-mode", isAppointments || isInventory);
+    $("chat-area").classList.toggle("appointments-mode", isAppointments || isInventory || isOrders);
     $("ai-setup-panel").classList.toggle("hidden", !isAi);
     $("appointments-panel").classList.toggle("hidden", !isAppointments);
     $("inventory-panel").classList.toggle("hidden", !isInventory);
+    $("orders-panel").classList.toggle("hidden", !isOrders);
 
     if (isChats) {
       if (state.activeId) {
@@ -2299,6 +2307,7 @@
       activeChat.classList.add("hidden");
       if (isAi) loadAiSetupPanel();
       if (isInventory) loadInventoryPanel();
+      if (isOrders) loadOrders();
       if (isAppointments) {
         loadAppointmentsPanel();
         loadResults();
@@ -2957,6 +2966,7 @@
   }
 
   function renderReadiness() {
+    syncOrdersTab();
     const r = state.aiProfile?.readiness;
     const card = $("ai-ready-card");
     card.classList.toggle("hidden", !r);
@@ -3260,6 +3270,8 @@
 
   function fillInterestAlert(cfg) {
     renderAlertRecipients(cfg?.recipients || []);
+    $("alert-warning").textContent = cfg?.warning || "";
+    $("alert-warning").classList.toggle("hidden", !cfg?.warning);
     if (cfg) {
       state.onboarding.alertCount = (cfg.recipients || []).length;
       renderOnboarding();
@@ -3393,6 +3405,137 @@
       state.products = [];
     }
     renderProducts();
+  }
+
+  async function loadOrders() {
+    try {
+      state.orders = await api("/orders");
+    } catch {
+      state.orders = state.orders || [];
+    }
+    renderOrders();
+  }
+
+  function setOrdersStatus(text) {
+    $("orders-status").textContent = text || "";
+  }
+
+  function orderCard(o) {
+    const who = o.customer || o.contact_name || o.contact_phone || "Cliente";
+    const rows = [
+      ["Total", o.total],
+      ["Entrega", o.delivery],
+      ["Pago", o.payment],
+      ["Guía", o.tracking],
+    ]
+      .filter(([, v]) => v)
+      .map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`)
+      .join("");
+    const when = o.status === "dispatched" ? `Despachado ${formatTime(o.dispatched_at)}` : formatTime(o.created_at);
+    const proof = o.payment_proof && o.status === "ready"
+      ? '<span class="order-flag">Comprobante sin verificar</span>'
+      : "";
+    const chat = o.conversation_id
+      ? `<button type="button" class="btn ghost small" data-order-chat="${o.conversation_id}">Ver chat</button>`
+      : "";
+    let actions = chat;
+    if (state.canWrite && o.status === "ready") {
+      actions = `<button type="button" class="btn primary small" data-order-dispatch="${o.id}">Marcar despachado</button>${chat}<button type="button" class="btn ghost small" data-order-cancel="${o.id}">Cancelar</button>`;
+    } else if (state.canWrite && o.status === "pending") {
+      actions = `<button type="button" class="btn ghost small" data-order-paid="${o.id}">Ya pagó</button>${chat}<button type="button" class="btn ghost small" data-order-cancel="${o.id}">Cancelar</button>`;
+    }
+    return `
+      <article class="order-card${o.status === "cancelled" ? " is-cancelled" : ""}" data-order-id="${o.id}">
+        <header class="order-head">
+          <strong>${escapeHtml(o.items)}</strong>
+          <span class="muted small">${escapeHtml(when)}</span>
+        </header>
+        <p class="order-who">${escapeHtml(who)}${o.contact_phone && o.contact_phone !== who ? ` · ${escapeHtml(o.contact_phone)}` : ""} ${proof}</p>
+        ${rows ? `<dl class="order-details">${rows}</dl>` : ""}
+        <div class="order-dispatch hidden">
+          <input type="text" maxlength="120" placeholder="Número de guía (opcional)" />
+          <label><input type="checkbox" checked /> Avisarle al cliente por WhatsApp</label>
+          <div class="alert-actions">
+            <button type="button" class="btn primary small" data-order-confirm="${o.id}">Confirmar despacho</button>
+            <button type="button" class="btn ghost small" data-order-back>Volver</button>
+          </div>
+        </div>
+        <div class="alert-actions order-actions">${actions}</div>
+      </article>`;
+  }
+
+  function renderOrders() {
+    const orders = state.orders || [];
+    const groups = {
+      ready: orders.filter((o) => o.status === "ready"),
+      pending: orders.filter((o) => o.status === "pending"),
+      done: orders.filter((o) => o.status === "dispatched" || o.status === "cancelled"),
+    };
+    for (const [key, list] of Object.entries(groups)) {
+      $(`orders-${key}`).innerHTML = list.map(orderCard).join("");
+      $(`orders-${key}-empty`).classList.toggle("hidden", list.length > 0);
+    }
+    $("orders-ready-count").textContent = groups.ready.length ? `(${groups.ready.length})` : "";
+    $("orders-pending-count").textContent = groups.pending.length ? `(${groups.pending.length})` : "";
+    const badge = $("orders-badge");
+    badge.textContent = String(groups.ready.length);
+    badge.classList.toggle("hidden", !groups.ready.length);
+    syncOrdersTab();
+  }
+
+  function syncOrdersTab() {
+    const sells = Boolean(state.aiProfile?.payment_methods);
+    $("mode-orders").classList.toggle("hidden", !sells && !(state.orders || []).length);
+  }
+
+  async function updateOrder(id, payload) {
+    setOrdersStatus("Guardando…");
+    try {
+      const saved = await api(`/orders/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      state.orders = (state.orders || []).map((o) => (o.id === saved.id ? saved : o));
+      renderOrders();
+      if (saved.status === "dispatched") {
+        setOrdersStatus(saved.customer_notified ? "Despachado. Ya le avisamos al cliente." : "Despachado.");
+      } else {
+        setOrdersStatus("");
+      }
+    } catch (err) {
+      setOrdersStatus(err.message || "No se pudo guardar. Intenta de nuevo.");
+    }
+  }
+
+  function onOrdersClick(e) {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const card = btn.closest(".order-card");
+    const dispatchBox = card?.querySelector(".order-dispatch");
+    if (btn.dataset.orderChat) {
+      if (!state.conversations.some((c) => c.id === btn.dataset.orderChat)) {
+        setOrdersStatus("Ese chat ya no está en tu lista (puede estar archivado).");
+        return;
+      }
+      switchPanelMode("chats");
+      selectConversation(btn.dataset.orderChat);
+    } else if (btn.dataset.orderDispatch) {
+      dispatchBox.classList.remove("hidden");
+      card.querySelector(".order-actions").classList.add("hidden");
+      dispatchBox.querySelector("input[type=text]").focus();
+    } else if (btn.hasAttribute("data-order-back")) {
+      dispatchBox.classList.add("hidden");
+      card.querySelector(".order-actions").classList.remove("hidden");
+    } else if (btn.dataset.orderConfirm) {
+      btn.disabled = true;
+      updateOrder(btn.dataset.orderConfirm, {
+        status: "dispatched",
+        tracking: dispatchBox.querySelector("input[type=text]").value.trim(),
+        notify_customer: dispatchBox.querySelector("input[type=checkbox]").checked,
+      });
+    } else if (btn.dataset.orderPaid) {
+      updateOrder(btn.dataset.orderPaid, { status: "ready" });
+    } else if (btn.dataset.orderCancel) {
+      if (!confirm("¿Cancelar este pedido? Las unidades no se devuelven solas al inventario.")) return;
+      updateOrder(btn.dataset.orderCancel, { status: "cancelled" });
+    }
   }
 
   function formatThousands(n) {
@@ -4175,6 +4318,7 @@
       }
       renderReadiness();
       loadAiQuestions({ badgeOnly: true });
+      loadOrders();
 
       applyWaSession(wa);
       setChatListTab(state.chatListTab);
@@ -4406,6 +4550,9 @@
       case "products.updated":
         if (state.panelMode === "inventory" && !document.activeElement?.closest?.("#products-list")) loadProducts();
         refreshReadinessSoon();
+        break;
+      case "orders.updated":
+        if (!document.activeElement?.closest?.("#orders-panel .order-dispatch")) loadOrders();
         break;
       case "ai_questions.updated": {
         const typing = state.panelMode === "ai" && document.activeElement?.closest?.("#ai-questions-card");
@@ -4972,6 +5119,8 @@
   $("mode-chats").addEventListener("click", () => switchPanelMode("chats"));
   $("mode-appointments").addEventListener("click", () => switchPanelMode("appointments"));
   $("mode-inventory").addEventListener("click", () => switchPanelMode("inventory"));
+  $("mode-orders").addEventListener("click", () => switchPanelMode("orders"));
+  $("orders-panel").addEventListener("click", onOrdersClick);
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
   $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
   $("schedule-ai-booking")?.addEventListener("change", () => saveAppointmentSchedule());

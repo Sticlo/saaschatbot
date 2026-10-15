@@ -344,18 +344,18 @@ _ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\
 _SHOWS_RE = re.compile(r"\bmira\b|\baqui\s+(?:estan|esta|las|la)\b|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b")
 
 
-def infer_photo_ref(message: str, client_text: str, products: list) -> Optional[str]:
-    """«¡Claro! Mira 👇» sin photo_ref: el cliente se queda sin las fotos que pidió.
-    Si pidió fotos y queda claro de qué producto, se adjuntan."""
+def shows_photos(message: str, client_text: str) -> bool:
+    """El cliente pidió fotos (o reclama las que no le llegaron) y la respuesta dice que ahí van."""
     reply = _plain(message)
     asked = _plain(client_text)
-    if not _ASKS_PHOTO_RE.search(asked) or not (_SHOWS_RE.search(reply) or _PROMISE_RE.search(reply)):
-        return None
-    text = " " + " ".join(re.findall(r"\w+", f"{asked} {reply}")) + " "
+    wants = _ASKS_PHOTO_RE.search(asked) or (asks_to_resend(client_text) and _ASKS_PHOTO_RE.search(reply))
+    return bool(wants and (_SHOWS_RE.search(reply) or _PROMISE_RE.search(reply)))
+
+
+def _best_product(text: str, products: list):
+    text = " " + " ".join(re.findall(r"\w+", _plain(text))) + " "
     scored = []
     for product in products:
-        if not product.photos:
-            continue
         words = [w for w in re.split(r"\W+", _plain(product.name)) if len(w) >= 3]
         score = sum(1 for w in words if f" {w} " in text or f" {w}s " in text)
         if score:
@@ -365,12 +365,78 @@ def infer_photo_ref(message: str, client_text: str, products: list) -> Optional[
     scored.sort(key=lambda item: item[0], reverse=True)
     if len(scored) > 1 and scored[0][0] == scored[1][0]:
         return None
-    return product_ref(scored[0][1])
+    return scored[0][1]
+
+
+def infer_photo_ref(
+    message: str, client_text: str, products: list, recent: tuple[str, ...] = ()
+) -> Optional[str]:
+    """«¡Claro! Mira 👇» sin photo_ref: el cliente se queda sin las fotos que pidió.
+    `recent`: lo último que se habló, del más nuevo al más viejo. Un «fotos» a secas es del
+    producto del que se venía hablando."""
+    if not shows_photos(message, client_text):
+        return None
+    with_photos = [p for p in products if p.photos]
+    if not with_photos:
+        return None
+    named = _ref_in_text(message, with_photos) or _best_product(f"{client_text} {message}", with_photos)
+    if named is None:
+        for text in recent:
+            named = _ref_in_text(text, with_photos) or _best_product(text, with_photos)
+            if named is not None:
+                break
+    if named is None and len(with_photos) == 1:
+        named = with_photos[0]
+    return product_ref(named) if named is not None else None
+
+
+_REF_RE = re.compile(r"\b(?:ref(?:erencia)?\.?\s*[:=#]?\s*)?([0-9a-f]{8})\b", re.IGNORECASE)
+
+
+def _ref_in_text(text: str, products: list):
+    refs = {product_ref(p): p for p in products}
+    for match in _REF_RE.finditer(text or ""):
+        product = refs.get(match.group(1).lower())
+        if product is not None:
+            return product
+    return None
+
+
+def without_internal_refs(message: str, products: list) -> str:
+    """La ref es para la IA: «Ropa Unisex (ref df984011)» no le dice nada al cliente."""
+    refs = {product_ref(p) for p in products}
+    if not refs:
+        return message
+    cleaned = re.sub(
+        r"\s*\(\s*(?:ref(?:erencia)?\.?\s*[:=#]?\s*)?([0-9a-f]{8})\s*\)|\s*\bref(?:erencia)?\.?\s*[:=#]?\s*([0-9a-f]{8})\b",
+        lambda m: "" if (m.group(1) or m.group(2) or "").lower() in refs else m.group(0),
+        message,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r" +([,.;:!?])", r"\1", cleaned)
+
+
+def photo_choice_message(products: list) -> str:
+    """Pidió fotos y no queda claro de cuál: preguntar antes que decir «Mira 👇» y no mandar nada."""
+    names = [p.name for p in products if p.photos][:6]
+    listed = ", ".join(names[:-1]) + f" o {names[-1]}" if len(names) > 1 else names[0]
+    return f"¡Claro! ¿De cuál quieres ver fotos: {listed}? 📸"
 
 
 def asks_to_resend(client_text: str) -> bool:
     """«No me llegó», «mándamelo de nuevo», «???»: el cliente no tiene lo que le prometimos."""
     return bool(_RESEND_RE.search(_plain(client_text)))
+
+
+def wants_photos_again(client_text: str, reply: "AiGeneratedReply", *, conversation_id, asked_at: float) -> bool:
+    """«No me llegó», o vuelve a pedir las fotos después de recibirlas: salen otra vez.
+    Un reintento de la misma respuesta no las repite."""
+    if asks_to_resend(client_text):
+        return True
+    if not (reply.photo_ref and _ASKS_PHOTO_RE.search(_plain(client_text))):
+        return False
+    sent_at = photos_sent_at(conversation_id, reply.photo_ref)
+    return sent_at is not None and sent_at < asked_at
 
 
 def _strip_json_fence(text: str) -> str:
@@ -563,6 +629,14 @@ def _photos_sent_key(conversation_id, ref: str) -> str:
     return f"ai:product_photos_sent:{conversation_id}:{ref}"
 
 
+def photos_sent_at(conversation_id, ref: str) -> Optional[float]:
+    try:
+        raw = get_redis().get(_photos_sent_key(conversation_id, ref))
+        return float(raw) if raw is not None else None
+    except Exception:
+        return None
+
+
 def send_product_photos(
     db: Session,
     *,
@@ -603,7 +677,7 @@ def send_product_photos(
             log.exception("Error enviando foto de producto conv=%s ref=%s", conversation.id, ref)
     if sent:
         try:
-            get_redis().set(key, "1", ex=SHORTCUT_RESEND_GUARD_SECONDS)
+            get_redis().set(key, str(time.time()), ex=SHORTCUT_RESEND_GUARD_SECONDS)
         except Exception:
             pass
         log.info("IA envió %s fotos de %s conv=%s", sent, product.name, conversation.id)

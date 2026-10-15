@@ -135,6 +135,7 @@ class InterestAlertSettings(BaseModel):
 
 class InterestAlertResponse(InterestAlertSettings):
     pending_count: int = 0
+    warning: Optional[str] = None
 
 
 class FollowupSettings(BaseModel):

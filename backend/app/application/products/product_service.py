@@ -254,8 +254,9 @@ def products_prompt_block(products: list[Product], *, selling: bool) -> str:
     if any(p.photos for p in products):
         rules.append(
             "- Fotos: si piden fotos o ver un producto marcado con 📷, pon su ref en photo_ref y escribe algo breve "
-            "(«¡Claro! Mira 👇»): las fotos salen aparte con el nombre y el precio. Si ya las enviaste en este chat, "
-            "no las repitas salvo que las pidan de nuevo."
+            "(«¡Claro! Mira 👇»): las fotos salen aparte con el nombre y el precio. Si piden «fotos» sin decir de "
+            "cuál, son del producto del que vienen hablando; si no hablaban de ninguno, pregunta de cuál. "
+            "Si ya las enviaste en este chat, no las repitas salvo que las pidan de nuevo."
         )
     rules.append(
         "- Si piden fotos de algo sin 📷 y ningún atajo las tiene, no prometas enviarlas: descríbelo con lo que "
@@ -267,7 +268,8 @@ def products_prompt_block(products: list[Product], *, selling: bool) -> str:
             '[{"ref":"<ref>","qty":<cantidad>}].'
         )
     return (
-        "\n\nProductos del negocio (ref | nombre | precio | disponibilidad | detalles):\n"
+        "\n\nProductos del negocio (ref | nombre | precio | disponibilidad | detalles). La ref es interna: "
+        "nunca la escribas en el mensaje al cliente:\n"
         + "\n".join(lines)
         + "\n"
         + "\n".join(rules)

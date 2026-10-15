@@ -24,6 +24,7 @@ from app.application.ai.ai_conversation_service import (
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode
 from app.application.ai.ai_qualify_service import CLOSING_HOLD_REPLIES, build_qualify_system_prompt
 from app.application.appointments.appointment_service import BOGOTA
+from app.application.orders.order_service import has_recent_purchase
 from app.domain.entities import Conversation, Message, Tenant, TenantProfile
 from app.domain.entities.enums import (
     ConversationInterest,
@@ -52,6 +53,7 @@ SEND_GAP_SECONDS = (8, 20)
 LOCK_TTL_SECONDS = 15 * 60
 HISTORY_TURNS = 12
 SKIP = "NO"
+PURCHASE_QUIET = timedelta(days=3)
 
 _ENDED_REPLIES = frozenset(CLOSING_HOLD_REPLIES)
 
@@ -131,6 +133,9 @@ def due_followups(db: Session, tenant: Tenant, now: datetime) -> list[Conversati
         if not should_ai_respond(tenant, conversation) or is_alert_phone(tenant, conversation.contact_phone):
             continue
         if _awaiting_human_since(conversation.id) is not None:
+            continue
+        # Ya compró (o se le avisó el despacho): insistirle sería venderle lo mismo otra vez.
+        if has_recent_purchase(db, conversation.id, now - PURCHASE_QUIET):
             continue
         due.append(conversation)
     return due

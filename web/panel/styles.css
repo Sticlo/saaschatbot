@@ -2632,6 +2632,98 @@ textarea { resize: vertical; min-height: 44px; }
   max-width: 920px;
 }
 
+.alert-warning {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.orders-panel .ai-shortcuts-card:first-of-type { margin-top: 0; }
+.orders-count { color: var(--muted); font-weight: 500; }
+
+.orders-list {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+}
+
+.order-card {
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.order-card.is-cancelled { opacity: 0.55; }
+.order-card.is-cancelled .order-head strong { text-decoration: line-through; }
+
+.order-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.order-head strong { line-height: 1.35; }
+.order-head .muted.small { margin: 0; white-space: nowrap; }
+
+.order-who {
+  margin: 0.3rem 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.order-flag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--warning);
+  border: 1px solid currentColor;
+}
+
+.order-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.35rem 1rem;
+  margin: 0.6rem 0 0;
+}
+
+.order-details dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.order-details dd { margin: 0.1rem 0 0; font-size: 0.88rem; }
+
+.order-dispatch {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.order-dispatch input[type="text"] {
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font: inherit;
+}
+
+.order-dispatch label { font-size: 0.88rem; display: flex; gap: 0.45rem; align-items: center; }
+.order-card .alert-actions { margin-top: 0.7rem; }
+.order-dispatch .alert-actions { margin-top: 0; }
+.order-dispatch input[type="checkbox"] { accent-color: var(--accent); }
+
 .products-summary {
   margin: 0.15rem 0 0.35rem;
   font-size: 0.88rem;

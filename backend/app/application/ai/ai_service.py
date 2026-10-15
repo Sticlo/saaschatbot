@@ -56,10 +56,13 @@ from app.application.ai.ai_shortcut_service import (
     AiGeneratedReply,
     OrderSummary,
     annotate_sent_shortcuts,
-    asks_to_resend,
     infer_photo_ref,
     infer_promised_shortcut,
+    photo_choice_message,
     send_reply_with_shortcut,
+    shows_photos,
+    wants_photos_again,
+    without_internal_refs,
 )
 from app.application.appointments.appointment_service import (
     BOGOTA,
@@ -91,6 +94,7 @@ from app.application.messaging.message_service import (
 )
 from app.application.outbound.outbound_dedup_service import mark_phone_excluded
 from app.application.outbound.quick_shortcut_service import get_shortcuts
+from app.application.orders.order_service import orders_prompt_block, record_ai_order
 from app.application.products.product_service import StockChange, list_products, reserve_order_stock
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
 from app.application.whatsapp.whatsapp_service import send_text_message
@@ -1040,7 +1044,12 @@ def _send_generated_reply(
             session=session,
             conversation=conversation,
             reply=reply,
-            allow_resend=asks_to_resend(_turn_text(message)),
+            allow_resend=wants_photos_again(
+                _turn_text(message),
+                reply,
+                conversation_id=conversation.id,
+                asked_at=message.created_at.timestamp() if message.created_at else 0.0,
+            ),
         )
     except Exception as exc:
         log.exception("Error enviando respuesta IA conv=%s", conversation.id)
@@ -1413,11 +1422,16 @@ def _deliver_reply(
             log.warning("IA dijo que agendó con la agenda apagada; se pasa al equipo conv=%s", conversation.id)
             reply = replace(reply, message=BOOKING_HANDOFF_MESSAGE, book_slot=None, stage=STAGE_CLOSING)
 
-    if reply.photo_ref is None and reply.shortcut_id is None:
-        shown = infer_photo_ref(reply.message, _turn_text(message), products or [])
+    if reply.photo_ref is None and reply.shortcut_id is None and shows_photos(reply.message, _turn_text(message)):
+        shown = infer_photo_ref(
+            reply.message, _turn_text(message), products or [], _recent_texts(db, conversation.id)
+        )
         if shown:
             log.info("IA dijo que mostraba fotos sin photo_ref; se adjuntan conv=%s", conversation.id)
             reply = replace(reply, photo_ref=shown)
+        elif any(p.photos for p in products or []):
+            log.info("IA dijo que mostraba fotos sin decir de cuál; se pregunta conv=%s", conversation.id)
+            reply = replace(reply, message=photo_choice_message(products or []))
     if reply.shortcut_id is None and reply.photo_ref is None:
         promised = infer_promised_shortcut(reply.message, _turn_text(message), shortcuts)
         if promised:
@@ -1425,7 +1439,7 @@ def _deliver_reply(
             reply = replace(reply, shortcut_id=promised)
 
     # Solo cambia lo que lee el cliente: la etapa se decide con la promesa original (avisa al dueño).
-    outgoing = replace(reply, message=without_wait_promise(reply.message))
+    outgoing = replace(reply, message=without_internal_refs(without_wait_promise(reply.message), products or []))
     if outgoing.message != reply.message:
         log.info("IA prometió responder en minutos; se quita la promesa conv=%s", conversation.id)
 
@@ -1461,6 +1475,7 @@ def _deliver_reply(
     selling = bool(payment_methods_of(tenant.profile))
     stage = _resolve_stage(reply, message=message, shortcuts=shortcuts, booking=booking, selling=selling)
     if selling and reply.order is not None:
+        _save_order(db, tenant, conversation, reply.order)
         _alert_order(tenant, conversation, reply.order, _reserve_stock_once(db, tenant, conversation, reply.order))
         stage = _max_stage(stage, STAGE_INTERESTED)
     _apply_stage(
@@ -1509,6 +1524,18 @@ def _record_missing_info(
             f"Abrir panel: {_panel_link()}"
         ),
     )
+
+
+def _save_order(db: Session, tenant: Tenant, conversation: Conversation, order: OrderSummary) -> None:
+    try:
+        saved = record_ai_order(db, tenant, conversation, order)
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("No se pudo guardar el pedido conv=%s", conversation.id)
+        return
+    if saved is not None:
+        publish_panel_event(tenant.id, {"type": "orders.updated"})
 
 
 def _reserve_stock_once(
@@ -1621,6 +1648,17 @@ def _client_is_waiting_on_us(db: Session, conversation_id: uuid.UUID, message: M
         return False
     body = last_bot[0] or ""
     return "?" in body or promises_follow_up(body)
+
+
+def _recent_texts(db: Session, conversation_id: uuid.UUID, limit: int = 8) -> tuple[str, ...]:
+    rows = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return tuple(t for t in (text_for_ai(m).strip() for m in rows) if t)
 
 
 def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
@@ -1820,7 +1858,7 @@ def _process_qualify(
             shortcuts=shortcuts,
             booking=booking,
             products=products,
-            knowledge=learned_answers_block(db, tenant.id),
+            knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
         )
     except DeepSeekError as exc:
         log.warning("IA qualify sin respuesta conv=%s: %s", conversation.id, exc)
@@ -1909,7 +1947,7 @@ def _process_full_reply(
             shortcuts=shortcuts,
             booking=booking,
             products=products,
-            knowledge=learned_answers_block(db, tenant.id),
+            knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
         )
     except DeepSeekError as exc:
         log.warning("IA sin respuesta conv=%s: %s", conversation.id, exc)

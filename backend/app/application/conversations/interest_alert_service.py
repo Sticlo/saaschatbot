@@ -89,6 +89,26 @@ def alert_phones(profile: Optional[TenantProfile], *, sales: bool = False) -> li
     ]
 
 
+OWN_NUMBER_WARNING = (
+    "Ese es el número de WhatsApp de tu negocio: los avisos te llegarían como un mensaje a ti mismo, "
+    "sin notificación, y no te enterarías. Pon tu número personal o el de quien atiende."
+)
+
+
+def business_phone(session: Optional[WhatsAppSession]) -> str:
+    if session is None:
+        return ""
+    return session.phone_number or (session.bound_owner_jid or "").split("@")[0].split(":")[0]
+
+
+def own_number_recipients(recipients: list[dict], session: Optional[WhatsAppSession]) -> list[dict]:
+    """Los avisos salen del WhatsApp del negocio: mandárselos a ese mismo número no suena en ningún lado."""
+    own = business_phone(session)
+    if not own:
+        return []
+    return [r for r in recipients if phone_match_tail(r.get("phone") or "", own)]
+
+
 def is_alert_phone(tenant: Tenant, phone: str) -> bool:
     if not phone:
         return False

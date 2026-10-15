@@ -21,6 +21,7 @@ from app.domain.entities.enums import (
 )
 from app.domain.entities.bait_template import BaitTemplate
 from app.domain.entities.legal_consent import LegalConsent
+from app.domain.entities.order import Order
 from app.domain.entities.outbound import Campaign, Exclusion, Lead, SendQueueItem
 from app.domain.entities.plan import DEFAULT_PLAN_ID, Plan
 from app.domain.entities.product import Product
@@ -52,6 +53,7 @@ __all__ = [
     "MessageDirection",
     "MessageSource",
     "MessageStatus",
+    "Order",
     "Plan",
     "Product",
     "SendQueueStatus",

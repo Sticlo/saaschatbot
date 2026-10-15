@@ -255,7 +255,7 @@ def test_interest_alert_settings_api(client: TestClient):
 
     r = client.get("/api/v1/tenants/me/interest-alert", headers=headers)
     assert r.status_code == 200, r.text
-    assert r.json() == {"recipients": [], "alert_threshold": 10, "pending_count": 0}
+    assert r.json() == {"recipients": [], "alert_threshold": 10, "pending_count": 0, "warning": None}
 
     r = client.put(
         "/api/v1/tenants/me/interest-alert",
@@ -285,3 +285,33 @@ def test_interest_alert_settings_api(client: TestClient):
     r = client.post("/api/v1/tenants/me/interest-alert/test", headers=headers)
     assert r.status_code == 400
     assert "WhatsApp" in r.json()["detail"]
+
+
+@requires_db
+def test_alerts_to_the_business_own_number_are_flagged(client: TestClient):
+    """Alfa_Store puso el número del negocio: los avisos le llegaban como mensaje a sí misma, sin sonar."""
+    from app.domain.entities import TenantProfile, WhatsAppSession
+    from app.infrastructure.persistence.database import SessionLocal
+
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    tenant_id = uuid.UUID(client.get("/api/v1/tenants/me", headers=headers).json()["id"])
+    with SessionLocal() as db:
+        db.add(WhatsAppSession(tenant_id=tenant_id, instance_name=f"i_{uuid.uuid4().hex[:8]}", phone_number="+573001234567"))
+        profile = db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).first()
+        if profile is None:
+            profile = TenantProfile(tenant_id=tenant_id)
+            db.add(profile)
+        profile.alert_recipients = [{"name": "Yo", "phone": "+573001234567", "scope": "all"}]
+        db.commit()
+
+    r = client.get("/api/v1/tenants/me/interest-alert", headers=headers)
+    assert "número de WhatsApp de tu negocio" in r.json()["warning"]
+
+    same = {"recipients": [{"name": "Yo", "phone": "+57 300 123 4567", "scope": "all"}], "alert_threshold": 10}
+    r = client.put("/api/v1/tenants/me/interest-alert", json=same, headers=headers)
+    assert r.status_code == 422 and "sin notificación" in r.json()["detail"]
+
+    personal = {"recipients": [{"name": "Yo", "phone": "+57 300 999 8877", "scope": "all"}], "alert_threshold": 10}
+    r = client.put("/api/v1/tenants/me/interest-alert", json=personal, headers=headers)
+    assert r.status_code == 200 and r.json()["warning"] is None

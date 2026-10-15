@@ -68,6 +68,20 @@ def _prepare_test_database() -> bool:
 
 _DB_READY = _prepare_test_database()
 
+
+def _flush_test_redis() -> None:
+    """Una corrida cortada deja trabajos de IA en cola: los workers de la siguiente los atenderían
+    con la IA real y mandarían a WhatsApp, enredando otras pruebas."""
+    import redis
+
+    try:
+        redis.Redis.from_url(settings.redis_url).flushdb()
+    except Exception as exc:
+        print(f"[tests] No se pudo limpiar Redis de pruebas: {exc}")
+
+
+_flush_test_redis()
+
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 

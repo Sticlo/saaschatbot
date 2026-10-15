@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -15,7 +16,7 @@ from app.application.ai.ai_shortcut_service import (
     reply_format_instruction,
 )
 from app.application.products.product_service import product_ref, products_prompt_block
-from app.domain.entities import Product
+from app.domain.entities import Message, Product
 from tests.conftest import requires_db
 from tests.test_phase1 import _register
 from tests.test_sales_stage_and_booking import _run, _seed
@@ -61,6 +62,44 @@ def test_photos_are_attached_when_the_ai_forgets_the_ref():
     assert infer_photo_ref("La suite tiene jacuzzi y vista al mar", "¿Tienes fotos de la suite?", products) is None
     # Si no queda claro de cuál, mejor nada.
     assert infer_photo_ref("¡Claro! Mira 👇", "¿Tienes fotos?", products) is None
+
+
+def test_plain_fotos_are_of_the_product_they_were_talking_about():
+    """Alfa_Store: pidió «Fotos» tras ver el catálogo, la IA dijo «Mira 👇» tres veces y no salió nada."""
+    from app.application.ai.ai_shortcut_service import photo_choice_message, wants_photos_again
+
+    ropa = _product("Ropa Unisex", ["assets/t/a.jpg"], 60000)
+    buzos = _product("Buzos hombre", ["assets/t/b.jpg"], 60000)
+    products = [ropa, buzos]
+    catalog = "¡Con gusto! Mira un adelanto 👇 - Ropa Unisex | $60.000 | tallas S, M, L ¿Te la muestro en fotos?"
+
+    assert infer_photo_ref("¡Claro! Mira 👇", "Fotos", products, ("Fotos", catalog)) == product_ref(ropa)
+    assert infer_photo_ref("¡Claro! Mira 👇", "Foto ?", products, ("Foto ?", "¡Perfecto! La talla M", "M", catalog)) == (
+        product_ref(ropa)
+    )
+    # «??» reclamando las fotos prometidas, con la ref que la IA escribió en el texto.
+    promised = f"Ahí te van las fotos de nuestra Ropa Unisex (ref {product_ref(ropa)}) 😊"
+    assert infer_photo_ref(promised, "??", products) == product_ref(ropa)
+    assert infer_photo_ref("¡Claro! Mira 👇", "fotos de los buzos", products, (catalog,)) == product_ref(buzos)
+    # Con un solo producto con fotos no hay duda.
+    assert infer_photo_ref("¡Claro! Mira 👇", "¿Tienes fotos?", [ropa, _product("Gorra")]) == product_ref(ropa)
+
+    assert photo_choice_message(products) == "¡Claro! ¿De cuál quieres ver fotos: Ropa Unisex o Buzos hombre? 📸"
+    assert wants_photos_again("no me llegó", AiGeneratedReply(message="Mira 👇"), conversation_id=uuid.uuid4(), asked_at=0)
+    assert not wants_photos_again("Foto ?", AiGeneratedReply(message="¿De cuál?"), conversation_id=uuid.uuid4(), asked_at=0)
+
+
+def test_the_client_never_sees_the_internal_ref():
+    from app.application.ai.ai_shortcut_service import without_internal_refs
+
+    ropa = _product("Ropa Unisex", ["assets/t/a.jpg"], 60000)
+    ref = product_ref(ropa)
+    assert without_internal_refs(f"Fotos de nuestra Ropa Unisex (ref {ref}), en talla M.", [ropa]) == (
+        "Fotos de nuestra Ropa Unisex, en talla M."
+    )
+    assert without_internal_refs(f"La Ropa Unisex ref={ref} vale $60.000", [ropa]) == "La Ropa Unisex vale $60.000"
+    # Una referencia del negocio que no es nuestra ref se queda.
+    assert without_internal_refs("Es la referencia 20491234", [ropa]) == "Es la referencia 20491234"
 
 
 @pytest.fixture
@@ -165,3 +204,69 @@ def test_ai_sends_the_product_photos(_sleep, mock_generate, mock_text, mock_imag
         mock_generate.return_value = AiGeneratedReply(message="Ahí te las dejé 👆", photo_ref=product_ref(suite))
         assert _run(db, tenant, conv, msg) is True
         assert mock_image.call_count == 2
+
+        # Si el cliente las vuelve a pedir después de recibirlas, salen otra vez.
+        again = Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction="in",
+            source="contact",
+            body="Foto ?",
+            status="received",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=5),
+        )
+        db.add(again)
+        db.commit()
+        mock_generate.return_value = AiGeneratedReply(message="¡Claro! Mira 👇", photo_ref=product_ref(suite))
+        assert _run(db, tenant, conv, again) is True
+        assert mock_image.call_count == 4
+
+
+@requires_db
+@patch("app.application.ai.ai_shortcut_service.send_image_message")
+@patch("app.application.ai.ai_shortcut_service.send_text_message")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_plain_fotos_never_end_in_an_empty_mira(_sleep, mock_generate, mock_text, mock_image):
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="Fotos")
+        ropa = Product(tenant_id=tenant.id, name="Ropa Unisex", price_cop=60000, photos=[f"assets/{tenant.id}/a.jpg"])
+        buzos = Product(tenant_id=tenant.id, name="Buzos hombre", price_cop=60000, photos=[f"assets/{tenant.id}/b.jpg"])
+        db.add_all([ropa, buzos])
+        db.commit()
+
+        # Sin haber hablado de ningún producto: se pregunta de cuál en vez de un «Mira 👇» vacío.
+        mock_generate.return_value = AiGeneratedReply(message="¡Claro! Mira 👇")
+        assert _run(db, tenant, conv, msg) is True
+        assert mock_text.call_args.kwargs["text"] == "¡Claro! ¿De cuál quieres ver fotos: Ropa Unisex o Buzos hombre? 📸"
+        assert mock_image.call_count == 0
+
+        db.add(
+            Message(
+                tenant_id=tenant.id,
+                conversation_id=conv.id,
+                direction="out",
+                source="bot",
+                body="Tenemos la Ropa Unisex a $60.000 en tallas S a XL",
+                status="sent",
+                created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+            )
+        )
+        again = Message(
+            tenant_id=tenant.id,
+            conversation_id=conv.id,
+            direction="in",
+            source="contact",
+            body="Foto ?",
+            status="received",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=4),
+        )
+        db.add(again)
+        db.commit()
+        ref = product_ref(ropa)
+        mock_generate.return_value = AiGeneratedReply(message=f"¡Claro! Mira 👇 (ref {ref})")
+        assert _run(db, tenant, conv, again) is True
+        assert mock_text.call_args.kwargs["text"] == "¡Claro! Mira 👇"
+        assert [c.kwargs["image_path"] for c in mock_image.call_args_list] == ropa.photos

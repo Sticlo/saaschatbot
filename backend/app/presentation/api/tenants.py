@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.shared.core.deps import RequireOwner, RequireViewer
 from app.infrastructure.persistence.database import get_db
-from app.domain.entities import Tenant, TenantProfile
+from app.domain.entities import Tenant, TenantProfile, WhatsAppSession
 from app.infrastructure.cache.redis_client import cache_delete, tenant_cache_key
 from app.presentation.schemas.auth import (
     FollowupSettings,
@@ -130,16 +131,25 @@ def update_profile(
     return profile
 
 
+def _whatsapp_session(db: Session, tenant_id) -> Optional[WhatsAppSession]:
+    return db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
+
+
 def _interest_alert_response(db: Session, profile: TenantProfile) -> InterestAlertResponse:
     from app.application.conversations.interest_alert_service import (
+        OWN_NUMBER_WARNING,
         alert_recipients,
+        own_number_recipients,
         unanswered_interested_conversations,
     )
 
+    recipients = alert_recipients(profile)
+    own = own_number_recipients(recipients, _whatsapp_session(db, profile.tenant_id))
     return InterestAlertResponse(
-        recipients=alert_recipients(profile),
+        recipients=recipients,
         alert_threshold=profile.alert_threshold,
         pending_count=len(unanswered_interested_conversations(db, profile.tenant_id)),
+        warning=OWN_NUMBER_WARNING if own else None,
     )
 
 
@@ -158,14 +168,18 @@ def update_interest_alert(
     db: Session = Depends(get_db),
 ):
     from app.application.conversations.interest_alert_service import (
+        OWN_NUMBER_WARNING,
         InterestAlertError,
         normalize_alert_recipients,
+        own_number_recipients,
     )
 
     try:
         recipients = normalize_alert_recipients([r.model_dump() for r in body.recipients])
     except InterestAlertError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    if own_number_recipients(recipients, _whatsapp_session(db, current.tenant_id)):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=OWN_NUMBER_WARNING)
 
     profile = get_or_create_tenant_profile(db, current.tenant_id)
     profile.alert_recipients = recipients

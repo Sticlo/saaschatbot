@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=61" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=62" />
 </head>
 <body>
   <div id="app">
@@ -139,6 +139,7 @@
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
             <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
+            <button type="button" id="mode-orders" class="sidebar-mode-tab hidden">Pedidos <span id="orders-badge" class="tab-count-badge hidden" title="Pedidos listos para despachar">0</span></button>
             <button type="button" id="mode-appointments" class="sidebar-mode-tab">Citas</button>
             <button type="button" id="mode-inventory" class="sidebar-mode-tab">Inventario</button>
             <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA <span id="ai-questions-badge" class="tab-count-badge hidden" title="Preguntas que la IA no supo responder">0</span></button>
@@ -393,6 +394,7 @@
                 <span class="ai-field-hint">Con indicativo. Hasta 5: tú, el encargado o quienes despachan.</span>
               </div>
               <div id="alert-recipients" class="alert-recipients"></div>
+              <p id="alert-warning" class="alert-warning hidden" role="alert"></p>
               <button type="button" id="alert-add-btn" class="btn ghost small alert-add-btn">+ Agregar otro número</button>
               <div class="alert-settings-row">
                 <label class="ai-field">
@@ -428,6 +430,41 @@
               </label>
               <p id="followup-status" class="ai-save-status muted small"></p>
             </section>
+          </div>
+
+          <div id="orders-panel" class="appointments-panel orders-panel hidden">
+            <header class="appointments-hero">
+              <h2>Pedidos</h2>
+              <p>Lo que la IA ya vendió. Tú solo despachas: al marcarlo despachado, le avisamos al cliente por WhatsApp.</p>
+            </header>
+
+            <section class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Listos para despachar <span id="orders-ready-count" class="orders-count"></span></h3>
+                <p class="muted small">Pagados o contraentrega. Si dice <strong>comprobante sin verificar</strong>, revisa que la plata sí te haya llegado antes de enviarlo.</p>
+              </div>
+              <div id="orders-ready" class="orders-list"></div>
+              <p id="orders-ready-empty" class="muted small hidden">Nada pendiente por despachar.</p>
+            </section>
+
+            <section class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Esperando el pago <span id="orders-pending-count" class="orders-count"></span></h3>
+                <p class="muted small">La IA ya cerró la venta y le pasó tus datos de pago. Cuando el cliente mande el comprobante, pasa solo a <strong>Listos para despachar</strong>.</p>
+              </div>
+              <div id="orders-pending" class="orders-list"></div>
+              <p id="orders-pending-empty" class="muted small hidden">Ningún pago pendiente.</p>
+            </section>
+
+            <section class="ai-shortcuts-card">
+              <div class="ai-shortcuts-card-head">
+                <h3>Despachados</h3>
+                <p class="muted small">Los del último mes.</p>
+              </div>
+              <div id="orders-done" class="orders-list"></div>
+              <p id="orders-done-empty" class="muted small hidden">Todavía no has despachado nada.</p>
+            </section>
+            <p id="orders-status" class="ai-save-status muted small"></p>
           </div>
 
           <div id="inventory-panel" class="appointments-panel inventory-panel hidden">
@@ -753,6 +790,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=135"></script>
+  <script src="/static/panel/app.js?v=136"></script>
 </body>
 </html>
