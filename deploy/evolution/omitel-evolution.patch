@@ -14,7 +14,7 @@ index 207d8ba..43ddfad 100644
      return await this.waMonitor.waInstances[instanceName].sendPresence(data);
    }
 diff --git a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
-index 10feb7c..400f7af 100644
+index 10feb7c..ef3abb6 100644
 --- a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
 +++ b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
 @@ -227,6 +227,7 @@ export class BaileysStartupService extends ChannelStartupService {
@@ -68,7 +68,21 @@ index 10feb7c..400f7af 100644
        } else {
          this.instance.qrcode.pairingCode = null;
        }
-@@ -692,6 +717,10 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -665,7 +690,13 @@ export class BaileysStartupService extends ChannelStartupService {
+         return isGroupJid || isBroadcast || isNewsletter;
+       },
+       syncFullHistory: this.localSettings.syncFullHistory,
++      // Solo se vincula de ahí en adelante: el historial de mensajes (RECENT=3, FULL=2, ON_DEMAND=6)
++      // de cuentas con miles de chats deja la vinculación cargando. Apagarlo todo pierde los LID
++      // que trae INITIAL_BOOTSTRAP y Baileys queda inestable.
+       shouldSyncHistoryMessage: (msg: proto.Message.IHistorySyncNotification) => {
++        if ([2, 3, 6].includes(Number(msg?.syncType))) {
++          return false;
++        }
+         return this.historySyncNotification(msg);
+       },
+       cachedGroupMetadata: this.getGroupMetadataCache,
+@@ -692,6 +723,10 @@ export class BaileysStartupService extends ChannelStartupService {
  
      this.endSession = false;
  
@@ -79,7 +93,7 @@ index 10feb7c..400f7af 100644
      this.client = makeWASocket(socketConfig);
  
      if (this.localSettings.wavoipToken && this.localSettings.wavoipToken.length > 0) {
-@@ -757,19 +786,28 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -757,19 +792,28 @@ export class BaileysStartupService extends ChannelStartupService {
  
        const chatsToInsert = chats
          .filter((chat) => !existingChatIdSet?.has(chat.id))
@@ -115,7 +129,7 @@ index 10feb7c..400f7af 100644
              skipDuplicates: true,
            });
        }
-@@ -785,7 +823,13 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -785,7 +829,13 @@ export class BaileysStartupService extends ChannelStartupService {
        >[],
      ) => {
        const chatsRaw = chats.map((chat) => {
@@ -130,7 +144,7 @@ index 10feb7c..400f7af 100644
        });
  
        this.sendDataWebhook(Events.CHATS_UPDATE, chatsRaw);
-@@ -985,24 +1029,20 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -985,24 +1035,20 @@ export class BaileysStartupService extends ChannelStartupService {
            }
          }
  
@@ -163,7 +177,7 @@ index 10feb7c..400f7af 100644
            });
          }
  
-@@ -1010,7 +1050,11 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -1010,7 +1056,11 @@ export class BaileysStartupService extends ChannelStartupService {
  
          if (this.configService.get<Database>('DATABASE').SAVE_DATA.HISTORIC) {
            await this.prismaRepository.chat.createMany({
@@ -176,7 +190,7 @@ index 10feb7c..400f7af 100644
              skipDuplicates: true,
            });
          }
-@@ -2096,7 +2140,12 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -2096,7 +2146,12 @@ export class BaileysStartupService extends ChannelStartupService {
    ) {
      const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
  
@@ -190,7 +204,7 @@ index 10feb7c..400f7af 100644
        throw new BadRequestException(isWA);
      }
  
-@@ -3350,6 +3399,16 @@ export class BaileysStartupService extends ChannelStartupService {
+@@ -3350,6 +3405,16 @@ export class BaileysStartupService extends ChannelStartupService {
      const verify = await this.client.onWhatsApp(...filteredNumbers);
      const users: OnWhatsAppDto[] = await Promise.all(
        jids.users.map(async (user) => {

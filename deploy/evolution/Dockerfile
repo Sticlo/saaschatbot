@@ -3,6 +3,9 @@
 # regenerarlo con: git -C whatsapp/evolution-api diff > deploy/evolution/omitel-evolution.patch
 FROM node:20-alpine AS builder
 
+# Se compila en el mismo droplet de producción: sin tope, tsc/tsup agotan la RAM y tumban la app.
+ENV NODE_OPTIONS=--max-old-space-size=1280
+
 RUN apk add --no-cache git ffmpeg wget curl bash openssl dos2unix
 
 # El lockfile apunta al fork de Baileys por ssh; en la imagen no hay llaves, se baja por https.

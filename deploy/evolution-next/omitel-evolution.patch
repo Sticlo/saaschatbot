@@ -1,0 +1,229 @@
+diff --git a/src/api/controllers/chat.controller.ts b/src/api/controllers/chat.controller.ts
+index 22e90b9..1616f7d 100644
+--- a/src/api/controllers/chat.controller.ts
++++ b/src/api/controllers/chat.controller.ts
+@@ -70,6 +70,10 @@ export class ChatController {
+     return await this.waMonitor.waInstances[instanceName].fetchChats(query);
+   }
+ 
++  public async fetchChatStates({ instanceName }: InstanceDto) {
++    return await this.waMonitor.waInstances[instanceName].fetchChatStates();
++  }
++
+   public async findChatByRemoteJid({ instanceName }: InstanceDto, remoteJid: string) {
+     return await this.waMonitor.waInstances[instanceName].findChatByRemoteJid(remoteJid);
+   }
+diff --git a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
+index 60e857f..07e7053 100644
+--- a/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
++++ b/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts
+@@ -248,6 +248,7 @@ export class BaileysStartupService extends ChannelStartupService {
+   private authStateProvider: AuthStateProvider;
+   private readonly msgRetryCounterCache: CacheStore = new NodeCache();
+   private readonly userDevicesCache: CacheStore = new NodeCache({ stdTTL: 300000, useClones: false });
++  private readonly chatStateCache = new Map<string, { archived: boolean; name?: string }>();
+   private endSession = false;
+   private logBaileys = this.configService.get<Log>('LOG').BAILEYS;
+   private eventProcessingQueue: Promise<void> = Promise.resolve();
+@@ -264,6 +265,26 @@ export class BaileysStartupService extends ChannelStartupService {
+     return this.stateConnection;
+   }
+ 
++  private rememberChatState(chat: { id?: string; name?: string; archived?: boolean }) {
++    const remoteJid = chat?.id;
++    if (!remoteJid) {
++      return;
++    }
++    const prev = this.chatStateCache.get(remoteJid) || { archived: false };
++    this.chatStateCache.set(remoteJid, {
++      archived: chat.archived ?? prev.archived ?? false,
++      name: chat.name ?? prev.name,
++    });
++  }
++
++  public fetchChatStates() {
++    return Array.from(this.chatStateCache.entries()).map(([remoteJid, state]) => ({
++      remoteJid,
++      archived: !!state.archived,
++      name: state.name,
++    }));
++  }
++
+   public async logoutInstance() {
+     this.messageProcessor.onDestroy();
+     await this.client?.logout('Log out instance: ' + this.instanceName);
+@@ -372,9 +393,13 @@ export class BaileysStartupService extends ChannelStartupService {
+         color: { light: '#ffffff', dark: color },
+       };
+ 
++      // Pedir otro código invalida el anterior: con uno nuevo en cada QR (cada 45 s) no alcanza
++      // a escribirse en el celular. Se pide una vez por conexión.
+       if (this.phoneNumber) {
+-        await delay(1000);
+-        this.instance.qrcode.pairingCode = await this.client.requestPairingCode(this.phoneNumber);
++        if (!this.instance.qrcode.pairingCode) {
++          await delay(1000);
++          this.instance.qrcode.pairingCode = await this.client.requestPairingCode(this.phoneNumber);
++        }
+       } else {
+         this.instance.qrcode.pairingCode = null;
+       }
+@@ -668,7 +693,13 @@ export class BaileysStartupService extends ChannelStartupService {
+         return isGroupJid || isBroadcast || isNewsletter;
+       },
+       syncFullHistory: this.localSettings.syncFullHistory,
++      // Solo se vincula de ahí en adelante: el historial de mensajes (RECENT=3, FULL=2, ON_DEMAND=6)
++      // de cuentas con miles de chats deja la vinculación cargando. Apagarlo todo pierde los LID
++      // que trae INITIAL_BOOTSTRAP y Baileys queda inestable.
+       shouldSyncHistoryMessage: (msg: proto.Message.IHistorySyncNotification) => {
++        if ([2, 3, 6].includes(Number(msg?.syncType))) {
++          return false;
++        }
+         return this.historySyncNotification(msg);
+       },
+       cachedGroupMetadata: this.getGroupMetadataCache,
+@@ -695,6 +726,10 @@ export class BaileysStartupService extends ChannelStartupService {
+ 
+     this.endSession = false;
+ 
++    if (this.instance.qrcode) {
++      this.instance.qrcode.pairingCode = null;
++    }
++
+     this.client = makeWASocket(socketConfig);
+ 
+     if (this.localSettings.wavoipToken && this.localSettings.wavoipToken.length > 0) {
+@@ -759,18 +794,30 @@ export class BaileysStartupService extends ChannelStartupService {
+ 
+       const chatsToInsert = chats
+         .filter((chat) => !existingChatIdSet?.has(chat.id))
+-        .map((chat) => ({
+-          remoteJid: chat.id,
+-          instanceId: this.instanceId,
+-          name: chat.name,
+-          unreadMessages: chat.unreadCount !== undefined ? chat.unreadCount : 0,
+-        }));
++        .map((chat) => {
++          this.rememberChatState(chat);
++          return {
++            remoteJid: chat.id,
++            instanceId: this.instanceId,
++            name: chat.name,
++            unreadMessages: chat.unreadCount !== undefined ? chat.unreadCount : 0,
++            archived: !!chat.archived,
++          };
++        });
+ 
+       this.sendDataWebhook(Events.CHATS_UPSERT, chatsToInsert);
+ 
+       if (chatsToInsert.length > 0) {
+         if (this.configService.get<Database>('DATABASE').SAVE_DATA.CHATS)
+-          await this.prismaRepository.chat.createMany({ data: chatsToInsert, skipDuplicates: true });
++          await this.prismaRepository.chat.createMany({
++            data: chatsToInsert.map(({ remoteJid, instanceId, name, unreadMessages }) => ({
++              remoteJid,
++              instanceId,
++              name,
++              unreadMessages,
++            })),
++            skipDuplicates: true,
++          });
+       }
+     },
+ 
+@@ -782,7 +829,13 @@ export class BaileysStartupService extends ChannelStartupService {
+       >[],
+     ) => {
+       const chatsRaw = chats.map((chat) => {
+-        return { remoteJid: chat.id, instanceId: this.instanceId };
++        this.rememberChatState(chat);
++        return {
++          remoteJid: chat.id,
++          instanceId: this.instanceId,
++          archived: !!chat.archived,
++          name: chat.name,
++        };
+       });
+ 
+       this.sendDataWebhook(Events.CHATS_UPDATE, chatsRaw);
+@@ -974,25 +1027,20 @@ export class BaileysStartupService extends ChannelStartupService {
+           }
+         }
+ 
+-        const chatsRaw: { remoteJid: string; instanceId: string; name?: string }[] = [];
+-        const chatsRepository = new Set(
+-          (await this.prismaRepository.chat.findMany({ where: { instanceId: this.instanceId } })).map(
+-            (chat) => chat.remoteJid,
+-          ),
+-        );
++        const chatsRaw: { remoteJid: string; instanceId: string; name?: string; archived?: boolean }[] = [];
+ 
+         for (const chat of chats) {
+-          if (chatsRepository?.has(chat.id)) {
+-            continue;
+-          }
+-
+-          chatsRaw.push({ remoteJid: chat.id, instanceId: this.instanceId, name: chat.name });
++          this.rememberChatState(chat);
++          chatsRaw.push({ remoteJid: chat.id, instanceId: this.instanceId, name: chat.name, archived: !!chat.archived });
+         }
+ 
+         this.sendDataWebhook(Events.CHATS_SET, chatsRaw);
+ 
+         if (this.configService.get<Database>('DATABASE').SAVE_DATA.HISTORIC) {
+-          await this.prismaRepository.chat.createMany({ data: chatsRaw, skipDuplicates: true });
++          await this.prismaRepository.chat.createMany({
++            data: chatsRaw.map(({ remoteJid, instanceId, name }) => ({ remoteJid, instanceId, name })),
++            skipDuplicates: true,
++          });
+         }
+ 
+         const messagesRaw: any[] = [];
+@@ -2294,7 +2342,12 @@ export class BaileysStartupService extends ChannelStartupService {
+   ) {
+     const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
+ 
+-    if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast')) {
++    if (
++      !isWA.exists &&
++      !isJidGroup(isWA.jid) &&
++      !isWA.jid.includes('@broadcast') &&
++      !isWA.jid.toLowerCase().endsWith('@lid')
++    ) {
+       throw new BadRequestException(isWA);
+     }
+ 
+diff --git a/src/api/routes/chat.router.ts b/src/api/routes/chat.router.ts
+index 158947e..82a8733 100644
+--- a/src/api/routes/chat.router.ts
++++ b/src/api/routes/chat.router.ts
+@@ -191,6 +191,16 @@ export class ChatRouter extends RouterBroker {
+ 
+         return res.status(HttpStatus.OK).json(response);
+       })
++      .get(this.routerPath('chatStates'), ...guards, async (req, res) => {
++        const response = await this.dataValidate<InstanceDto>({
++          request: req,
++          schema: null,
++          ClassRef: InstanceDto,
++          execute: (instance) => chatController.fetchChatStates(instance),
++        });
++
++        return res.status(HttpStatus.OK).json(response);
++      })
+       .get(this.routerPath('findChatByRemoteJid'), ...guards, async (req, res) => {
+         const instance = req.params as unknown as InstanceDto;
+         const { remoteJid } = req.query as unknown as { remoteJid: string };
+diff --git a/src/api/services/channel.service.ts b/src/api/services/channel.service.ts
+index 56bec08..2853156 100644
+--- a/src/api/services/channel.service.ts
++++ b/src/api/services/channel.service.ts
+@@ -852,4 +852,8 @@ export class ChannelStartupService {
+ 
+     return mediaTypes.some((type) => msg[type] && Object.keys(msg[type]).length > 0);
+   }
++
++  public fetchChatStates() {
++    return [];
++  }
+ }
