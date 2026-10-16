@@ -421,6 +421,52 @@
     toastTimer = setTimeout(() => el.classList.remove("is-open"), duration || Math.min(7000, 2600 + text.length * 40));
   }
 
+  const SKEL_W = [62, 48, 70, 55, 40, 66, 58, 44];
+  function skeletonHtml(kind, n = 6, tag = "li") {
+    const rows = Array.from({ length: n }, (_, i) => i);
+    if (kind === "chats") {
+      return rows
+        .map(
+          (i) => `<li class="skel-row" aria-hidden="true"><span class="skel-lines">` +
+            `<span class="skel" style="width:${SKEL_W[i % 8]}%"></span>` +
+            `<span class="skel skel-sm" style="width:${SKEL_W[(i + 3) % 8] + 20}%"></span></span></li>`
+        )
+        .join("");
+    }
+    if (kind === "messages") {
+      const bubbles = [["in", 58], ["in", 38], ["out", 52], ["in", 66], ["out", 34], ["out", 48]];
+      return `<div class="skel-thread" aria-hidden="true">${bubbles
+        .map(([d, w]) => `<span class="skel skel-bubble ${d}" style="width:${w}%"></span>`)
+        .join("")}</div>`;
+    }
+    return rows
+      .map(
+        (i) => `<${tag} class="skel-card" aria-hidden="true"><span class="skel" style="width:${SKEL_W[i % 8] - 10}%"></span>` +
+          `<span class="skel skel-sm" style="width:${SKEL_W[(i + 2) % 8] + 15}%"></span></${tag}>`
+      )
+      .join("");
+  }
+
+  function showSkeleton(el, kind, n, delay = 120) {
+    if (!el) return () => {};
+    const timer = setTimeout(() => {
+      el.innerHTML = skeletonHtml(kind, n, /^(UL|OL)$/.test(el.tagName) ? "li" : "div");
+      el.setAttribute("aria-busy", "true");
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      el.removeAttribute("aria-busy");
+    };
+  }
+
+  const msgCache = new Map();
+  function cacheMessages(id, msgs) {
+    if (!id || !msgs?.length) return;
+    msgCache.delete(id);
+    msgCache.set(id, msgs);
+    if (msgCache.size > 30) msgCache.delete(msgCache.keys().next().value);
+  }
+
   function setStatusText(id, text) {
     const el = $(id);
     const msg = text || "";
@@ -580,6 +626,9 @@
     $("ai-ready-banner").classList.add("hidden");
     $("ai-questions-badge").classList.add("hidden");
     $("orders-badge").classList.add("hidden");
+    msgCache.clear();
+    state.convCache = null;
+    state.productsLoaded = false;
     $("mode-orders").classList.add("hidden");
     state.orders = [];
     $("sidebar-chats").classList.remove("hidden");
@@ -2014,6 +2063,7 @@
 
   async function fetchConversations() {
     const rows = sortConversations(await api("/conversations?archived=false"));
+    state.convCache = rows;
     if (state.chatListTab === "all") return rows;
     return rows.filter((c) => matchesInterestTab(c, state.chatListTab));
   }
@@ -2806,7 +2856,7 @@
     if ($("appointment-date")) $("appointment-date").value = iso;
 
     const list = $("appointments-slot-list");
-    if (list) list.innerHTML = '<li class="muted appointments-loading">Cargando agenda…</li>';
+    const stopSkel = showSkeleton(list, "list", 5);
     setAppointmentsStatus("");
 
     try {
@@ -2814,11 +2864,14 @@
         ? `&staff_id=${encodeURIComponent(state.appointmentsStaffId)}`
         : "";
       const day = await api(`/appointments/day?day=${encodeURIComponent(iso)}${staffParam}`);
+      stopSkel();
+      if (state.appointmentsDate !== iso) return;
       state.appointmentsDay = day;
       state.appointmentsStaffId = day.staff_id || null;
       renderStaffChips(day);
       renderAppointmentsSlots(day);
     } catch (err) {
+      stopSkel();
       if (list) {
         list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
       }
@@ -3812,11 +3865,18 @@
   }
 
   async function loadProducts() {
+    let stopSkel = () => {};
+    if (!state.productsLoaded) {
+      $("products-empty").classList.add("hidden");
+      stopSkel = showSkeleton($("products-list"), "list", 4, 0);
+    }
     try {
       state.products = await api("/products");
     } catch {
       state.products = [];
     }
+    stopSkel();
+    state.productsLoaded = true;
     renderProducts();
   }
 
@@ -4667,6 +4727,7 @@
   async function selectConversation(id) {
     pullInFlight = false;
     if (pendingImage && pendingImage.conversationId !== id) clearPendingImage();
+    if (state.activeId && state.activeId !== id) cacheMessages(state.activeId, state.messages);
     state.activeId = id;
     state.messages = [];
     state._messagesSig = "";
@@ -4689,27 +4750,39 @@
     renderConversationList();
     renderQuickShortcuts();
 
+    const cached = msgCache.get(id);
+    let stopSkel = () => {};
+    if (cached) {
+      state.messages = cached;
+      renderMessages();
+    } else {
+      stopSkel = showSkeleton(messagesEl, "messages", 0, 80);
+    }
+
     try {
       const msgs = dedupeMessages(await api(`/conversations/${id}/messages`));
+      stopSkel();
       if (state.activeId !== id) return;
       state.messages = msgs;
+      cacheMessages(id, msgs);
       state._messagesSig = msgs
         .map((m) => m.id || `${m.body}|${m.created_at}`)
         .join("\n");
       renderMessages();
-      animateIn(messagesEl, { y: 4, duration: 180 });
+      if (!cached) animateIn(messagesEl, { y: 4, duration: 180 });
       if (state.wa.status === "connected") pullActiveChat();
       if (conv.unread_count) {
         conv.unread_count = 0;
         renderConversationList();
       }
     } catch (err) {
+      stopSkel();
       console.error(err);
     }
   }
 
   async function loadInitial() {
-    conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
+    conversationList.innerHTML = skeletonHtml("chats", 7);
     try {
       const me = state.user || (await api("/auth/me"));
       applyUserFromMe(me);
@@ -4747,6 +4820,7 @@
       if (!state.syncInProgress) {
         try {
           const all = sortConversations(await api("/conversations?archived=false", {}, 30000));
+          state.convCache = all;
           recalculateInterestedCount(all);
           const filtered =
             state.chatListTab === "all"
@@ -4893,7 +4967,10 @@
             pulseInterestedTab();
           }
           api("/conversations?archived=false", {}, 15000)
-            .then((rows) => recalculateInterestedCount(sortConversations(rows)))
+            .then((rows) => {
+              state.convCache = sortConversations(rows);
+              recalculateInterestedCount(state.convCache);
+            })
             .catch(() => {});
           renderOnboarding();
         }
@@ -5505,11 +5582,21 @@
     state.activeId = null;
     emptyChat.classList.remove("hidden");
     activeChat.classList.add("hidden");
-    conversationList.innerHTML = '<li class="conversation-item"><span class="muted">Cargando…</span></li>';
+    let stopSkel = () => {};
+    if (state.convCache) {
+      setConversations(tab === "all" ? state.convCache : state.convCache.filter((c) => matchesInterestTab(c, tab)));
+      renderConversationList();
+    } else {
+      stopSkel = showSkeleton(conversationList, "chats", 7, 0);
+    }
     try {
-      setConversations(await fetchConversations());
+      const rows = await fetchConversations();
+      stopSkel();
+      if (state.chatListTab !== tab) return;
+      setConversations(rows);
       renderConversationList();
     } catch (err) {
+      stopSkel();
       conversationList.innerHTML = `<li class="conversation-item"><span class="error">${escapeHtml(err.message)}</span></li>`;
     }
   }
@@ -5521,6 +5608,7 @@
   function closeActiveChat() {
     if (!state.activeId) return;
     if (pendingImage) clearPendingImage();
+    cacheMessages(state.activeId, state.messages);
     state.activeId = null;
     state.messages = [];
     state._messagesSig = "";
