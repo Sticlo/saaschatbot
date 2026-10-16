@@ -24,6 +24,10 @@ RUN f=node_modules/baileys/lib/Utils/generics.js && \
     sed -i "s/platformType.toString().charCodeAt(0).toString() : '49'/platformType.toString() : '1'/" "$f" && \
     grep -q "platformType.toString() : '1'" "$f"
 
+COPY patch-baileys-registration.js /tmp/patch-baileys-registration.js
+RUN node /tmp/patch-baileys-registration.js && \
+    grep -q "2a15188050200130003801400148015001580160017001" node_modules/baileys/lib/Utils/validate-connection.js
+
 RUN cp .env.example .env && chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
 RUN ./Docker/scripts/generate_database.sh
