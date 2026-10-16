@@ -141,6 +141,14 @@ def is_reaction_only(body: str) -> bool:
 def _extract_message_body(message_obj: dict) -> str:
     if not isinstance(message_obj, dict):
         return ""
+    wrapped = message_obj.get("documentWithCaptionMessage")
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("message"), dict):
+        message_obj = wrapped["message"]
+    document = message_obj.get("documentMessage")
+    if isinstance(document, dict):
+        name = str(document.get("fileName") or document.get("title") or "").strip()
+        caption = str(document.get("caption") or "").strip()
+        return "\n".join(p for p in ("[document]", name, caption if caption != name else "") if p)
     for key in (
         "conversation",
         "extendedTextMessage",
@@ -1127,6 +1135,9 @@ def parse_messages_upsert(data: Any) -> list[dict]:
         from_me = bool(key.get("fromMe"))
         b64_data = item.get("base64") or ""
         msg_obj = item.get("message") or {}
+        wrapped = msg_obj.get("documentWithCaptionMessage")
+        if isinstance(wrapped, dict) and isinstance(wrapped.get("message"), dict):
+            msg_obj = wrapped["message"]
         # Detectar mimetype desde el objeto de mensaje
         mimetype = ""
         for mtype in ("imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"):

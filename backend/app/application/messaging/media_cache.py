@@ -32,6 +32,17 @@ _MIME_EXT: dict[str, str] = {
     "audio/ogg; codecs=opus": "ogg",
     "audio/mpeg": "mp3",
     "audio/mp4": "m4a",
+    "video/quicktime": "mov",
+    "application/pdf": "pdf",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "text/plain": "txt",
+    "text/csv": "csv",
+    "application/zip": "zip",
 }
 
 _TYPE_MIME: dict[str, str] = {

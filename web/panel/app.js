@@ -2442,6 +2442,137 @@
     if (e.key === "Escape" && lightbox.el?.classList.contains("is-open")) closeLightbox();
   });
 
+  const VOICE_BARS = 34;
+  const VOICE_SPEEDS = [1, 1.5, 2];
+  const PLAY_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13a1 1 0 001.5.86l10.4-6.5a1 1 0 000-1.72L9.5 4.64A1 1 0 008 5.5z"/></svg>';
+  const PAUSE_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></svg>';
+  let playingVoice = null;
+  const voicePlayers = new Map();
+
+  function placeholderPeaks(seed) {
+    let h = 0;
+    for (let i = 0; i < seed.length; i += 97) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return Array.from({ length: VOICE_BARS }, (_, i) => {
+      h = (h * 1103515245 + 12345) >>> 0;
+      return 0.25 + ((h >>> 16) % 1000) / 1000 * 0.6 * Math.sin(Math.PI * (i + 1) / (VOICE_BARS + 1));
+    });
+  }
+
+  async function decodeVoice(src) {
+    const buf = await (await fetch(src)).arrayBuffer();
+    const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!Ctx) throw new Error("sin audio");
+    const audio = await new Ctx(1, 1, 44100).decodeAudioData(buf);
+    const data = audio.getChannelData(0);
+    const step = Math.max(1, Math.floor(data.length / VOICE_BARS));
+    const peaks = [];
+    for (let b = 0; b < VOICE_BARS; b++) {
+      let sum = 0;
+      for (let i = b * step; i < Math.min(data.length, (b + 1) * step); i++) sum += data[i] * data[i];
+      peaks.push(Math.sqrt(sum / step));
+    }
+    const max = Math.max(...peaks, 0.0001);
+    return { peaks: peaks.map((p) => 0.14 + (p / max) * 0.86), duration: audio.duration };
+  }
+
+  function buildVoicePlayer(src) {
+    const el = document.createElement("div");
+    el.className = "voice-player";
+    el.innerHTML = `<button type="button" class="vp-play" aria-label="Reproducir nota de voz">${PLAY_ICON}</button>
+      <div class="vp-body">
+        <div class="vp-wave" role="slider" aria-label="Avanzar en la nota de voz" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+          ${placeholderPeaks(src).map((p) => `<span style="--h:${p.toFixed(3)}"></span>`).join("")}
+        </div>
+        <div class="vp-meta"><span class="vp-time">0:00</span><button type="button" class="vp-speed" aria-label="Velocidad">1×</button></div>
+      </div>`;
+    const audio = new Audio();
+    audio.preload = "metadata";
+    audio.src = src;
+    audio.playerEl = el;
+    const playBtn = el.querySelector(".vp-play");
+    const wave = el.querySelector(".vp-wave");
+    const bars = [...wave.children];
+    const timeEl = el.querySelector(".vp-time");
+    const speedBtn = el.querySelector(".vp-speed");
+    let duration = 0;
+    let speedIdx = 0;
+    let raf = 0;
+
+    const knownDuration = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration);
+    const paint = () => {
+      const total = knownDuration();
+      const ratio = total ? Math.min(1, audio.currentTime / total) : 0;
+      const lit = Math.round(ratio * VOICE_BARS);
+      bars.forEach((b, i) => b.classList.toggle("on", i < lit));
+      wave.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+      const playing = !audio.paused;
+      timeEl.textContent = formatDuration((playing || audio.currentTime ? audio.currentTime : total) * 1000);
+    };
+    const loop = () => {
+      paint();
+      if (!audio.paused) raf = requestAnimationFrame(loop);
+    };
+    const setPlaying = (on) => {
+      el.classList.toggle("is-playing", on);
+      playBtn.innerHTML = on ? PAUSE_ICON : PLAY_ICON;
+      playBtn.setAttribute("aria-label", on ? "Pausar nota de voz" : "Reproducir nota de voz");
+    };
+
+    audio.addEventListener("loadedmetadata", paint);
+    audio.addEventListener("play", () => {
+      if (playingVoice && playingVoice !== audio) playingVoice.pause();
+      playingVoice = audio;
+      setPlaying(true);
+      cancelAnimationFrame(raf);
+      loop();
+    });
+    audio.addEventListener("pause", () => {
+      setPlaying(false);
+      paint();
+    });
+    audio.addEventListener("ended", () => {
+      audio.currentTime = 0;
+      setPlaying(false);
+      paint();
+    });
+    playBtn.addEventListener("click", () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+    speedBtn.addEventListener("click", () => {
+      speedIdx = (speedIdx + 1) % VOICE_SPEEDS.length;
+      audio.playbackRate = VOICE_SPEEDS[speedIdx];
+      speedBtn.textContent = `${String(VOICE_SPEEDS[speedIdx]).replace(".", ",")}×`;
+    });
+    const seek = (clientX) => {
+      const total = knownDuration();
+      if (!total) return;
+      const rect = wave.getBoundingClientRect();
+      audio.currentTime = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * total;
+      paint();
+    };
+    wave.addEventListener("pointerdown", (e) => {
+      seek(e.clientX);
+      wave.setPointerCapture?.(e.pointerId);
+    });
+    wave.addEventListener("pointermove", (e) => {
+      if (e.buttons) seek(e.clientX);
+    });
+    wave.addEventListener("keydown", (e) => {
+      const total = knownDuration();
+      if (!total || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      e.preventDefault();
+      audio.currentTime = Math.max(0, Math.min(total, audio.currentTime + (e.key === "ArrowRight" ? 5 : -5)));
+      paint();
+    });
+
+    decodeVoice(src)
+      .then(({ peaks, duration: d }) => {
+        duration = d;
+        bars.forEach((b, i) => b.style.setProperty("--h", peaks[i].toFixed(3)));
+        paint();
+      })
+      .catch(() => {});
+    return el;
+  }
+
   function _renderMediaElement(type, base64, mimetype) {
     const src = `data:${mimetype};base64,${base64}`;
     const mt = type;
@@ -2458,10 +2589,7 @@
       el.controls = true;
       el.className = "media-video";
     } else if (mt === "audio" || mt === "ptt") {
-      el = document.createElement("audio");
-      el.src = src;
-      el.controls = true;
-      el.className = "media-audio";
+      el = buildVoicePlayer(src);
     } else {
       el = document.createElement("a");
       el.href = src;
@@ -2493,7 +2621,10 @@
     const cached = mediaCache.get(m.id);
     if (cached) {
       if (cached.ok) {
-        const el = _renderMediaElement(cached.media_type || type, cached.base64, cached.mimetype);
+        const mt = cached.media_type || type;
+        const isVoice = mt === "audio" || mt === "ptt";
+        const el = (isVoice && voicePlayers.get(m.id)) || _renderMediaElement(mt, cached.base64, cached.mimetype);
+        if (isVoice) voicePlayers.set(m.id, el);
         inner.appendChild(el);
       } else {
         // Fallido: mostrar ícono discreto sin texto alarmante
@@ -2518,6 +2649,7 @@
       .then(({ base64, media_type, mimetype }) => {
         mediaCache.set(m.id, { ok: true, base64, media_type: media_type || type, mimetype });
         const el = _renderMediaElement(media_type || type, base64, mimetype);
+        if (el.classList.contains("voice-player")) voicePlayers.set(m.id, el);
         placeholder.replaceWith(el);
       })
       .catch(() => {
@@ -2532,6 +2664,9 @@
   }
 
   function outboundTicks(status) {
+    if (status === "pending") {
+      return '<span class="ticks pending" title="Enviando"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.6V8l2.2 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>';
+    }
     if (status === "read") return '<span class="ticks read" title="Leído">✓✓</span>';
     if (status === "delivered") return '<span class="ticks delivered" title="Entregado">✓✓</span>';
     if (status === "failed") return '<span class="ticks failed" title="No se envió">!</span>';
@@ -2539,6 +2674,80 @@
   }
 
   let renderedMsgs = { convId: null, ids: new Set(), bodies: new Set() };
+  const pendingOut = [];
+  const docFiles = new Map();
+
+  function fileSizeLabel(bytes) {
+    const kb = (Number(bytes) || 0) / 1024;
+    return kb > 1024 ? `${(kb / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(kb))} KB`;
+  }
+
+  function docExtension(name) {
+    const match = /\.([a-z0-9]{1,5})$/i.exec(name || "");
+    return match ? match[1].toUpperCase() : "DOC";
+  }
+
+  const DOC_DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>';
+
+  function buildDocBubble(m, timeHtml) {
+    const legacy = (m.body || "").startsWith("📄 ");
+    const lines = (legacy ? m.body.slice(2) : mediaCaption(m.body)).trim().split("\n");
+    const name = (lines[0] || "").trim() || "Documento";
+    const caption = lines.slice(1).join("\n").trim();
+    const ext = docExtension(name);
+    const local = m.file || docFiles.get(m.id);
+    const wrap = document.createElement("div");
+    wrap.className = "msg doc-msg " + (m.direction === "in" ? "in" : "out");
+    wrap.innerHTML = `<button type="button" class="doc-card" title="Abrir ${escapeHtml(name)}">
+        <span class="doc-badge" data-ext="${escapeHtml(ext)}">${escapeHtml(ext.slice(0, 4))}</span>
+        <span class="doc-info"><strong>${escapeHtml(name)}</strong><small>${escapeHtml([ext, local && fileSizeLabel(local.size)].filter(Boolean).join(" · "))}</small></span>
+        <span class="doc-get">${DOC_DOWNLOAD_ICON}</span>
+      </button>${caption ? `<p class="media-caption">${escapeHtml(caption)}</p>` : ""}${timeHtml}`;
+    const card = wrap.querySelector(".doc-card");
+    card.addEventListener("click", () => openDocument(m, name, card));
+    return wrap;
+  }
+
+  async function openDocument(m, name, card) {
+    let blob = m.file || docFiles.get(m.id);
+    if (!blob) {
+      if (!m.id || m.pending || card.classList.contains("is-loading")) return;
+      card.classList.add("is-loading");
+      try {
+        const r = await fetch(`${API}/conversations/${m.conversation_id}/messages/${m.id}/media`, { credentials: "include", headers: headers(false) });
+        if (!r.ok) throw new Error(String(r.status));
+        const { base64, mimetype } = await r.json();
+        const bin = atob(base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        blob = new Blob([bytes], { type: mimetype || "application/octet-stream" });
+        docFiles.set(m.id, blob);
+        const small = card.querySelector("small");
+        if (small) small.textContent = `${docExtension(name)} · ${fileSizeLabel(blob.size)}`;
+      } catch {
+        toast("No se pudo abrir el archivo. Pídele al cliente que lo vuelva a enviar.", { tone: "error" });
+        return;
+      } finally {
+        card.classList.remove("is-loading");
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  function visiblePending(shown) {
+    return pendingOut.filter((p) => {
+      if (p.conversation_id !== state.activeId) return false;
+      const since = new Date(p.created_at).getTime() - 15_000;
+      return !shown.some((m) => m.direction === "out" && m.body === p.body && new Date(m.created_at).getTime() >= since);
+    });
+  }
 
   function renderMessages() {
     messagesEl.innerHTML = "";
@@ -2548,7 +2757,14 @@
     const arrived = [];
     let prevDay = "";
     let prevDir = "";
-    for (const m of dedupeMessages(state.messages)) {
+    const shown = dedupeMessages(state.messages);
+    const list = shown.slice();
+    for (const p of visiblePending(shown)) {
+      const at = Date.parse(p.created_at);
+      const i = list.findIndex((m) => !m.pending && Date.parse(m.created_at) > at);
+      list.splice(i < 0 ? list.length : i, 0, p);
+    }
+    for (const m of list) {
       const day = m.created_at ? new Date(m.created_at).toDateString() : prevDay;
       if (day && day !== prevDay) {
         const sep = document.createElement("div");
@@ -2569,13 +2785,20 @@
       const mediaType = detectMediaType(m.body);
 
       let div;
-      if (mediaType && m.id) {
+      if (mediaType === "document" || (m.body || "").startsWith("📄 ")) {
+        div = buildDocBubble(m, timeHtml);
+      } else if (mediaType && m.id) {
         div = buildMediaBubble(m, mediaType, timeHtml);
       } else {
         div = document.createElement("div");
         div.className = "msg " + (m.direction === "in" ? "in" : "out");
         const caption = m.body && !detectMediaType(m.body) ? escapeHtml(m.body) : escapeHtml(m.body);
         div.innerHTML = `<span class="msg-text">${caption}</span>${timeHtml}`;
+      }
+      if (m.pending) {
+        div.classList.add(m.status === "failed" ? "is-failed" : "is-pending");
+        div.dataset.pending = m.id;
+        if (m.status === "failed") div.title = "No se envió. Toca para reintentar.";
       }
       const dir = m.direction === "in" ? "in" : "out";
       if (dir !== prevDir) div.classList.add("tail");
@@ -2584,6 +2807,7 @@
       if (isNew) arrived.push({ div, inbound: m.direction === "in" });
     }
     renderedMsgs = { convId: state.activeId, ids, bodies };
+    if (playingVoice && !messagesEl.contains(playingVoice.playerEl)) playingVoice.pause();
     messagesEl.scrollTop = messagesEl.scrollHeight;
     if (arrived.length <= 4) {
       arrived.forEach(({ div, inbound }, i) =>
@@ -6119,9 +6343,7 @@
     }
     clearPendingImage();
     pendingFile = { file, conversationId: state.activeId };
-    const kb = file.size / 1024;
-    const size = kb > 1024 ? `${(kb / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(kb))} KB`;
-    showAttachmentCard({ title: file.name, hint: `${size} · toca enviar para mandarlo` });
+    showAttachmentCard({ title: file.name, hint: `${fileSizeLabel(file.size)} · toca enviar para mandarlo` });
   }
 
   function pickAttachment(file) {
@@ -6191,21 +6413,6 @@
     });
   }
 
-  async function sendPendingImage(caption) {
-    const image = pendingImage;
-    const fd = new FormData();
-    fd.append("file", image.blob, `foto.${image.mimetype.split("/")[1]}`);
-    fd.append("caption", caption);
-    const msg = await api(`/conversations/${image.conversationId}/messages/image`, { method: "POST", body: fd }, 30000);
-    try {
-      mediaCache.set(msg.id, { ok: true, base64: await blobToBase64(image.blob), media_type: "image", mimetype: image.mimetype });
-    } catch {
-      /* se descargará de WhatsApp como cualquier otra foto */
-    }
-    clearPendingImage();
-    return msg;
-  }
-
   document.addEventListener("paste", (e) => {
     if (activeChat.classList.contains("hidden")) return;
     if (isEditable(e.target) && e.target !== messageInput) return;
@@ -6265,10 +6472,64 @@
   });
 
   function pushSentMessage(msg) {
-    if (msg.conversation_id !== state.activeId || state.messages.some((m) => m.id === msg.id)) return;
-    state.messages.push(msg);
-    state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+    if (msg.conversation_id !== state.activeId) return;
+    if (!state.messages.some((m) => m.id === msg.id)) {
+      state.messages.push(msg);
+      state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+    }
     renderMessages();
+  }
+
+  let pendingSeq = 0;
+  function addPending(conversationId, body, { media = null, file = null } = {}) {
+    const tmp = {
+      id: `tmp-${++pendingSeq}`,
+      conversation_id: conversationId,
+      direction: "out",
+      body,
+      source: "agent",
+      created_at: new Date().toISOString(),
+      status: "pending",
+      pending: true,
+      file,
+    };
+    if (media) mediaCache.set(tmp.id, media);
+    pendingOut.push(tmp);
+    if (conversationId === state.activeId) renderMessages();
+    return tmp;
+  }
+
+  async function deliverPending(tmp, send) {
+    tmp.send = send;
+    try {
+      const msg = await send();
+      pendingOut.splice(pendingOut.indexOf(tmp), 1);
+      const media = mediaCache.get(tmp.id);
+      if (media && msg?.id) mediaCache.set(msg.id, media);
+      if (voicePlayers.has(tmp.id) && msg?.id) voicePlayers.set(msg.id, voicePlayers.get(tmp.id));
+      if (tmp.file && msg?.id) docFiles.set(msg.id, tmp.file);
+      if (msg?.id) pushSentMessage(msg);
+      else if (tmp.conversation_id === state.activeId) renderMessages();
+    } catch (err) {
+      tmp.status = "failed";
+      if (tmp.conversation_id === state.activeId) renderMessages();
+      toast(`${err.message || "No se pudo enviar."} Toca el mensaje para reintentar.`, { tone: "error" });
+    }
+  }
+
+  messagesEl.addEventListener("click", (e) => {
+    const bubble = e.target.closest(".msg.is-failed");
+    const tmp = bubble && pendingOut.find((p) => p.id === bubble.dataset.pending);
+    if (!tmp || e.target.closest(".doc-card, .voice-player, .media-img")) return;
+    tmp.status = "pending";
+    renderMessages();
+    deliverPending(tmp, tmp.send);
+  });
+
+  function resetComposerText() {
+    messageInput.value = "";
+    syncComposerMode();
+    fitComposer();
   }
 
   const canRecordVoice = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
@@ -6347,17 +6608,16 @@
     const ext = mimetype.includes("mp4") ? "m4a" : mimetype.includes("ogg") ? "ogg" : "webm";
     const fd = new FormData();
     fd.append("file", blob, `nota.${ext}`);
+    let base64 = "";
     try {
-      const msg = await api(`/conversations/${conversationId}/messages/audio`, { method: "POST", body: fd }, 60000);
-      try {
-        mediaCache.set(msg.id, { ok: true, base64: await blobToBase64(blob), media_type: "audio", mimetype: mimetype.split(";")[0] });
-      } catch {
-        /* se descargará de WhatsApp */
-      }
-      pushSentMessage(msg);
-    } catch (err) {
-      toast(err.message || "No se pudo enviar la nota de voz.", { tone: "error" });
+      base64 = await blobToBase64(blob);
+    } catch {
+      /* se descargará de WhatsApp */
     }
+    const tmp = addPending(conversationId, "[audio]", {
+      media: base64 ? { ok: true, base64, media_type: "audio", mimetype: mimetype.split(";")[0] } : null,
+    });
+    deliverPending(tmp, () => api(`/conversations/${conversationId}/messages/audio`, { method: "POST", body: fd }, 60000));
   }
 
   $("voice-btn").addEventListener("click", startVoiceNote);
@@ -6370,71 +6630,43 @@
     if (!state.activeId || !state.canWrite) return;
     const text = messageInput.value.trim();
     if (pendingFile) {
-      const btn = sendForm.querySelector("button[type=submit]");
-      btn.disabled = true;
-      try {
-        const { file, conversationId } = pendingFile;
-        const fd = new FormData();
-        fd.append("file", file, file.name);
-        fd.append("caption", text);
-        const msg = await api(`/conversations/${conversationId}/messages/file`, { method: "POST", body: fd }, 60000);
-        messageInput.value = "";
-        syncComposerMode();
-        fitComposer();
-        clearPendingImage();
-        pushSentMessage(msg);
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        btn.disabled = false;
-      }
+      const { file, conversationId } = pendingFile;
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      fd.append("caption", text);
+      clearPendingImage();
+      resetComposerText();
+      const tmp = addPending(conversationId, ["[document]", file.name, text].filter(Boolean).join("\n"), { file });
+      deliverPending(tmp, () => api(`/conversations/${conversationId}/messages/file`, { method: "POST", body: fd }, 60000));
       return;
     }
     if (pendingImage) {
-      const btn = sendForm.querySelector("button[type=submit]");
-      btn.disabled = true;
+      const image = pendingImage;
+      const fd = new FormData();
+      fd.append("file", image.blob, `foto.${image.mimetype.split("/")[1]}`);
+      fd.append("caption", text);
+      clearPendingImage();
+      resetComposerText();
+      let base64 = "";
       try {
-        const msg = await sendPendingImage(text);
-        messageInput.value = "";
-        syncComposerMode();
-        fitComposer();
-        if (msg.conversation_id === state.activeId && !state.messages.some((m) => m.id === msg.id)) {
-          state.messages.push(msg);
-          state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
-          renderMessages();
-        }
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        btn.disabled = false;
+        base64 = await blobToBase64(image.blob);
+      } catch {
+        /* se descargará de WhatsApp como cualquier otra foto */
       }
+      const tmp = addPending(image.conversationId, text ? `[image]\n${text}` : "[image]", {
+        media: base64 ? { ok: true, base64, media_type: "image", mimetype: image.mimetype } : null,
+      });
+      deliverPending(tmp, () => api(`/conversations/${image.conversationId}/messages/image`, { method: "POST", body: fd }, 30000));
       return;
     }
     if (!text) return;
 
-    const btn = sendForm.querySelector("button[type=submit]");
-    btn.disabled = true;
-    try {
-      const msg = await api(`/conversations/${state.activeId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ text }),
-      });
-      messageInput.value = "";
-      syncComposerMode();
-      fitComposer();
-      const exists = state.messages.some((m) => m.id === msg.id);
-      if (!exists) {
-        state.messages.push(msg);
-        state._messagesSig = state.messages
-          .map((m) => m.id || `${m.body}|${m.created_at}`)
-          .join("\n");
-        renderMessages();
-      }
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      btn.disabled = false;
-    }
+    const conversationId = state.activeId;
+    resetComposerText();
+    const tmp = addPending(conversationId, text);
+    deliverPending(tmp, () =>
+      api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ text }) })
+    );
   });
 
   $("toggle-mode-manual").addEventListener("change", async (e) => {

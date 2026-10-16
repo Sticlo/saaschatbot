@@ -941,7 +941,7 @@ def send_document_data_message(
     caption: str = "",
     source: str,
 ) -> Message:
-    """Archivo que el dueño adjunta en el chat (PDF, Word, Excel…): se manda tal cual, no se guarda."""
+    """Archivo que el dueño adjunta en el chat (PDF, Word, Excel…): se manda tal cual y queda para abrirlo luego."""
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
@@ -957,14 +957,19 @@ def send_document_data_message(
         filename=file_name,
         caption=caption[:1024],
     )
-    body = f"📄 {file_name}\n{caption}".strip() if caption else f"📄 {file_name}"
+    evolution_id = _extract_evolution_id(result)
+    if evolution_id:
+        from app.application.messaging.media_cache import save_media_from_webhook
+
+        save_media_from_webhook(str(tenant.id), evolution_id, data_b64, media_type="document", mimetype=mimetype)
+    body = "\n".join(p for p in ("[document]", file_name, caption.strip()) if p)
     return _record_outbound_message(
         db,
         tenant=tenant,
         conversation=conversation,
         body=body[:4096],
         source=source,
-        evolution_id=_extract_evolution_id(result),
+        evolution_id=evolution_id,
     )
 
 

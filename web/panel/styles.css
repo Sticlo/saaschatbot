@@ -5240,3 +5240,179 @@ body.lightbox-open { overflow: hidden; }
 }
 
 .msg-text { white-space: pre-wrap; }
+
+/* Envío al instante: relojito mientras sale, «!» si falló */
+.msg .ticks.pending { display: inline-flex; vertical-align: -2px; color: var(--bubble-time, var(--muted)); }
+.msg.is-pending .ticks.pending svg { animation: omi-clock 1.6s linear infinite; transform-origin: 50% 50%; }
+.msg.is-failed { cursor: pointer; box-shadow: 0 0 0 1.5px rgba(227, 93, 106, 0.55); }
+.msg.is-failed .ticks.failed {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 0.25rem;
+  border-radius: 50%;
+  background: #e35d6a;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+@keyframes omi-clock { to { transform: rotate(360deg); } }
+
+/* Documentos como en WhatsApp */
+.msg.doc-msg { padding: 0.3rem 0.3rem 0.25rem; min-width: min(260px, 72vw); }
+.doc-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.6rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.16);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 160ms var(--ease-out);
+}
+[data-theme="light"] .doc-card { background: rgba(11, 20, 26, 0.06); }
+.doc-card:active { transform: scale(0.98); }
+@media (hover: hover) {
+  .doc-card:hover { background: rgba(0, 0, 0, 0.24); }
+  [data-theme="light"] .doc-card:hover { background: rgba(11, 20, 26, 0.1); }
+}
+.doc-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 42px;
+  border-radius: 4px;
+  background: #7f66ff;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  clip-path: polygon(0 0, 70% 0, 100% 24%, 100% 100%, 0 100%);
+}
+.doc-badge[data-ext="PDF"] { background: #e5484d; }
+.doc-badge[data-ext="DOC"], .doc-badge[data-ext="DOCX"] { background: #2f6fde; }
+.doc-badge[data-ext="XLS"], .doc-badge[data-ext="XLSX"], .doc-badge[data-ext="CSV"] { background: #1f9d55; }
+.doc-badge[data-ext="PPT"], .doc-badge[data-ext="PPTX"] { background: #e8762c; }
+.doc-badge[data-ext="ZIP"] { background: #8a8f98; }
+.doc-info { flex: 1; min-width: 0; display: grid; gap: 0.1rem; }
+.doc-info strong { font-size: 0.9rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-info small { font-size: 0.72rem; color: var(--bubble-time, var(--muted)); }
+.doc-get {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  opacity: 0.55;
+}
+.doc-card.is-loading .doc-get { border-color: transparent; border-top-color: currentColor; animation: omi-clock 0.8s linear infinite; }
+.doc-card.is-loading .doc-get svg { visibility: hidden; }
+.doc-msg .media-caption { margin: 0.35rem 0.3rem 0; max-width: none; }
+.doc-msg .time { padding-right: 0.25rem; }
+
+/* Notas de voz como en WhatsApp */
+.voice-player {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: min(270px, 66vw);
+  padding: 0.2rem 0.1rem 0;
+}
+.vp-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--bubble-time, var(--muted));
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out);
+}
+.vp-play:active { transform: scale(0.9); }
+.vp-body { flex: 1; min-width: 0; display: grid; gap: 0.2rem; }
+.vp-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.vp-wave span {
+  flex: 1;
+  min-width: 2px;
+  height: calc(var(--h, 0.4) * 100%);
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 32%, transparent);
+  transition: background-color 120ms linear, height 260ms var(--ease-out);
+}
+.vp-wave span.on { background: #53bdeb; }
+.msg.in .vp-wave span.on { background: #00a884; }
+.vp-wave:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 4px; }
+.vp-meta { display: flex; align-items: center; justify-content: space-between; }
+.vp-time { font-size: 0.72rem; font-variant-numeric: tabular-nums; color: var(--bubble-time, var(--muted)); }
+.vp-speed {
+  min-width: 34px;
+  padding: 0.05rem 0.4rem;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.voice-player.is-playing .vp-speed,
+.vp-speed:focus-visible { opacity: 1; }
+/* Interruptores de Manual / IA en el chat */
+.chat-toggles .toggle-row input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background-color 180ms ease;
+}
+.chat-toggles .toggle-row input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 220ms var(--ease-out);
+}
+.chat-toggles .toggle-row input:checked { background: #00a884; }
+.chat-toggles .toggle-row input:checked::after { transform: translateX(14px); }
+.chat-toggles .toggle-row input:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-toggles .toggle-row input:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .msg.is-pending .ticks.pending svg,
+  .doc-card.is-loading .doc-get { animation: none; }
+  .chat-toggles .toggle-row input::after,
+  .vp-wave span { transition: none; }
+}
+[data-theme="light"] .chat-toggles .toggle-row input:not(:checked) { background: #c4cad3; }

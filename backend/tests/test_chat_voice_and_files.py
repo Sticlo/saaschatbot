@@ -65,16 +65,32 @@ def test_iphone_recordings_are_accepted_and_garbage_is_not(mock_send, _cache, cl
 
 
 @requires_db
+@patch("app.application.messaging.media_cache.save_media_from_webhook")
 @patch("app.application.whatsapp.whatsapp_service.gateway_send_document", return_value={"key": {"id": "WA-DOC-1"}})
-def test_pdf_from_the_plus_button_reaches_the_client(mock_send, client, chat):
+def test_pdf_from_the_plus_button_reaches_the_client(mock_send, mock_cache, client, chat):
     conversation_id, headers = chat
     response = _file(client, conversation_id, headers, data=PDF, name="Cotización boda.pdf", caption="Te la paso")
 
     assert response.status_code == 201, response.text
-    assert response.json()["body"] == "📄 Cotización boda.pdf\nTe la paso"
+    assert response.json()["body"] == "[document]\nCotización boda.pdf\nTe la paso"
     kwargs = mock_send.call_args.kwargs
     assert kwargs["mimetype"] == "application/pdf"
     assert kwargs["filename"] == "Cotización boda.pdf"
+    assert mock_cache.call_args.args[1] == "WA-DOC-1"
+    assert mock_cache.call_args.kwargs["mimetype"] == "application/pdf"
+
+
+def test_documents_from_the_client_keep_their_name():
+    from app.application.messaging.message_service import _extract_message_body
+
+    plain = {"documentMessage": {"fileName": "Lista de precios.pdf", "mimetype": "application/pdf"}}
+    assert _extract_message_body(plain) == "[document]\nLista de precios.pdf"
+    with_caption = {
+        "documentWithCaptionMessage": {
+            "message": {"documentMessage": {"fileName": "RUT.pdf", "caption": "el rut que pediste"}}
+        }
+    }
+    assert _extract_message_body(with_caption) == "[document]\nRUT.pdf\nel rut que pediste"
 
 
 @requires_db
