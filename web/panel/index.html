@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=77" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=82" />
 </head>
 <body>
   <div id="app">
@@ -121,6 +121,7 @@
             <span id="user-label" class="menu-user"></span>
           </div>
           <button type="button" id="guide-btn" class="menu-item hidden">Ver la guía otra vez</button>
+          <button type="button" id="diag-open" class="menu-item hidden">Lo que encontramos en tu WhatsApp</button>
           <a href="/mi-plan" data-site-path="/mi-plan" class="menu-item">Mi plan</a>
           <label class="menu-item toggle-row theme-toggle">
             <span>Tema claro</span>
@@ -186,8 +187,6 @@
               <h3>Elige un chat</h3>
               <p class="muted">La IA le responde sola. Cuando alguien quiera comprar, te avisa.</p>
               <p id="diag-analyzing" class="diag-analyzing hidden">Revisando cómo atendiste tu WhatsApp este mes…</p>
-              <button id="diag-open" type="button" class="diag-entry hidden">Mira lo que encontramos en tu WhatsApp</button>
-              <button type="button" id="wa-unlink-ready-btn" class="link-btn wa-unlink-ready hidden">Desvincular WhatsApp</button>
             </div>
           </div>
 
@@ -196,6 +195,7 @@
               <button type="button" id="chat-back-btn" class="chat-back-btn" aria-label="Volver a los chats">
                 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5l-7 7 7 7"/></svg>
               </button>
+              <span id="chat-avatar" class="avatar chat-avatar" aria-hidden="true"></span>
               <div class="chat-header-main">
                 <h3 id="chat-title">—</h3>
                 <span id="chat-phone" class="chat-contact-phone muted"></span>
@@ -239,8 +239,10 @@
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9.2-9.2a3.7 3.7 0 015.2 5.2l-9.2 9.2a1.8 1.8 0 01-2.6-2.6l8.5-8.5"/></svg>
               </button>
               <input type="file" id="attach-image-input" accept="image/jpeg,image/png,image/webp" hidden />
-              <textarea id="message-input" rows="2" placeholder="Escribe un mensaje…" maxlength="4096"></textarea>
-              <button type="submit" class="btn primary">Enviar</button>
+              <textarea id="message-input" rows="1" placeholder="Mensaje" maxlength="4096"></textarea>
+              <button type="submit" class="btn primary composer-send" aria-label="Enviar" title="Enviar">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"/></svg>
+              </button>
             </form>
           </div>
 
@@ -829,6 +831,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=155"></script>
+  <script src="/static/panel/app.js?v=157"></script>
 </body>
 </html>

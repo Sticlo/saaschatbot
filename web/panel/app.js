@@ -687,6 +687,57 @@
     return d.toLocaleString("es-CO", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" });
   }
 
+  function formatClock(iso) {
+    if (!iso) return "";
+    return new Date(iso).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" });
+  }
+
+  function daysAgo(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const a = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.round((b - a) / 86400000);
+  }
+
+  function capitalize(s) {
+    return s ? s[0].toUpperCase() + s.slice(1) : s;
+  }
+
+  function dayLabel(iso) {
+    const n = daysAgo(iso);
+    const d = new Date(iso);
+    if (n === 0) return "Hoy";
+    if (n === 1) return "Ayer";
+    if (n > 1 && n < 7) return capitalize(d.toLocaleDateString("es-CO", { weekday: "long" }));
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString("es-CO", { day: "numeric", month: "long", ...(sameYear ? {} : { year: "numeric" }) });
+  }
+
+  function listTime(iso) {
+    if (!iso) return "";
+    const n = daysAgo(iso);
+    if (n === 0) return formatClock(iso);
+    if (n === 1) return "Ayer";
+    if (n > 1 && n < 7) return capitalize(new Date(iso).toLocaleDateString("es-CO", { weekday: "short" }).replace(".", ""));
+    return new Date(iso).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  }
+
+  const AVATAR_HUES = [158, 200, 265, 330, 20, 42, 185, 290];
+  function avatarHtml(name, cls = "avatar") {
+    const clean = String(name || "").replace(/[^\p{L}\p{N} ]/gu, "").trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    const initials = /^\d/.test(clean) || !parts.length
+      ? ""
+      : (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+    let h = 0;
+    for (const ch of clean) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    const hue = AVATAR_HUES[h % AVATAR_HUES.length];
+    const inner = initials ||
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>';
+    return `<span class="${cls}" style="--av-h:${hue}" aria-hidden="true">${inner}</span>`;
+  }
+
   function updateWaBadge(status) {
     state.wa.status = status || state.wa.status;
     if (state.wa.status === "connected" && state.wa.phone_number) {
@@ -1301,6 +1352,7 @@
   function refreshActiveChatHeader(conv) {
     if (!conv || conv.id !== state.activeId) return;
     $("chat-title").textContent = convTitle(conv);
+    $("chat-avatar").outerHTML = avatarHtml(convTitle(conv), "avatar chat-avatar").replace("<span ", '<span id="chat-avatar" ');
     applyChatContactPhone(conv);
     syncChatToggles(conv);
   }
@@ -2154,16 +2206,36 @@
       if (c.mode === "manual") tags.push('<span class="mode-tag">manual</span>');
       if (c.ai_active && aiAllowedInChat(c)) tags.push('<span class="ai-tag">IA</span>');
       const subtitle = convSubtitle(c);
+      const title = convTitle(c);
+      li.classList.toggle("has-unread", Boolean(c.unread_count));
       li.innerHTML = `
-        <div class="row">
-          <span class="name">${escapeHtml(convTitle(c))}</span>
-          ${c.unread_count ? `<span class="unread">${c.unread_count}</span>` : ""}
+        ${avatarHtml(title)}
+        <div class="conv-body">
+          <div class="row">
+            <span class="name">${escapeHtml(title)}</span>
+            <span class="conv-time">${escapeHtml(listTime(c.last_message_at))}</span>
+          </div>
+          <div class="meta">
+            <span class="conv-preview">${subtitle ? escapeHtml(subtitle) : ""}</span>
+            ${tags.join("")}
+            ${c.unread_count ? `<span class="unread">${c.unread_count}</span>` : ""}
+          </div>
         </div>
-        <div class="meta">${subtitle ? escapeHtml(subtitle) + " " : ""}${tags.join("")}</div>
       `;
       li.addEventListener("click", () => selectConversation(c.id));
       conversationList.appendChild(li);
     }
+    conversationList.insertAdjacentHTML("beforeend", listBrandHtml());
+  }
+
+  function listBrandHtml() {
+    const name = state.tenant?.business_name || $("business-name").textContent.trim();
+    return `
+      <li class="list-brand" aria-hidden="true">
+        <svg class="list-brand-mark" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>
+        ${name && name !== "—" ? `<span class="list-brand-name">${escapeHtml(name)}</span>` : ""}
+        <span class="list-brand-by">atendido con Omitel</span>
+      </li>`;
   }
 
   function escapeHtml(str) {
@@ -2332,14 +2404,26 @@
     const ids = new Set();
     const bodies = new Set();
     const arrived = [];
+    let prevDay = "";
+    let prevDir = "";
     for (const m of dedupeMessages(state.messages)) {
+      const day = m.created_at ? new Date(m.created_at).toDateString() : prevDay;
+      if (day && day !== prevDay) {
+        const sep = document.createElement("div");
+        sep.className = "day-sep";
+        sep.innerHTML = `<span>${escapeHtml(dayLabel(m.created_at))}</span>`;
+        messagesEl.appendChild(sep);
+        prevDir = "";
+      }
+      prevDay = day;
       const idKey = m.id || `${m.body}|${m.created_at}`;
       const bodyKey = `${m.direction}|${m.body}`;
       const isNew = sameChat && !renderedMsgs.ids.has(idKey) && !renderedMsgs.bodies.has(bodyKey);
       ids.add(idKey);
       bodies.add(bodyKey);
       const ticks = m.direction === "out" ? outboundTicks(m.status) : "";
-      const timeHtml = `<span class="time">${formatTime(m.created_at)} · ${m.source}${ticks}</span>`;
+      const byAi = m.direction === "out" && (m.source === "ai" || m.source === "bot");
+      const timeHtml = `<span class="time" title="${escapeHtml(formatTime(m.created_at))}">${byAi ? '<span class="msg-ai">IA</span>' : ""}${formatClock(m.created_at)}${ticks}</span>`;
       const mediaType = detectMediaType(m.body);
 
       let div;
@@ -2351,6 +2435,9 @@
         const caption = m.body && !detectMediaType(m.body) ? escapeHtml(m.body) : escapeHtml(m.body);
         div.innerHTML = `${caption}${timeHtml}`;
       }
+      const dir = m.direction === "in" ? "in" : "out";
+      if (dir !== prevDir) div.classList.add("tail");
+      prevDir = dir;
       messagesEl.appendChild(div);
       if (isNew) arrived.push({ div, inbound: m.direction === "in" });
     }
@@ -4745,6 +4832,7 @@
       animateIn(activeChat, { y: 6, duration: 200 });
     }
     $("chat-title").textContent = convTitle(conv);
+    $("chat-avatar").outerHTML = avatarHtml(convTitle(conv), "avatar chat-avatar").replace("<span ", '<span id="chat-avatar" ');
     applyChatContactPhone(conv);
     syncChatToggles(conv);
     renderConversationList();
@@ -6065,6 +6153,13 @@
       e.target.checked = !e.target.checked;
     }
   });
+
+  function fitComposer() {
+    messageInput.style.height = "auto";
+    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 140)}px`;
+  }
+  messageInput.addEventListener("input", fitComposer);
+  sendForm.addEventListener("submit", () => requestAnimationFrame(fitComposer));
 
   messageInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
