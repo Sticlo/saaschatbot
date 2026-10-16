@@ -128,6 +128,54 @@ def test_a_wrong_number_is_rejected_before_touching_whatsapp(client: TestClient,
     assert "indicativo" in response.json()["detail"]
 
 
+def _connecting(qr_age_seconds=None):
+    from datetime import datetime, timedelta, timezone
+
+    from app.domain.entities import Tenant, WhatsAppSession, WhatsAppStatus
+
+    tenant = Tenant(id=uuid.uuid4(), business_name="x", slug="x", whatsapp_status=WhatsAppStatus.CONNECTING.value)
+    session = WhatsAppSession(tenant_id=tenant.id, instance_name="t_x")
+    if qr_age_seconds is not None:
+        session.qr_base64 = "data:image/png;base64,abc"
+        session.qr_updated_at = datetime.now(timezone.utc) - timedelta(seconds=qr_age_seconds)
+    return tenant, session
+
+
+def test_another_click_keeps_the_qr_the_owner_is_scanning():
+    from app.application.whatsapp.whatsapp_service import _link_attempt_in_progress
+
+    tenant, session = _connecting(qr_age_seconds=10)
+    assert _link_attempt_in_progress(session, tenant, None)
+
+    tenant, session = _connecting(qr_age_seconds=300)
+    assert not _link_attempt_in_progress(session, tenant, None)
+
+    tenant, session = _connecting()
+    assert not _link_attempt_in_progress(session, tenant, None)
+
+
+def test_another_click_keeps_the_code_only_for_the_same_number():
+    from app.application.whatsapp.whatsapp_service import _link_attempt_in_progress, store_pairing_code
+
+    tenant, session = _connecting(qr_age_seconds=10)
+    store_pairing_code(tenant.id, "WZYEH1YY", "573001234567")
+
+    assert _link_attempt_in_progress(session, tenant, "573001234567")
+    assert not _link_attempt_in_progress(session, tenant, "573009999999")
+
+    store_pairing_code(tenant.id, None)
+    assert not _link_attempt_in_progress(session, tenant, "573001234567")
+
+
+def test_a_failed_link_is_not_reused():
+    from app.application.whatsapp.whatsapp_service import _link_attempt_in_progress
+    from app.domain.entities import WhatsAppStatus
+
+    tenant, session = _connecting(qr_age_seconds=10)
+    tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
+    assert not _link_attempt_in_progress(session, tenant, None)
+
+
 def test_new_code_from_whatsapp_reaches_the_panel():
     from app.application.messaging.message_service import handle_qrcode_update
     from app.application.whatsapp.whatsapp_service import pairing_code_for

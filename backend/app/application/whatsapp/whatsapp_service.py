@@ -103,6 +103,10 @@ def whatsapp_connect_lock(tenant_id: uuid.UUID) -> Iterator[bool]:
 
 PAIRING_CODE_TTL_SECONDS = 10 * 60
 PAIRING_CODE_WAIT_SECONDS = 12
+# Un clic más en «Conectar» dentro de esta ventana reusa el QR o el código vigente: recrear la
+# instancia invalida lo que el dueño ya tiene en pantalla o está escaneando.
+QR_REUSE_SECONDS = 60
+PAIRING_CODE_REUSE_SECONDS = 120
 
 
 def pairing_number(raw: str) -> Optional[str]:
@@ -117,14 +121,45 @@ def _pairing_key(tenant_id) -> str:
     return f"wa:pairing_code:{tenant_id}"
 
 
-def store_pairing_code(tenant_id, code: Optional[str]) -> None:
+def _pairing_number_key(tenant_id) -> str:
+    return f"wa:pairing_number:{tenant_id}"
+
+
+def store_pairing_code(tenant_id, code: Optional[str], number: Optional[str] = None) -> None:
     try:
+        redis = get_redis()
         if code:
-            get_redis().set(_pairing_key(tenant_id), code, ex=PAIRING_CODE_TTL_SECONDS)
+            redis.set(_pairing_key(tenant_id), code, ex=PAIRING_CODE_TTL_SECONDS)
+            if number:
+                redis.set(_pairing_number_key(tenant_id), number, ex=PAIRING_CODE_REUSE_SECONDS)
         else:
-            get_redis().delete(_pairing_key(tenant_id))
+            redis.delete(_pairing_key(tenant_id), _pairing_number_key(tenant_id))
     except Exception:
         log.warning("No se pudo guardar el código de vinculación tenant=%s", tenant_id)
+
+
+def _recent_pairing_number(tenant_id) -> Optional[str]:
+    try:
+        raw = get_redis().get(_pairing_number_key(tenant_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+
+def _link_attempt_in_progress(session: WhatsAppSession, tenant: Tenant, number: Optional[str]) -> bool:
+    """El QR o el código que el dueño tiene en pantalla sigue vivo en Evolution."""
+    if tenant.whatsapp_status != WhatsAppStatus.CONNECTING.value:
+        return False
+    if number:
+        return _recent_pairing_number(tenant.id) == number and pairing_code_for(tenant.id) is not None
+    if not session.qr_base64 or not session.qr_updated_at:
+        return False
+    updated = session.qr_updated_at
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - updated).total_seconds() < QR_REUSE_SECONDS
 
 
 def pairing_code_for(tenant_id) -> Optional[str]:
@@ -471,6 +506,9 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
         pass
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         return session
+    if _link_attempt_in_progress(session, tenant, number):
+        log.info("Vinculación en curso instancia=%s: se reusa el QR/código vigente", session.instance_name)
+        return session
     # Lo que sigue son varios segundos de llamadas a Evolution: sin soltar las filas del
     # negocio y la sesión, el webhook y el sondeo de estado se cruzan con esta transacción.
     db.commit()
@@ -550,7 +588,7 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
     session.qr_updated_at = datetime.now(timezone.utc) if qr else None
     tenant.whatsapp_status = WhatsAppStatus.CONNECTING.value
     db.flush()
-    store_pairing_code(tenant.id, pairing_code)
+    store_pairing_code(tenant.id, pairing_code, number)
     from app.application.realtime.realtime_service import publish_whatsapp_status
 
     publish_whatsapp_status(
