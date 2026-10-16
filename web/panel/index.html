@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=64" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=76" />
 </head>
 <body>
   <div id="app">
@@ -101,36 +101,42 @@
           <span id="sync-status" class="sync-status dev-only hidden" title="Estado de sincronización con el celular">Sync: —</span>
           <span id="wa-status" class="badge wa-disconnected">WhatsApp</span>
           <button type="button" id="wa-connect-btn" class="btn primary small">Conectar WhatsApp</button>
-          <div class="topbar-wa-actions">
-            <button id="wa-disconnect-btn" class="btn ghost small hidden">Desvincular</button>
-            <a id="wa-chatwoot-link" class="btn ghost small hidden" href="#" target="_blank" rel="noopener noreferrer">Chatwoot</a>
-            <button id="wa-reset-chats-btn" class="btn ghost small hidden" title="Borrar chats de otro celular">Limpiar chats</button>
-          </div>
-          <button type="button" id="topbar-menu-btn" class="topbar-menu-btn" aria-label="Menú" aria-expanded="false" aria-controls="topbar-menu">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>
-          </button>
         </div>
-        <div class="topbar-right" id="topbar-menu">
-          <button type="button" id="guide-btn" class="btn ghost small hidden" title="Repetir el recorrido guiado">Guía</button>
+        <div class="topbar-actions">
           <div id="plan-status-bar" class="plan-status-bar hidden" aria-live="polite">
             <span id="plan-status-label" class="plan-status-label"></span>
             <a href="/mi-plan" data-site-path="/mi-plan" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
           </div>
-          <label class="toggle-row theme-toggle" title="Tema claro con naranja Omitel">
+          <label class="ai-switch" title="Prende o apaga la IA en todos los chats">
+            <input type="checkbox" id="toggle-ai-global" role="switch" />
+            <span class="ai-switch-track" aria-hidden="true"><span class="ai-switch-thumb"></span></span>
+            <span class="ai-switch-label">IA</span>
+          </label>
+          <button type="button" id="topbar-menu-btn" class="topbar-menu-btn" aria-label="Menú de la cuenta" aria-expanded="false" aria-controls="topbar-menu">
+            <span id="topbar-avatar" class="topbar-avatar" aria-hidden="true">O</span>
+          </button>
+        </div>
+        <div class="topbar-right" id="topbar-menu" role="menu">
+          <div class="menu-head">
+            <span id="user-label" class="menu-user"></span>
+          </div>
+          <button type="button" id="guide-btn" class="menu-item hidden">Ver la guía otra vez</button>
+          <a href="/mi-plan" data-site-path="/mi-plan" class="menu-item">Mi plan</a>
+          <label class="menu-item toggle-row theme-toggle">
             <span>Tema claro</span>
             <input type="checkbox" id="theme-toggle" />
           </label>
-          <label class="toggle-row" title="Activa/desactiva IA en todos los chats">
-            <span>IA global</span>
-            <input type="checkbox" id="toggle-ai-global" />
-          </label>
-          <span id="user-label" class="muted"></span>
-          <button id="logout-btn" class="btn ghost">Salir</button>
+          <div class="topbar-wa-actions">
+            <button id="wa-reset-chats-btn" class="menu-item hidden">Limpiar chats de otro celular</button>
+            <a id="wa-chatwoot-link" class="menu-item hidden" href="#" target="_blank" rel="noopener noreferrer">Abrir Chatwoot</a>
+            <button id="wa-disconnect-btn" class="menu-item menu-danger hidden">Desvincular WhatsApp</button>
+          </div>
+          <button id="logout-btn" class="menu-item menu-danger">Cerrar sesión</button>
         </div>
       </header>
 
       <div id="ai-alert-banner" class="ai-alert-banner hidden"></div>
-      <div id="ai-ready-banner" class="ai-alert-banner error ai-ready-banner hidden">
+      <div id="ai-ready-banner" class="ai-alert-banner ai-ready-banner hidden">
         <span id="ai-ready-banner-text"></span>
         <button type="button" id="ai-ready-banner-btn" class="link-btn">Completar ahora</button>
       </div>
@@ -138,11 +144,11 @@
       <div class="layout">
         <aside class="sidebar">
           <div class="sidebar-mode-tabs">
-            <button type="button" id="mode-chats" class="sidebar-mode-tab active">Chats</button>
-            <button type="button" id="mode-orders" class="sidebar-mode-tab hidden">Pedidos <span id="orders-badge" class="tab-count-badge hidden" title="Pedidos listos para despachar">0</span></button>
-            <button type="button" id="mode-appointments" class="sidebar-mode-tab">Citas</button>
-            <button type="button" id="mode-inventory" class="sidebar-mode-tab">Inventario</button>
-            <button type="button" id="mode-ai" class="sidebar-mode-tab">Personalizar IA <span id="ai-questions-badge" class="tab-count-badge hidden" title="Preguntas que la IA no supo responder">0</span></button>
+            <button type="button" id="mode-chats" class="sidebar-mode-tab active"><svg class="mode-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg><span class="mode-label">Chats</span></button>
+            <button type="button" id="mode-orders" class="sidebar-mode-tab hidden"><svg class="mode-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 13H7L6 7zM9 7V6a3 3 0 0 1 6 0v1"/></svg><span class="mode-label">Pedidos</span> <span id="orders-badge" class="tab-count-badge hidden" title="Pedidos listos para despachar">0</span></button>
+            <button type="button" id="mode-appointments" class="sidebar-mode-tab"><svg class="mode-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-12zM4 10h16M8 3v4M16 3v4"/></svg><span class="mode-label">Citas</span></button>
+            <button type="button" id="mode-inventory" class="sidebar-mode-tab"><svg class="mode-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9zM3.5 7.5 12 12l8.5-4.5M12 12v9"/></svg><span class="mode-label">Inventario</span></button>
+            <button type="button" id="mode-ai" class="sidebar-mode-tab"><svg class="mode-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg><span class="mode-label">Tu IA</span> <span id="ai-questions-badge" class="tab-count-badge hidden" title="Preguntas que la IA no supo responder">0</span></button>
           </div>
 
           <div id="sidebar-chats">
@@ -238,13 +244,19 @@
             </form>
           </div>
 
-          <div id="ai-setup-panel" class="ai-setup-panel hidden">
-            <header class="ai-setup-hero">
+          <div id="ai-setup-panel" class="ai-setup-panel hidden" data-section="negocio">
+            <nav class="ai-sections" aria-label="Secciones de tu IA">
+              <button type="button" class="ai-section-tab active" data-ai-section="negocio">Tu negocio</button>
+              <button type="button" class="ai-section-tab" data-ai-section="probar">Probar</button>
+              <button type="button" class="ai-section-tab" data-ai-section="avisos">Avisos <span id="ai-avisos-dot" class="ai-section-dot hidden" aria-label="Falta tu número"></span></button>
+              <button type="button" class="ai-section-tab" data-ai-section="respuestas">Respuestas <span id="ai-respuestas-badge" class="tab-count-badge hidden">0</span></button>
+            </nav>
+            <header class="ai-setup-hero" data-ai-group="negocio">
               <h2>Cuéntanos de tu negocio</h2>
-              <p>La IA atiende, resuelve dudas y, si le cuentas <strong>cómo te pagan</strong>, cierra la venta sola: confirma el pedido, pide la dirección, comparte tus medios de pago y te avisa cuando llega el comprobante.</p>
+              <p>Con esto tu IA responde, cotiza y cierra la venta sola.</p>
             </header>
 
-            <section id="ai-ready-card" class="ai-ready-card hidden">
+            <section id="ai-ready-card" class="ai-ready-card hidden" data-ai-group="negocio">
               <div class="ai-ready-head">
                 <h3 id="ai-ready-title">¿Tu IA está lista para vender?</h3>
                 <span id="ai-ready-count" class="ai-ready-count"></span>
@@ -257,7 +269,7 @@
               </div>
             </section>
 
-            <div class="ai-setup-layout">
+            <div class="ai-setup-layout" data-ai-group="negocio">
               <section class="ai-setup-form-card">
                 <div class="ai-step">
                   <span class="ai-step-num">1</span>
@@ -365,7 +377,7 @@
               </aside>
             </div>
 
-            <section id="try-ai-card" class="ai-shortcuts-card try-ai-card">
+            <section id="try-ai-card" class="ai-shortcuts-card try-ai-card" data-ai-group="probar">
               <div class="ai-shortcuts-card-head">
                 <h3>Prueba tu IA</h3>
                 <p class="muted small">Escríbele como si fueras un cliente. Te responde igual que en WhatsApp, con lo que tengas guardado (precios, fotos, medios de pago), <strong>sin enviarle nada a nadie</strong>.</p>
@@ -387,7 +399,7 @@
               </div>
             </section>
 
-            <section id="ai-questions-card" class="ai-shortcuts-card">
+            <section id="ai-questions-card" class="ai-shortcuts-card" data-ai-group="respuestas">
               <div class="ai-shortcuts-card-head">
                 <h3>Preguntas que la IA no supo responder</h3>
                 <p class="muted small">Cuando un cliente pregunta algo que no le has contado, la IA le dice que le confirmas y te lo anota aquí. <strong>Respóndelo una vez</strong> y la IA lo aprende para todos tus chats.</p>
@@ -400,7 +412,7 @@
               <p id="ai-questions-status" class="ai-save-status muted small"></p>
             </section>
 
-            <section class="ai-shortcuts-card">
+            <section class="ai-shortcuts-card" data-ai-group="respuestas">
               <div class="ai-shortcuts-card-head">
                 <h3>Atajos rápidos</h3>
                 <p class="muted small">Los mismos para <strong>todos tus chats</strong> — menú, precios, fotos… Un clic envía al cliente; la <strong>IA también puede enviarlos sola</strong> cuando pregunten por eso.</p>
@@ -411,7 +423,7 @@
               <button type="button" id="ai-shortcuts-config-btn" class="btn ghost small">Configurar atajos</button>
             </section>
 
-            <section id="alerts-card" class="ai-shortcuts-card">
+            <section id="alerts-card" class="ai-shortcuts-card" data-ai-group="avisos">
               <div class="ai-shortcuts-card-head">
                 <h3>Alertas por WhatsApp</h3>
                 <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando la IA <strong>cierra un pedido</strong>, llega un <strong>comprobante de pago</strong> o se agenda una cita, con sus datos.</p>
@@ -438,7 +450,7 @@
               <p id="alert-save-status" class="ai-save-status muted small"></p>
             </section>
 
-            <section id="followup-card" class="ai-shortcuts-card">
+            <section id="followup-card" class="ai-shortcuts-card" data-ai-group="avisos">
               <div class="ai-shortcuts-card-head">
                 <h3>Seguimiento a clientes que no responden</h3>
                 <p class="muted small">Si un cliente deja de contestar, la IA le escribe <strong>una sola vez</strong> retomando lo que hablaban y le pregunta si sigue interesado. No insiste más hasta que el cliente vuelva a escribir, y solo escribe de 8 a. m. a 8 p. m. dentro de tu horario.</p>
@@ -817,6 +829,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=138"></script>
+  <script src="/static/panel/app.js?v=153"></script>
 </body>
 </html>

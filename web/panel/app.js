@@ -352,6 +352,94 @@
   const messagesEl = $("messages");
   const emptyChat = $("empty-chat");
   const activeChat = $("active-chat");
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
+  const EASE_DRAWER = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+  function animateIn(el, { x = 0, y = 0, scale = 1, opacity = 0, duration = 200, easing = EASE_OUT, delay = 0, origin } = {}) {
+    if (!el?.animate || reducedMotion.matches) return;
+    if (origin) el.style.transformOrigin = origin;
+    el.animate(
+      [
+        { opacity, transform: `translate(${x}px, ${y}px) scale(${scale})` },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration, easing, delay, fill: "backwards" }
+    );
+  }
+
+  function mountTabPill(bar) {
+    if (!bar) return;
+    const pill = document.createElement("span");
+    pill.className = "tab-pill";
+    pill.setAttribute("aria-hidden", "true");
+    bar.prepend(pill);
+    bar.classList.add("has-pill");
+    const place = () => {
+      const tab = bar.querySelector(":scope > .active:not(.hidden)");
+      if (!tab || !tab.offsetWidth) {
+        pill.classList.remove("is-placed");
+        return;
+      }
+      pill.style.width = `${tab.offsetWidth}px`;
+      pill.style.height = `${tab.offsetHeight}px`;
+      pill.style.transform = `translate(${tab.offsetLeft}px, ${tab.offsetTop}px)`;
+      if (!pill.classList.contains("is-placed")) {
+        pill.classList.add("is-placed");
+        requestAnimationFrame(() => pill.classList.add("is-live"));
+      }
+    };
+    new MutationObserver((records) => {
+      if (records.some((r) => r.target !== pill)) place();
+    }).observe(bar, { subtree: true, attributes: true, attributeFilter: ["class"] });
+    const resize = new ResizeObserver(place);
+    resize.observe(bar);
+    bar.querySelectorAll(":scope > button").forEach((tab) => resize.observe(tab));
+    place();
+  }
+
+  let toastTimer = null;
+  function toast(text, { tone = "ok", duration } = {}) {
+    let el = $("omi-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "omi-toast";
+      el.className = "omi-toast";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.innerHTML = '<span class="omi-toast-icon" aria-hidden="true"></span><span class="omi-toast-text"></span>';
+      el.addEventListener("click", () => el.classList.remove("is-open"));
+      document.body.appendChild(el);
+      el.getBoundingClientRect();
+    }
+    el.dataset.tone = tone;
+    el.querySelector(".omi-toast-icon").textContent = tone === "error" ? "!" : "✓";
+    el.querySelector(".omi-toast-text").textContent = text;
+    el.classList.add("is-open");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("is-open"), duration || Math.min(7000, 2600 + text.length * 40));
+  }
+
+  function setStatusText(id, text) {
+    const el = $(id);
+    const msg = text || "";
+    if (msg.startsWith("✓ ")) {
+      toast(msg.slice(2));
+      if (el) el.textContent = "";
+      return;
+    }
+    if (el) el.textContent = msg;
+  }
+
+  mountTabPill(document.querySelector(".sidebar-mode-tabs"));
+  mountTabPill(document.querySelector(".chat-tabs"));
+  mountTabPill(document.querySelector(".ai-sections"));
+  document.querySelector(".ai-sections").addEventListener("click", (e) => {
+    const tab = e.target.closest(".ai-section-tab");
+    if (tab) showAiSection(tab.dataset.aiSection);
+  });
+
   const sendForm = $("send-form");
   const messageInput = $("message-input");
   const wsStatus = $("ws-status");
@@ -860,6 +948,10 @@
       hideQrModal();
       stopWaPoll();
       startLivePoll();
+      if (nextPhone !== prevPhone) {
+        checkAlertRecipients();
+        if (state.canManageGlobal) refreshReadinessSoon();
+      }
       if (phoneChanged) {
         prepareForNewDevice();
         state.autoSyncRequested = true;
@@ -905,7 +997,10 @@
     state.canManageGlobal = me.role === "owner";
     state.canConnectWa = !!me;
     const userLabel = $("user-label");
-    if (userLabel) userLabel.textContent = `${me.full_name} (${me.role})`;
+    const roleName = { owner: "Dueño", admin: "Administrador", agent: "Asesor", viewer: "Solo lectura" }[me.role] || me.role;
+    if (userLabel) userLabel.textContent = `${me.full_name} · ${roleName}`;
+    const avatar = $("topbar-avatar");
+    if (avatar) avatar.textContent = (me.full_name || me.email || "O").trim().charAt(0).toUpperCase();
     const aiGlobal = $("toggle-ai-global");
     if (aiGlobal) aiGlobal.disabled = !state.canManageGlobal;
   }
@@ -1283,9 +1378,11 @@
       steps.push({
         key: "wa",
         mode: "chats",
-        target: () => $("wa-setup-btn") || $("wa-connect-btn"),
+        target: () => ($("wa-setup")?.getClientRects().length ? $("wa-setup") : $("wa-connect-btn")),
         title: "Conecta tu WhatsApp",
-        text: "Toca el botón verde. En el celular: WhatsApp › Dispositivos vinculados › Vincular dispositivo, y escanea el código.",
+        text: preferredWaMode() === "code"
+          ? "Toca el botón verde y escribe el número de este WhatsApp. Te damos un código para escribirlo en WhatsApp › Dispositivos vinculados."
+          : "Toca el botón verde y escanea el código con tu celular: WhatsApp › Dispositivos vinculados › Vincular dispositivo.",
         hint: "Cuando quede conectado, sigo solo.",
       });
     }
@@ -1342,14 +1439,14 @@
       target: () => $("try-ai-card"),
       focus: () => $("try-ai-input"),
       title: "Pruébala tú primero",
-      text: "Escríbele como si fueras un cliente: pregunta precios, pide fotos y compra algo. No se le envía nada a nadie. Si algo no te gusta, ajústalo arriba y vuelve a probar.",
+      text: "Escríbele como si fueras un cliente: pregunta precios, pide fotos y compra algo. No se le envía nada a nadie. Si algo no te gusta, ajústalo en «Tu negocio» y vuelve a probar.",
       done: () => tryAi.turns.some((t) => t.from === "ai"),
     });
     steps.push({
       key: "bye",
       mode: "chats",
       title: "Listo",
-      text: "Aquí ves los chats; en «Interesados», a los que quieren comprar. Si usas este WhatsApp también para cosas personales, apaga «IA activa» en esos chats para que no les responda. Si te pierdes, toca «Guía».",
+      text: "Aquí ves los chats; en «Interesados», a los que quieren comprar. Si usas este WhatsApp también para cosas personales, apaga «IA activa» en esos chats para que no les responda. Si te pierdes, toca tu inicial arriba a la derecha y «Ver la guía otra vez».",
       next: "Entendido",
     });
     return steps;
@@ -1397,12 +1494,18 @@
       const i = tour.steps.findIndex((s) => s.key === goTo);
       tourGo(i >= 0 ? i : tour.index + 1);
     });
+    root.querySelector(".tour-text").addEventListener("click", () => {
+      if (!root.classList.contains("tour-docked")) return;
+      root.querySelector(".tour-pop").classList.toggle("tour-expanded");
+      scheduleTourLayout();
+    });
     root.querySelector(".tour-backdrop").addEventListener("click", () => {
       const pop = root.querySelector(".tour-pop");
       pop.classList.remove("tour-nudge");
       void pop.offsetWidth;
       pop.classList.add("tour-nudge");
     });
+    new ResizeObserver(scheduleTourLayout).observe(root.querySelector(".tour-pop"));
     tour.root = root;
     return root;
   }
@@ -1415,10 +1518,12 @@
     }
     tour.steps = buildTourSteps();
     tour.active = true;
+    document.body.classList.add("tour-on");
     ensureTourRoot().classList.remove("hidden");
     document.addEventListener("keydown", onTourKey);
     window.addEventListener("resize", scheduleTourLayout);
     window.addEventListener("scroll", scheduleTourLayout, true);
+    window.addEventListener("scrollend", scheduleTourLayout, true);
     tourGo(0);
   }
 
@@ -1429,9 +1534,12 @@
     tour.cleanup = null;
     tour.target = null;
     tour.root?.classList.add("hidden");
+    document.body.classList.remove("tour-on", "has-tour-dock");
+    document.documentElement.style.removeProperty("--tour-dock-space");
     document.removeEventListener("keydown", onTourKey);
     window.removeEventListener("resize", scheduleTourLayout);
     window.removeEventListener("scroll", scheduleTourLayout, true);
+    window.removeEventListener("scrollend", scheduleTourLayout, true);
     if (remember) localStorage.setItem(tourStorageKey(), "1");
     setTimeout(maybeShowDiagnostic, 500);
   }
@@ -1474,18 +1582,23 @@
     secondary.textContent = step.secondary?.label || "";
     secondary.classList.toggle("hidden", !step.secondary);
     const pop = root.querySelector(".tour-pop");
-    pop.classList.remove("tour-pop-in");
+    pop.classList.remove("tour-pop-in", "tour-expanded");
     void pop.offsetWidth;
     pop.classList.add("tour-pop-in");
 
     setTimeout(() => {
       if (!tour.active || tour.steps[tour.index] !== step) return;
       const el = step.target?.() || null;
+      revealAiGroup(el);
       tour.target = el && el.getClientRects().length ? el : null;
       if (tour.target) {
         const r = tour.target.getBoundingClientRect();
         if (r.top < 70 || r.bottom > window.innerHeight - 40) {
-          tour.target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+          const tall = r.height > window.innerHeight * 0.5;
+          tour.target.scrollIntoView({
+            block: tall ? "start" : "center",
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+          });
         }
         if (step.advanceOnClick) {
           const target = tour.target;
@@ -1495,14 +1608,21 @@
           target.addEventListener("click", onClick);
           tour.cleanup = () => target.removeEventListener("click", onClick);
         }
+        const resize = new ResizeObserver(scheduleTourLayout);
+        resize.observe(tour.target);
+        const stopClick = tour.cleanup;
+        tour.cleanup = () => {
+          stopClick?.();
+          resize.disconnect();
+        };
         const input = step.focus?.();
         if (input) setTimeout(() => input.focus({ preventScroll: true }), 350);
       }
       layoutTour();
       setTimeout(() => {
         if (tour.steps[tour.index] !== step) return;
-        layoutTour();
         root.querySelector(".tour-done").classList.toggle("hidden", !step.done?.());
+        layoutTour();
       }, 450);
       if (!step.focus) root.querySelector(".tour-next").focus({ preventScroll: true });
     }, 30);
@@ -1520,15 +1640,40 @@
     });
   }
 
+  function visibleBox(el) {
+    let top = 4;
+    let bottom = window.innerHeight - 4;
+    for (let p = el; p && p !== document.body; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      if (cs.position === "fixed") break;
+      if (p === el || cs.overflowY === "visible") continue;
+      const r = p.getBoundingClientRect();
+      top = Math.max(top, r.top);
+      bottom = Math.min(bottom, r.bottom);
+    }
+    return { top, bottom };
+  }
+
+  function bottomNavTop() {
+    const nav = document.querySelector(".sidebar-mode-tabs");
+    if (!nav || !nav.getClientRects().length || getComputedStyle(nav).position !== "fixed") return window.innerHeight;
+    return nav.getBoundingClientRect().top;
+  }
+
   function layoutTour() {
     if (!tour.active || !tour.root) return;
     const W = window.innerWidth;
     const H = window.innerHeight;
     const pad = 8;
     let hole = { x: W / 2, y: H / 2, w: 0, h: 0, r: 0 };
+    let tall = false;
     if (tour.target) {
       const r = tour.target.getBoundingClientRect();
-      hole = { x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2, r: 12 };
+      const clip = visibleBox(tour.target);
+      const top = Math.max(r.top - pad, clip.top);
+      const bottom = Math.min(r.bottom + pad, clip.bottom);
+      hole = { x: r.left - pad, y: top, w: r.width + pad * 2, h: Math.max(bottom - top, 0), r: 12 };
+      tall = r.height > H * 0.5;
     }
     const { x, y, w, h } = hole;
     const rr = Math.min(hole.r, w / 2, h / 2);
@@ -1545,33 +1690,45 @@
     Object.assign(ring.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
 
     const pop = tour.root.querySelector(".tour-pop");
-    const pw = pop.offsetWidth;
-    const ph = pop.offsetHeight;
     const gap = 16;
     const margin = 12;
+    const floor = bottomNavTop();
+    tour.root.classList.remove("tour-docked");
+    const pw = pop.offsetWidth;
+    const fullH = pop.offsetHeight;
+    const roomRight = x + w + gap + pw <= W - margin;
+    const roomLeft = x - gap - pw >= margin;
+    const roomBelow = y + h + gap + fullH <= floor - margin;
+    const roomAbove = y - gap - fullH >= margin;
+    const docked = Boolean(tour.target) && !roomRight && !roomLeft && (tall || (!roomBelow && !roomAbove));
+    tour.root.classList.toggle("tour-docked", docked);
+    if (!docked) pop.classList.remove("tour-expanded");
+    const ph = docked ? pop.offsetHeight : fullH;
+    document.body.classList.toggle("has-tour-dock", docked);
+    document.documentElement.style.setProperty("--tour-dock-space", `${docked ? ph + margin * 2 : 0}px`);
     let left;
     let top;
     if (!tour.target) {
       left = (W - pw) / 2;
-      top = (H - ph) / 2;
-    } else if (y + h + gap + ph <= H - margin) {
+      top = (floor - ph) / 2;
+    } else if (docked) {
+      left = isPhoneLayout() ? (W - pw) / 2 : W - pw - margin * 2;
+      top = floor - ph - margin * (isPhoneLayout() ? 1 : 2);
+    } else if (tall) {
+      left = roomRight ? x + w + gap : x - gap - pw;
+      top = floor - ph - margin * 2;
+    } else if (roomBelow) {
       left = x + w / 2 - pw / 2;
       top = y + h + gap;
-    } else if (y - gap - ph >= margin) {
+    } else if (roomAbove) {
       left = x + w / 2 - pw / 2;
       top = y - gap - ph;
-    } else if (x + w + gap + pw <= W - margin) {
-      left = x + w + gap;
-      top = y + h / 2 - ph / 2;
-    } else if (x - gap - pw >= margin) {
-      left = x - gap - pw;
-      top = y + h / 2 - ph / 2;
     } else {
-      left = (W - pw) / 2;
-      top = H - ph - margin;
+      left = roomRight ? x + w + gap : x - gap - pw;
+      top = y + h / 2 - ph / 2;
     }
     pop.style.left = `${Math.round(Math.min(Math.max(left, margin), W - pw - margin))}px`;
-    pop.style.top = `${Math.round(Math.min(Math.max(top, margin), H - ph - margin))}px`;
+    pop.style.top = `${Math.round(Math.min(Math.max(top, margin), floor - ph - margin))}px`;
   }
 
   async function loadOnboardingStatus() {
@@ -1585,6 +1742,7 @@
       state.onboarding.bookingAllowed = schedule.ai_booking_allowed !== false;
     }
     renderOnboarding();
+    renderAvisosDot();
     loadDiagnostic();
   }
 
@@ -1903,12 +2061,14 @@
         : '<span class="muted">Importando chats y contactos de tu celular…</span>';
       conversationList.appendChild(syncLi);
     }
-    const emptyLabels = {
-      interested: "Sin contactos interesados",
-      not_interested: "Sin contactos no interesados",
-      all: "Sin conversaciones",
+    const emptyStates = {
+      interested: ["Aún no hay interesados", "Cuando alguien pregunte precios o quiera comprar, la IA lo marca y aparece aquí."],
+      not_interested: ["Nadie descartado", "Aquí quedan los contactos que dijeron que no o que solo saludaron."],
+      all: state.wa.status === "connected"
+        ? ["Todo tranquilo por ahora", "Cuando te escriba un cliente, el chat aparece aquí y tu IA le responde."]
+        : ["Tus chats aparecerán aquí", "Conecta tu WhatsApp y verás cada conversación con tus clientes."],
     };
-    const emptyLabel = emptyLabels[state.chatListTab] || emptyLabels.all;
+    const emptyState = emptyStates[state.chatListTab] || emptyStates.all;
 
     let list = state.searchQuery && state.searchPool ? state.searchPool : state.conversations;
     if (state.searchQuery) {
@@ -1921,8 +2081,16 @@
 
     if (!list.length) {
       if (state.syncInProgress) return;
-      const msg = state.searchQuery ? "Sin resultados" : emptyLabel;
-      conversationList.innerHTML = `<li class="conversation-item"><span class="muted">${msg}</span></li>`;
+      const [title, hint] = state.searchQuery
+        ? ["Sin resultados", `No encontramos chats con «${state.searchQuery}». Prueba con el nombre o el número.`]
+        : emptyState;
+      conversationList.innerHTML = `
+        <li class="list-empty">
+          <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${state.searchQuery ? "M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4" : "M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"}"/></svg></span>
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(hint)}</span>
+        </li>`;
+      animateIn(conversationList.firstElementChild, { y: 6, duration: 220 });
       return;
     }
     for (const c of list) {
@@ -2106,9 +2274,20 @@
     return '<span class="ticks sent" title="Enviado">✓</span>';
   }
 
+  let renderedMsgs = { convId: null, ids: new Set(), bodies: new Set() };
+
   function renderMessages() {
     messagesEl.innerHTML = "";
+    const sameChat = renderedMsgs.convId === state.activeId && renderedMsgs.ids.size > 0;
+    const ids = new Set();
+    const bodies = new Set();
+    const arrived = [];
     for (const m of dedupeMessages(state.messages)) {
+      const idKey = m.id || `${m.body}|${m.created_at}`;
+      const bodyKey = `${m.direction}|${m.body}`;
+      const isNew = sameChat && !renderedMsgs.ids.has(idKey) && !renderedMsgs.bodies.has(bodyKey);
+      ids.add(idKey);
+      bodies.add(bodyKey);
       const ticks = m.direction === "out" ? outboundTicks(m.status) : "";
       const timeHtml = `<span class="time">${formatTime(m.created_at)} · ${m.source}${ticks}</span>`;
       const mediaType = detectMediaType(m.body);
@@ -2123,8 +2302,21 @@
         div.innerHTML = `${caption}${timeHtml}`;
       }
       messagesEl.appendChild(div);
+      if (isNew) arrived.push({ div, inbound: m.direction === "in" });
     }
+    renderedMsgs = { convId: state.activeId, ids, bodies };
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (arrived.length <= 4) {
+      arrived.forEach(({ div, inbound }, i) =>
+        animateIn(div, {
+          y: 10,
+          scale: 0.96,
+          duration: 260,
+          delay: i * 50,
+          origin: inbound ? "bottom left" : "bottom right",
+        })
+      );
+    }
   }
 
   // —— Resultados: lo que la IA le generó al negocio ——
@@ -2297,7 +2489,15 @@
     }
   });
 
+  const MODE_PANELS = {
+    ai: "ai-setup-panel",
+    appointments: "appointments-panel",
+    inventory: "inventory-panel",
+    orders: "orders-panel",
+  };
+
   function switchPanelMode(mode) {
+    const changed = state.panelMode !== mode;
     state.panelMode = mode;
     const isChats = mode === "chats";
     const isAppointments = mode === "appointments";
@@ -2338,6 +2538,14 @@
       }
     }
     renderQuickShortcuts();
+    if (changed) {
+      if (isChats) {
+        animateIn($("sidebar-chats"), { y: 6, duration: 220 });
+        if (!isPhoneLayout()) animateIn(state.activeId ? activeChat : emptyChat, { y: 6, duration: 220 });
+      } else {
+        animateIn($(MODE_PANELS[mode]), { y: 8, duration: 240 });
+      }
+    }
   }
 
   function isoToTimeInput(iso) {
@@ -2382,9 +2590,8 @@
     el.classList.toggle("error", Boolean(isError && msg));
   }
 
-  function setScheduleStatus(msg) {
-    const el = $("schedule-save-status");
-    if (el) el.textContent = msg || "";
+  function setScheduleStatus(text) {
+    setStatusText("schedule-save-status", text);
   }
 
   function hideAppointmentModal() {
@@ -3126,12 +3333,25 @@
 
   function renderReadyBanner() {
     const missing = missingReadiness();
-    const show = Boolean(missing.length && state.tenant?.ai_global_enabled && state.canManageGlobal);
+    const ownNumber = (state.aiProfile?.tips || []).some((t) => t.key === "alerts-own");
+    renderAvisosDot();
+    const show = Boolean(state.canManageGlobal && (ownNumber || (missing.length && state.tenant?.ai_global_enabled)));
     $("ai-ready-banner").classList.toggle("hidden", !show);
-    if (show) {
+    $("ai-ready-banner").dataset.target = ownNumber ? "alert-recipients" : "";
+    $("ai-ready-banner").classList.toggle("error", ownNumber);
+    $("ai-ready-banner-btn").textContent = ownNumber ? "Cambiar número" : "Completar";
+    if (show && ownNumber) {
       $("ai-ready-banner-text").textContent =
-        `Tu IA está respondiendo a medias: le falta ${listEs(missing.map((i) => i.label.toLowerCase()))}. ` +
-        "Sin eso le dice «te confirmo» a tus clientes.";
+        "Los avisos de venta van al mismo WhatsApp del negocio: te llegan como mensaje a ti mismo y no suenan. " +
+        "Pon tu número personal.";
+    } else if (show) {
+      const labels = missing.map((i) => i.label.toLowerCase());
+      const extra = '<span class="banner-extra"> para vender sin decir «te confirmo»</span>.';
+      $("ai-ready-banner-text").innerHTML =
+        missing.length === 1
+          ? `A tu IA solo le falta ${escapeHtml(labels[0])}${extra}`
+          : `A tu IA le faltan ${missing.length} datos${extra}`;
+      $("ai-ready-banner-text").title = listEs(labels);
     }
   }
 
@@ -3142,6 +3362,7 @@
     }
     if (state.panelMode !== "ai") switchPanelMode("ai");
     const target = (fieldId && $(fieldId)) || $("ai-ready-card");
+    revealAiGroup(target);
     target.scrollIntoView({ behavior: "smooth", block: "center" });
     if (target.focus) target.focus({ preventScroll: true });
   }
@@ -3160,8 +3381,7 @@
   }
 
   function setAiQuestionsStatus(text) {
-    const el = $("ai-questions-status");
-    if (el) el.textContent = text || "";
+    setStatusText("ai-questions-status", text);
   }
 
   function renderAiQuestionsBadge() {
@@ -3169,6 +3389,30 @@
     const badge = $("ai-questions-badge");
     badge.textContent = String(open);
     badge.classList.toggle("hidden", !open || !state.canManageGlobal);
+    $("ai-respuestas-badge").textContent = String(open);
+    $("ai-respuestas-badge").classList.toggle("hidden", !open);
+  }
+
+  function renderAvisosDot() {
+    const ownNumber = (state.aiProfile?.tips || []).some((t) => t.key === "alerts-own");
+    $("ai-avisos-dot").classList.toggle("hidden", !(ownNumber || state.onboarding.alertCount === 0));
+  }
+
+  function showAiSection(name, { animate = true } = {}) {
+    const panel = $("ai-setup-panel");
+    if (!name || panel.dataset.section === name) return;
+    panel.dataset.section = name;
+    panel.querySelectorAll(".ai-section-tab").forEach((b) => b.classList.toggle("active", b.dataset.aiSection === name));
+    panel.scrollTop = 0;
+    if (animate) {
+      panel.querySelectorAll(`[data-ai-group="${name}"]`).forEach((el, i) =>
+        animateIn(el, { y: 8, duration: 240, delay: i * 40 })
+      );
+    }
+  }
+
+  function revealAiGroup(el) {
+    showAiSection(el?.closest?.("[data-ai-group]")?.dataset.aiGroup, { animate: false });
   }
 
   const PHOTO_WORDS = /fot|imag|pic|se ve|luce/i;
@@ -3395,17 +3639,41 @@
   }
 
   function setAlertStatus(text) {
-    const el = $("alert-save-status");
-    if (el) el.textContent = text || "";
+    setStatusText("alert-save-status", text);
+  }
+
+  const OWN_ALERT_NUMBER =
+    "Ese es el WhatsApp de tu negocio: el aviso te llegaría como un mensaje a ti mismo, sin sonar, " +
+    "y no te enterarías. Pon tu número personal o el de quien atiende.";
+
+  function isBusinessNumber(phone) {
+    const own = phoneTailDigits(state.wa?.phone_number);
+    return Boolean(own) && phoneTailDigits(phone) === own;
+  }
+
+  function checkAlertRecipients() {
+    const clashes = [];
+    document.querySelectorAll("#alert-recipients .alert-recipient").forEach((row) => {
+      const input = row.querySelector(".alert-phone");
+      const own = isBusinessNumber(getPhoneValue(input));
+      row.classList.toggle("is-own-number", own);
+      input.setAttribute("aria-invalid", own ? "true" : "false");
+      if (own) clashes.push(input);
+    });
+    $("alert-warning").textContent = clashes.length ? OWN_ALERT_NUMBER : "";
+    $("alert-warning").classList.toggle("hidden", !clashes.length);
+    return clashes;
   }
 
   function fillInterestAlert(cfg) {
     renderAlertRecipients(cfg?.recipients || []);
     $("alert-warning").textContent = cfg?.warning || "";
     $("alert-warning").classList.toggle("hidden", !cfg?.warning);
+    if (state.wa?.phone_number) checkAlertRecipients();
     if (cfg) {
       state.onboarding.alertCount = (cfg.recipients || []).length;
       renderOnboarding();
+      renderAvisosDot();
     }
     updateAiSetupControls();
     $("alert-threshold").value = cfg?.alert_threshold || 10;
@@ -3429,6 +3697,21 @@
 
   async function saveInterestAlert() {
     if (!state.canManageGlobal) return;
+    const clashes = checkAlertRecipients();
+    if (clashes.length) {
+      const field = clashes[0].closest(".phone-field") || clashes[0];
+      field.scrollIntoView({ behavior: "smooth", block: "center" });
+      clashes[0].focus({ preventScroll: true });
+      if (!reducedMotion.matches) {
+        field.animate(
+          [{ transform: "none" }, { transform: "translateX(-6px)" }, { transform: "translateX(5px)" },
+            { transform: "translateX(-3px)" }, { transform: "none" }],
+          { duration: 320, easing: "ease-out" }
+        );
+      }
+      setAlertStatus("");
+      return;
+    }
     $("alert-save-btn").disabled = true;
     setAlertStatus("Guardando…");
     try {
@@ -3455,8 +3738,7 @@
   }
 
   function setFollowupStatus(text) {
-    const el = $("followup-status");
-    if (el) el.textContent = text || "";
+    setStatusText("followup-status", text);
   }
 
   async function loadFollowup() {
@@ -3507,8 +3789,7 @@
   }
 
   function setBizSaveStatus(text) {
-    const el = $("biz-save-status");
-    if (el) el.textContent = text || "";
+    setStatusText("biz-save-status", text);
   }
 
   async function loadAiSetupPanel() {
@@ -3549,7 +3830,7 @@
   }
 
   function setOrdersStatus(text) {
-    $("orders-status").textContent = text || "";
+    setStatusText("orders-status", text);
   }
 
   function orderCard(o) {
@@ -3839,8 +4120,7 @@
   }
 
   function setProductsStatus(text) {
-    const el = $("products-status");
-    if (el) el.textContent = text || "";
+    setStatusText("products-status", text);
   }
 
   function addProductRow() {
@@ -4393,9 +4673,16 @@
     const conv = state.conversations.find((c) => c.id === id);
     if (!conv) return;
 
+    const wasOpen = !activeChat.classList.contains("hidden");
     if (isPhoneLayout() && !history.state?.omitelChat) history.pushState({ omitelChat: true }, "");
     emptyChat.classList.add("hidden");
     activeChat.classList.remove("hidden");
+    messagesEl.innerHTML = "";
+    if (isPhoneLayout() && !wasOpen) {
+      animateIn($("chat-area"), { x: 36, opacity: 0.4, duration: 300, easing: EASE_DRAWER });
+    } else if (!wasOpen) {
+      animateIn(activeChat, { y: 6, duration: 200 });
+    }
     $("chat-title").textContent = convTitle(conv);
     applyChatContactPhone(conv);
     syncChatToggles(conv);
@@ -4410,6 +4697,7 @@
         .map((m) => m.id || `${m.body}|${m.created_at}`)
         .join("\n");
       renderMessages();
+      animateIn(messagesEl, { y: 4, duration: 180 });
       if (state.wa.status === "connected") pullActiveChat();
       if (conv.unread_count) {
         conv.unread_count = 0;
@@ -5240,6 +5528,7 @@
     activeChat.classList.add("hidden");
     renderConversationList();
     renderQuickShortcuts();
+    if (isPhoneLayout()) animateIn(document.querySelector(".sidebar"), { x: -24, opacity: 0.5, duration: 280, easing: EASE_DRAWER });
   }
 
   $("chat-back-btn").addEventListener("click", () => {
@@ -5303,7 +5592,9 @@
   });
   $("staff-modal-backdrop")?.addEventListener("click", hideStaffModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
-  $("ai-ready-banner-btn").addEventListener("click", () => goToReadinessField(null));
+  $("ai-ready-banner-btn").addEventListener("click", () =>
+    goToReadinessField($("ai-ready-banner").dataset.target || null)
+  );
   $("ai-ready-list").addEventListener("click", (e) => {
     if (e.target.closest(".ai-ready-import")) {
       if (state.canManageGlobal) importCatalogFromReadiness();
@@ -5347,8 +5638,13 @@
   $("alert-add-btn").addEventListener("click", () => addAlertRecipient());
   $("alert-recipients").addEventListener("click", (e) => {
     const btn = e.target.closest(".alert-remove");
-    if (btn) removeAlertRecipient(btn);
+    if (btn) {
+      removeAlertRecipient(btn);
+      checkAlertRecipients();
+    }
   });
+  $("alert-recipients").addEventListener("input", () => checkAlertRecipients());
+  $("alert-recipients").addEventListener("change", () => checkAlertRecipients());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("products-add-btn")?.addEventListener("click", addProductRow);
   $("products-import-btn")?.addEventListener("click", importProductsFromCatalog);
