@@ -175,6 +175,15 @@ class WahaClient:
         }
         return self._request("POST", "/api/sendFile", json=payload, timeout=60.0)
 
+    def send_voice(self, session: str, chat_id: str, *, data_b64: str, mimetype: str) -> dict:
+        payload = {
+            "session": session,
+            "chatId": chat_id,
+            "file": {"mimetype": mimetype, "data": data_b64},
+            "convert": True,
+        }
+        return self._request("POST", "/api/sendVoice", json=payload, timeout=60.0)
+
     def send_buttons(
         self,
         session: str,

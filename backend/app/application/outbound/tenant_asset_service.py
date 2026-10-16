@@ -70,6 +70,68 @@ def read_chat_image(upload: UploadFile) -> tuple[bytes, str]:
     raise HTTPException(status_code=400, detail="Solo se pueden enviar fotos JPG, PNG o WEBP")
 
 
+_VOICE_MAX_BYTES = 10 * 1024 * 1024
+
+
+def read_chat_voice(upload: UploadFile) -> tuple[bytes, str]:
+    """Nota de voz grabada en el navegador: WebM/Opus (Chrome, Android), MP4/AAC (iPhone) u OGG (Firefox)."""
+    raw = upload.file.read(_VOICE_MAX_BYTES + 1)
+    if len(raw) > _VOICE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="La nota de voz es muy larga")
+    if len(raw) < 64:
+        raise HTTPException(status_code=400, detail="La nota de voz quedó vacía. Graba de nuevo.")
+    if raw.startswith(b"\x1a\x45\xdf\xa3"):
+        return raw, "audio/webm"
+    if raw.startswith(b"OggS"):
+        return raw, "audio/ogg"
+    if raw[4:8] == b"ftyp":
+        return raw, "audio/mp4"
+    if raw.startswith(b"ID3") or raw[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return raw, "audio/mpeg"
+    raise HTTPException(status_code=400, detail="No pudimos leer la nota de voz. Graba de nuevo.")
+
+
+CHAT_FILE_MAX_BYTES = 16 * 1024 * 1024
+_CHAT_FILE_MIME = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".zip": "application/zip",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".mp3": "audio/mpeg",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def read_chat_file(upload: UploadFile) -> tuple[bytes, str, str]:
+    """Archivo adjunto en el chat: (bytes, mimetype, nombre que verá el cliente)."""
+    raw = upload.file.read(CHAT_FILE_MAX_BYTES + 1)
+    if len(raw) > CHAT_FILE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="El archivo no puede superar 16 MB")
+    if not raw:
+        raise HTTPException(status_code=400, detail="El archivo está vacío")
+    name = display_file_name(upload.filename or "", default="archivo")
+    mime = _CHAT_FILE_MIME.get(Path(name).suffix.lower())
+    if not mime:
+        raise HTTPException(
+            status_code=400,
+            detail="Ese tipo de archivo no se puede enviar. Prueba con PDF, Word, Excel, fotos o videos.",
+        )
+    if mime == "application/pdf" and not raw.startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Ese PDF está dañado")
+    return raw, mime, name
+
+
 def save_product_photo(tenant_id: uuid.UUID, upload: UploadFile) -> str:
     """Solo fotos que WhatsApp muestra bien (JPG, PNG, WEBP), revisando el archivo y no su nombre."""
     raw, mime = read_chat_image(upload)

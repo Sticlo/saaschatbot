@@ -27,6 +27,7 @@ _MIME_EXT: dict[str, str] = {
     "image/gif": "gif",
     "video/mp4": "mp4",
     "video/webm": "webm",
+    "audio/webm": "webm",
     "audio/ogg": "ogg",
     "audio/ogg; codecs=opus": "ogg",
     "audio/mpeg": "mp3",

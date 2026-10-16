@@ -33,11 +33,16 @@ from app.application.realtime.realtime_service import publish_conversation_updat
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError
-from app.application.whatsapp.whatsapp_service import send_image_data_message, send_text_message
+from app.application.whatsapp.whatsapp_service import (
+    send_document_data_message,
+    send_image_data_message,
+    send_text_message,
+    send_voice_data_message,
+)
 from app.application.ai.ai_service import clear_awaiting_human
 from app.application.ai.ai_shortcut_service import send_shortcut_content
 from app.application.outbound.quick_shortcut_service import find_shortcut
-from app.application.outbound.tenant_asset_service import read_chat_image
+from app.application.outbound.tenant_asset_service import read_chat_file, read_chat_image, read_chat_voice
 from app.shared.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -562,6 +567,111 @@ def send_image(
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    return message
+
+
+def _chat_send_target(db: Session, tenant_id: uuid.UUID, conversation_id: uuid.UUID):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).first()
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.tenant_id == tenant_id)
+        .first()
+    )
+    if tenant is None or session is None or conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación o WhatsApp no encontrado")
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise HTTPException(status_code=409, detail=reason)
+    return tenant, session, conversation
+
+
+@router.post("/{conversation_id}/messages/audio", response_model=MessageResponse, status_code=201)
+def send_voice_note(
+    conversation_id: uuid.UUID,
+    request: Request,
+    current: RequireAgent,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Nota de voz grabada con el micrófono del chat."""
+    tenant, session, conversation = _chat_send_target(db, current.tenant_id, conversation_id)
+    enforce_rate_limit(
+        f"chat:audio:{current.tenant_id}",
+        limit=60,
+        window_seconds=600,
+        message="Enviaste muchas notas de voz seguidas. Espera un momento e intenta de nuevo.",
+    )
+    raw, mime = read_chat_voice(file)
+    try:
+        message = send_voice_data_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            data_b64=base64.b64encode(raw).decode("ascii"),
+            mimetype=mime,
+            source=MessageSource.AGENT.value,
+        )
+        log_audit(
+            db,
+            tenant_id=tenant.id,
+            user_id=current.id,
+            action="message.sent_voice",
+            details={"conversation_id": str(conversation.id), "bytes": len(raw)},
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+        db.refresh(message)
+    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return message
+
+
+@router.post("/{conversation_id}/messages/file", response_model=MessageResponse, status_code=201)
+def send_chat_file(
+    conversation_id: uuid.UUID,
+    request: Request,
+    current: RequireAgent,
+    file: UploadFile = File(...),
+    caption: str = Form("", max_length=1024),
+    db: Session = Depends(get_db),
+):
+    """Documento que el dueño adjunta con el «+» del chat (PDF, Word, Excel, videos…)."""
+    tenant, session, conversation = _chat_send_target(db, current.tenant_id, conversation_id)
+    enforce_rate_limit(
+        f"chat:file:{current.tenant_id}",
+        limit=40,
+        window_seconds=600,
+        message="Enviaste muchos archivos seguidos. Espera un momento e intenta de nuevo.",
+    )
+    raw, mime, name = read_chat_file(file)
+    try:
+        message = send_document_data_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            data_b64=base64.b64encode(raw).decode("ascii"),
+            mimetype=mime,
+            file_name=name,
+            caption=caption.strip(),
+            source=MessageSource.AGENT.value,
+        )
+        log_audit(
+            db,
+            tenant_id=tenant.id,
+            user_id=current.id,
+            action="message.sent_file",
+            details={"conversation_id": str(conversation.id), "bytes": len(raw), "mimetype": mime},
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+        db.refresh(message)
+    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return message
 
 

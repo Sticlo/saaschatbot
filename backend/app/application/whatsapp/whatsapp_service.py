@@ -50,6 +50,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     send_text as gateway_send_text,
     send_image as gateway_send_image,
     send_document as gateway_send_document,
+    send_voice as gateway_send_voice,
     uses_waha,
 )
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
@@ -891,6 +892,79 @@ def send_image_data_message(
         body=display_body[:4096],
         source=source,
         evolution_id=evolution_id,
+    )
+
+
+def send_voice_data_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    data_b64: str,
+    mimetype: str,
+    source: str,
+) -> Message:
+    """Nota de voz grabada en el panel: le llega al cliente como si la hubieras grabado en WhatsApp."""
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise EvolutionAPIError(reason)
+
+    conversation, recipient = _prepare_outbound_recipient(
+        db, tenant=tenant, session=session, conversation=conversation
+    )
+    result = gateway_send_voice(session.instance_name, recipient, data_b64=data_b64, mimetype=mimetype)
+    evolution_id = _extract_evolution_id(result)
+    if evolution_id:
+        from app.application.messaging.media_cache import save_media_from_webhook
+
+        save_media_from_webhook(str(tenant.id), evolution_id, data_b64, media_type="audio", mimetype=mimetype)
+    return _record_outbound_message(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        body="[audio]",
+        source=source,
+        evolution_id=evolution_id,
+    )
+
+
+def send_document_data_message(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    data_b64: str,
+    mimetype: str,
+    file_name: str,
+    caption: str = "",
+    source: str,
+) -> Message:
+    """Archivo que el dueño adjunta en el chat (PDF, Word, Excel…): se manda tal cual, no se guarda."""
+    ok, reason = can_send_whatsapp(tenant.whatsapp_status)
+    if not ok:
+        raise EvolutionAPIError(reason)
+
+    conversation, recipient = _prepare_outbound_recipient(
+        db, tenant=tenant, session=session, conversation=conversation
+    )
+    result = gateway_send_document(
+        session.instance_name,
+        recipient,
+        data_b64=data_b64,
+        mimetype=mimetype,
+        filename=file_name,
+        caption=caption[:1024],
+    )
+    body = f"📄 {file_name}\n{caption}".strip() if caption else f"📄 {file_name}"
+    return _record_outbound_message(
+        db,
+        tenant=tenant,
+        conversation=conversation,
+        body=body[:4096],
+        source=source,
+        evolution_id=_extract_evolution_id(result),
     )
 
 

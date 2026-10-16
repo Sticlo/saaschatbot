@@ -230,6 +230,13 @@ class EvolutionClient:
             "POST", f"/message/sendMedia/{instance_name}", json=payload, timeout=45.0
         )
 
+    def send_whatsapp_audio(self, instance_name: str, number: str, *, audio_b64: str) -> dict:
+        """Nota de voz (PTT): Evolution la convierte a OGG/Opus para que se vea como grabada."""
+        payload = {"number": number, "audio": audio_b64, "encoding": True}
+        return self._request(
+            "POST", f"/message/sendWhatsAppAudio/{instance_name}", json=payload, timeout=60.0
+        )
+
     def send_buttons(
         self,
         instance_name: str,

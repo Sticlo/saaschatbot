@@ -63,6 +63,7 @@
   // Caché de resultados de media: msgId → {ok: bool, data?} para no repetir fetches
   const mediaCache = new Map();
   let pendingImage = null; // foto pegada o adjunta en el chat, antes de enviarla
+  let pendingFile = null; // documento o video adjunto con el «+», antes de enviarlo
 
   const $ = (id) => document.getElementById(id);
 
@@ -2300,6 +2301,147 @@
     }[type] || "Ver media";
   }
 
+  const lightbox = { el: null, img: null, zoom: 1, x: 0, y: 0 };
+
+  function ensureLightbox() {
+    if (lightbox.el) return lightbox.el;
+    const el = document.createElement("div");
+    el.className = "lightbox";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-modal", "true");
+    el.setAttribute("aria-label", "Foto");
+    el.innerHTML = `
+      <div class="lightbox-bar">
+        <button type="button" class="lightbox-btn" data-lb-close aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+        <a class="lightbox-btn" data-lb-save download="foto.jpg" aria-label="Guardar foto">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
+        </a>
+      </div>
+      <img class="lightbox-img" alt="Foto" draggable="false" />`;
+    document.body.appendChild(el);
+    lightbox.el = el;
+    lightbox.img = el.querySelector(".lightbox-img");
+    el.querySelector("[data-lb-close]").addEventListener("click", () => closeLightbox());
+    el.addEventListener("click", (e) => {
+      if (e.target === el && lightbox.zoom === 1 && !lightbox.dragged) closeLightbox();
+    });
+    bindLightboxGestures(el, lightbox.img);
+    return el;
+  }
+
+  function applyLightboxTransform(extraY = 0) {
+    const { img, zoom, x, y } = lightbox;
+    img.style.transform = `translate(${x}px, ${y + extraY}px) scale(${zoom})`;
+  }
+
+  function bindLightboxGestures(el, img) {
+    let start = null;
+    let lastTap = 0;
+    el.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".lightbox-bar")) return;
+      start = { x: e.clientX, y: e.clientY, ox: lightbox.x, oy: lightbox.y, t: Date.now() };
+      lightbox.dragged = false;
+      img.classList.add("is-dragging");
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!start) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (Math.abs(dx) + Math.abs(dy) > 6) lightbox.dragged = true;
+      if (lightbox.zoom > 1) {
+        lightbox.x = start.ox + dx;
+        lightbox.y = start.oy + dy;
+        applyLightboxTransform();
+      } else if (dy > 0) {
+        applyLightboxTransform(dy);
+        el.style.setProperty("--lb-fade", String(Math.max(0.25, 1 - dy / 400)));
+      }
+    });
+    const end = (e) => {
+      if (!start) return;
+      const dy = e.clientY - start.y;
+      const quick = Date.now() - start.t < 250;
+      img.classList.remove("is-dragging");
+      el.style.removeProperty("--lb-fade");
+      if (lightbox.zoom === 1 && dy > 110) {
+        start = null;
+        closeLightbox();
+        return;
+      }
+      if (lightbox.zoom === 1) applyLightboxTransform();
+      if (!lightbox.dragged && quick && e.target === img) {
+        const now = Date.now();
+        if (now - lastTap < 300) {
+          toggleLightboxZoom(e.clientX, e.clientY);
+          lastTap = 0;
+        } else {
+          lastTap = now;
+        }
+      }
+      start = null;
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    img.addEventListener("dblclick", (e) => e.preventDefault());
+  }
+
+  function toggleLightboxZoom(cx, cy) {
+    if (lightbox.zoom > 1) {
+      Object.assign(lightbox, { zoom: 1, x: 0, y: 0 });
+    } else {
+      const r = lightbox.img.getBoundingClientRect();
+      const z = 2.4;
+      lightbox.zoom = z;
+      lightbox.x = (r.left + r.width / 2 - cx) * (z - 1);
+      lightbox.y = (r.top + r.height / 2 - cy) * (z - 1);
+    }
+    lightbox.el.classList.toggle("is-zoomed", lightbox.zoom > 1);
+    applyLightboxTransform();
+  }
+
+  function openLightbox(src, fromEl) {
+    const el = ensureLightbox();
+    Object.assign(lightbox, { zoom: 1, x: 0, y: 0, dragged: false });
+    lightbox.img.src = src;
+    lightbox.img.style.transform = "";
+    el.querySelector("[data-lb-save]").href = src;
+    el.classList.remove("is-zoomed");
+    el.classList.add("is-open");
+    document.body.classList.add("lightbox-open");
+    if (!history.state?.omitelLightbox) history.pushState({ ...(history.state || {}), omitelLightbox: true }, "");
+    if (fromEl && !reducedMotion.matches) {
+      const a = fromEl.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        const b = lightbox.img.getBoundingClientRect();
+        if (!b.width) return;
+        const sx = a.width / b.width;
+        const dx = a.left + a.width / 2 - (b.left + b.width / 2);
+        const dy = a.top + a.height / 2 - (b.top + b.height / 2);
+        lightbox.img.animate(
+          [{ transform: `translate(${dx}px, ${dy}px) scale(${sx})`, opacity: 0.6 }, { transform: "none", opacity: 1 }],
+          { duration: 260, easing: EASE_DRAWER }
+        );
+      });
+    }
+    el.querySelector("[data-lb-close]").focus({ preventScroll: true });
+  }
+
+  function closeLightbox(fromHistory = false) {
+    if (!lightbox.el?.classList.contains("is-open")) return;
+    lightbox.el.classList.remove("is-open");
+    document.body.classList.remove("lightbox-open");
+    if (!fromHistory && history.state?.omitelLightbox) {
+      lightbox.popping = true;
+      history.back();
+    }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && lightbox.el?.classList.contains("is-open")) closeLightbox();
+  });
+
   function _renderMediaElement(type, base64, mimetype) {
     const src = `data:${mimetype};base64,${base64}`;
     const mt = type;
@@ -2309,7 +2451,7 @@
       el.src = src;
       el.className = "media-img";
       el.alt = mt;
-      el.addEventListener("click", () => window.open(src));
+      el.addEventListener("click", () => openLightbox(src, el));
     } else if (mt === "video") {
       el = document.createElement("video");
       el.src = src;
@@ -2433,7 +2575,7 @@
         div = document.createElement("div");
         div.className = "msg " + (m.direction === "in" ? "in" : "out");
         const caption = m.body && !detectMediaType(m.body) ? escapeHtml(m.body) : escapeHtml(m.body);
-        div.innerHTML = `${caption}${timeHtml}`;
+        div.innerHTML = `<span class="msg-text">${caption}</span>${timeHtml}`;
       }
       const dir = m.direction === "in" ? "in" : "out";
       if (dir !== prevDir) div.classList.add("tail");
@@ -4813,7 +4955,10 @@
 
   async function selectConversation(id) {
     pullInFlight = false;
-    if (pendingImage && pendingImage.conversationId !== id) clearPendingImage();
+    if ((pendingImage && pendingImage.conversationId !== id) || (pendingFile && pendingFile.conversationId !== id)) {
+      clearPendingImage();
+    }
+    cancelVoiceNote();
     if (state.activeId && state.activeId !== id) cacheMessages(state.activeId, state.messages);
     state.activeId = id;
     state.messages = [];
@@ -5695,6 +5840,7 @@
 
   function closeActiveChat() {
     if (!state.activeId) return;
+    cancelVoiceNote();
     if (pendingImage) clearPendingImage();
     cacheMessages(state.activeId, state.messages);
     state.activeId = null;
@@ -5712,6 +5858,14 @@
     else closeActiveChat();
   });
   window.addEventListener("popstate", () => {
+    if (lightbox.popping) {
+      lightbox.popping = false;
+      return;
+    }
+    if (lightbox.el?.classList.contains("is-open")) {
+      closeLightbox(true);
+      return;
+    }
     if (!history.state?.omitelChat) closeActiveChat();
   });
 
@@ -5922,34 +6076,78 @@
   function clearPendingImage() {
     if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl);
     pendingImage = null;
+    pendingFile = null;
     $("composer-attachment").classList.add("hidden");
     $("composer-attachment-img").removeAttribute("src");
-    $("attach-image-input").value = "";
-    messageInput.placeholder = "Escribe un mensaje…";
+    for (const id of ["attach-image-input", "camera-input", "attach-file-input"]) $(id).value = "";
+    messageInput.placeholder = "Mensaje";
+    syncComposerMode();
+  }
+
+  function showAttachmentCard({ title, hint, previewUrl }) {
+    $("composer-attachment-img").classList.toggle("hidden", !previewUrl);
+    if (previewUrl) $("composer-attachment-img").src = previewUrl;
+    $("composer-attachment-doc").classList.toggle("hidden", Boolean(previewUrl));
+    $("composer-attachment-title").textContent = title;
+    $("composer-attachment-hint").textContent = hint;
+    $("composer-attachment").classList.remove("hidden");
+    animateIn($("composer-attachment"), { y: 8, duration: 200 });
+    messageInput.placeholder = "Agrega un comentario (opcional)";
+    messageInput.focus();
+    syncComposerMode();
+  }
+
+  function canSendFromComposer(what) {
+    if (!state.activeId) return false;
+    if (!state.canWrite) {
+      alert("Tu usuario no puede enviar mensajes. Pide acceso de agente o dueño.");
+      return false;
+    }
+    if (sendForm.classList.contains("disabled")) {
+      alert(`Conecta WhatsApp para enviar ${what}.`);
+      return false;
+    }
+    return true;
+  }
+
+  const CHAT_FILE_MAX = 16 * 1024 * 1024;
+  function setPendingFile(file) {
+    if (!file || !canSendFromComposer("archivos")) return;
+    if (file.size > CHAT_FILE_MAX) {
+      alert("El archivo no puede superar 16 MB.");
+      return;
+    }
+    clearPendingImage();
+    pendingFile = { file, conversationId: state.activeId };
+    const kb = file.size / 1024;
+    const size = kb > 1024 ? `${(kb / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(kb))} KB`;
+    showAttachmentCard({ title: file.name, hint: `${size} · toca enviar para mandarlo` });
+  }
+
+  function pickAttachment(file) {
+    if (!file) return;
+    if (file.type.startsWith("image/") && CHAT_IMAGE_TYPES.concat(["image/heic", "image/heif", "image/gif"]).includes(file.type)) {
+      setPendingImage(file);
+    } else {
+      setPendingFile(file);
+    }
   }
 
   async function setPendingImage(file) {
-    if (!file || !state.activeId) return;
-    if (!state.canWrite) {
-      alert("Tu usuario no puede enviar mensajes. Pide acceso de agente o dueño.");
-      return;
-    }
-    if (sendForm.classList.contains("disabled")) {
-      alert("Conecta WhatsApp para enviar fotos.");
-      return;
-    }
+    if (!file || !canSendFromComposer("fotos")) return;
     if (!file.type.startsWith("image/")) {
-      alert("Solo puedes enviar fotos (JPG, PNG o WEBP).");
+      setPendingFile(file);
       return;
     }
     try {
       const prepared = await prepareChatImage(file);
       clearPendingImage();
       pendingImage = { ...prepared, conversationId: state.activeId };
-      $("composer-attachment-img").src = prepared.previewUrl;
-      $("composer-attachment").classList.remove("hidden");
-      messageInput.placeholder = "Agrega un comentario (opcional)…";
-      messageInput.focus();
+      showAttachmentCard({
+        title: "Foto lista para enviar",
+        hint: "Escribe un comentario si quieres y toca enviar.",
+        previewUrl: prepared.previewUrl,
+      });
     } catch (err) {
       alert(err.message);
     }
@@ -6017,8 +6215,27 @@
     setPendingImage(file);
   });
 
-  $("attach-image-btn").addEventListener("click", () => $("attach-image-input").click());
-  $("attach-image-input").addEventListener("change", (e) => setPendingImage(e.target.files?.[0]));
+  function setAttachMenu(open) {
+    $("attach-menu").classList.toggle("hidden", !open);
+    $("attach-menu-btn").classList.toggle("is-open", open);
+    $("attach-menu-btn").setAttribute("aria-expanded", String(open));
+    if (open) animateIn($("attach-menu"), { y: 10, scale: 0.96, duration: 200, origin: "bottom left" });
+  }
+  $("attach-menu-btn").addEventListener("click", () => setAttachMenu($("attach-menu").classList.contains("hidden")));
+  $("attach-menu").addEventListener("click", (e) => {
+    const opt = e.target.closest("[data-attach]");
+    if (!opt) return;
+    setAttachMenu(false);
+    const input = { document: "attach-file-input", gallery: "attach-image-input", camera: "camera-input" }[opt.dataset.attach];
+    $(input).click();
+  });
+  document.addEventListener("click", (e) => {
+    if (!$("attach-menu").classList.contains("hidden") && !e.target.closest("#attach-menu, #attach-menu-btn")) setAttachMenu(false);
+  });
+  $("camera-btn").addEventListener("click", () => $("camera-input").click());
+  $("attach-image-input").addEventListener("change", (e) => pickAttachment(e.target.files?.[0]));
+  $("camera-input").addEventListener("change", (e) => setPendingImage(e.target.files?.[0]));
+  $("attach-file-input").addEventListener("change", (e) => pickAttachment(e.target.files?.[0]));
   $("composer-attachment-remove").addEventListener("click", () => {
     clearPendingImage();
     messageInput.focus();
@@ -6044,19 +6261,143 @@
     e.preventDefault();
     dragDepth = 0;
     sendForm.classList.remove("dragging");
-    setPendingImage(e.dataTransfer.files?.[0]);
+    pickAttachment(e.dataTransfer.files?.[0]);
   });
+
+  function pushSentMessage(msg) {
+    if (msg.conversation_id !== state.activeId || state.messages.some((m) => m.id === msg.id)) return;
+    state.messages.push(msg);
+    state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
+    renderMessages();
+  }
+
+  const canRecordVoice = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+  function syncComposerMode() {
+    const hasContent = Boolean(messageInput.value.trim() || pendingImage || pendingFile);
+    sendForm.classList.toggle("has-content", hasContent || !canRecordVoice);
+  }
+  messageInput.addEventListener("input", syncComposerMode);
+  sendForm.addEventListener("submit", () => setTimeout(syncComposerMode, 0));
+
+  const VOICE_MAX_MS = 5 * 60 * 1000;
+  const voice = { rec: null, stream: null, chunks: [], startedAt: 0, timer: null, send: false };
+
+  function voiceMimeType() {
+    const options = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"];
+    return options.find((t) => MediaRecorder.isTypeSupported?.(t)) || "";
+  }
+
+  function formatDuration(ms) {
+    const total = Math.floor(ms / 1000);
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function setVoiceUi(recording) {
+    sendForm.classList.toggle("is-recording", recording);
+    $("voice-bar").classList.toggle("hidden", !recording);
+    if (recording) animateIn($("voice-bar"), { x: 16, duration: 200 });
+  }
+
+  async function startVoiceNote() {
+    if (voice.rec || !canSendFromComposer("notas de voz")) return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      alert("Permite el micrófono en tu navegador para grabar notas de voz.");
+      return;
+    }
+    const mimeType = voiceMimeType();
+    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    Object.assign(voice, { rec, stream, chunks: [], startedAt: Date.now(), send: false, conversationId: state.activeId });
+    rec.ondataavailable = (e) => e.data?.size && voice.chunks.push(e.data);
+    rec.onstop = () => finishVoiceNote(rec.mimeType || mimeType || "audio/webm");
+    rec.start(250);
+    $("voice-time").textContent = "0:00";
+    voice.timer = setInterval(() => {
+      const elapsed = Date.now() - voice.startedAt;
+      $("voice-time").textContent = formatDuration(elapsed);
+      if (elapsed >= VOICE_MAX_MS) stopVoiceNote(true);
+    }, 250);
+    setVoiceUi(true);
+  }
+
+  function stopVoiceNote(send) {
+    if (!voice.rec) return;
+    voice.send = send;
+    clearInterval(voice.timer);
+    if (voice.rec.state !== "inactive") voice.rec.stop();
+    setVoiceUi(false);
+  }
+
+  function cancelVoiceNote() {
+    stopVoiceNote(false);
+  }
+
+  async function finishVoiceNote(mimetype) {
+    const { stream, chunks, send, startedAt, conversationId } = voice;
+    stream?.getTracks().forEach((t) => t.stop());
+    Object.assign(voice, { rec: null, stream: null, chunks: [] });
+    if (!send) return;
+    if (Date.now() - startedAt < 900) {
+      toast("Nota muy corta. Toca el micrófono, habla y luego toca enviar.", { tone: "error" });
+      return;
+    }
+    const blob = new Blob(chunks, { type: mimetype });
+    const ext = mimetype.includes("mp4") ? "m4a" : mimetype.includes("ogg") ? "ogg" : "webm";
+    const fd = new FormData();
+    fd.append("file", blob, `nota.${ext}`);
+    try {
+      const msg = await api(`/conversations/${conversationId}/messages/audio`, { method: "POST", body: fd }, 60000);
+      try {
+        mediaCache.set(msg.id, { ok: true, base64: await blobToBase64(blob), media_type: "audio", mimetype: mimetype.split(";")[0] });
+      } catch {
+        /* se descargará de WhatsApp */
+      }
+      pushSentMessage(msg);
+    } catch (err) {
+      toast(err.message || "No se pudo enviar la nota de voz.", { tone: "error" });
+    }
+  }
+
+  $("voice-btn").addEventListener("click", startVoiceNote);
+  $("voice-send").addEventListener("click", () => stopVoiceNote(true));
+  $("voice-cancel").addEventListener("click", cancelVoiceNote);
+  syncComposerMode();
 
   sendForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.activeId || !state.canWrite) return;
     const text = messageInput.value.trim();
+    if (pendingFile) {
+      const btn = sendForm.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const { file, conversationId } = pendingFile;
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        fd.append("caption", text);
+        const msg = await api(`/conversations/${conversationId}/messages/file`, { method: "POST", body: fd }, 60000);
+        messageInput.value = "";
+        syncComposerMode();
+        fitComposer();
+        clearPendingImage();
+        pushSentMessage(msg);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
     if (pendingImage) {
       const btn = sendForm.querySelector("button[type=submit]");
       btn.disabled = true;
       try {
         const msg = await sendPendingImage(text);
         messageInput.value = "";
+        syncComposerMode();
+        fitComposer();
         if (msg.conversation_id === state.activeId && !state.messages.some((m) => m.id === msg.id)) {
           state.messages.push(msg);
           state._messagesSig = state.messages.map((m) => m.id || `${m.body}|${m.created_at}`).join("\n");
@@ -6079,6 +6420,8 @@
         body: JSON.stringify({ text }),
       });
       messageInput.value = "";
+      syncComposerMode();
+      fitComposer();
       const exists = state.messages.some((m) => m.id === msg.id);
       if (!exists) {
         state.messages.push(msg);
