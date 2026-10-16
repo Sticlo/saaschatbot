@@ -143,9 +143,8 @@ services:
       # Versión de WhatsApp Web; si falla la vinculación por QR, actualizarla (client_revision
       # de web.whatsapp.com/sw.js).
       CONFIG_SESSION_PHONE_VERSION: ${CONFIG_SESSION_PHONE_VERSION:?Define CONFIG_SESSION_PHONE_VERSION en .env}
-      # Nombre del dispositivo vinculado que ve el dueño en su celular. «Evolution API» (el valor
-      # por defecto) es la firma pública de una herramienta no oficial.
-      CONFIG_SESSION_PHONE_CLIENT: Omitel
+      # No cambiar CONFIG_SESSION_PHONE_CLIENT: con un nombre propio («Omitel») WhatsApp en Android
+      # rechaza el QR («No se pudo iniciar sesión») y el código de vinculación.
       WEBHOOK_GLOBAL_ENABLED: "false"
       LOG_LEVEL: ERROR,WARN
     volumes:
