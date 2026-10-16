@@ -5935,3 +5935,17 @@ body.lightbox-open { overflow: hidden; }
   .morning-card, .morning-card.is-open { transition: opacity 160ms ease; transform: none; }
   @media (max-width: 768px) { .morning-card, .morning-card.is-open { transform: translate(-50%, 0); } }
 }
+
+/* App instalada: el contenido no queda debajo de la barra de estado ni del notch */
+.topbar { padding-top: calc(0.75rem + env(safe-area-inset-top, 0px)); }
+@media (max-width: 768px) {
+  .topbar { padding-top: calc(0.45rem + env(safe-area-inset-top, 0px)); }
+}
+.install-card-icon {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 0.7rem;
+  border-radius: 11px;
+  box-shadow: 0 0 0 1px var(--border);
+}

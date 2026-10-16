@@ -2,13 +2,19 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#0b141a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Omitel" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/static/panel/manifest.json" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Omitel — Panel</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=94" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=95" />
 </head>
 <body>
   <div id="app">
@@ -120,6 +126,7 @@
           <div class="menu-head">
             <span id="user-label" class="menu-user"></span>
           </div>
+          <button type="button" id="install-app-btn" class="menu-item hidden">Instalar como app</button>
           <button type="button" id="guide-btn" class="menu-item hidden">Ver la guía otra vez</button>
           <button type="button" id="diag-open" class="menu-item hidden">Lo que encontramos en tu WhatsApp</button>
           <a href="/mi-plan" data-site-path="/mi-plan" class="menu-item">Mi plan</a>
@@ -905,6 +912,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=169"></script>
+  <script src="/static/panel/app.js?v=170"></script>
 </body>
 </html>

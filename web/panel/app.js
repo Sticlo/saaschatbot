@@ -333,9 +333,14 @@
     if (loginToggle) loginToggle.checked = checked;
   }
 
+  function syncThemeColor(theme) {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f4f6fb" : "#0b141a");
+  }
+
   function applyTheme(theme) {
     const next = theme === "light" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
+    syncThemeColor(next);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
@@ -6257,6 +6262,102 @@
     e.preventDefault();
     startTour();
   });
+
+  /* Instalada desde la pantalla de inicio, el panel abre sin las barras del navegador. */
+  const INSTALL_HINT_KEY = "omitel_install_hint";
+  let installPrompt = null;
+  const isStandalone = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+  const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isPhone = () => window.matchMedia?.("(max-width: 768px) and (pointer: coarse)").matches;
+
+  function canOfferInstall() {
+    return !isStandalone() && Boolean(installPrompt || (isIos() && isPhone()));
+  }
+
+  function syncInstallButton() {
+    $("install-app-btn")?.classList.toggle("hidden", !canOfferInstall());
+  }
+
+  function closeInstallCard() {
+    const card = $("install-card");
+    if (!card) return;
+    card.classList.remove("is-open");
+    setTimeout(() => card.remove(), 260);
+  }
+
+  function showInstallCard({ steps = false } = {}) {
+    if ($("install-card") || $("morning-card")) return;
+    const text = steps
+      ? "Toca el botón Compartir (el cuadrito con la flecha hacia arriba) y elige «Agregar a inicio». Luego abre Omitel desde ese ícono."
+      : "Instálalo en tu celular y ábrelo desde su ícono: a pantalla completa, sin las barras del navegador.";
+    const card = document.createElement("div");
+    card.id = "install-card";
+    card.className = "morning-card install-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-label", "Instalar Omitel");
+    card.innerHTML = `
+      <button type="button" class="morning-card-close" aria-label="Cerrar">×</button>
+      <img class="install-card-icon" src="/static/panel/icon-192.png" alt="" width="44" height="44" />
+      <p class="morning-card-hello">Usa Omitel como app</p>
+      <p class="morning-card-text">${escapeHtml(text)}</p>
+      <div class="morning-card-actions">
+        ${steps ? "" : '<button type="button" class="btn primary small" data-install>Instalar</button>'}
+        <button type="button" class="btn ghost small" data-later>${steps ? "Entendido" : "Ahora no"}</button>
+      </div>`;
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("[data-install]")) {
+        closeInstallCard();
+        installApp();
+      } else if (e.target.closest(".morning-card-close, [data-later]")) {
+        closeInstallCard();
+      }
+    });
+    document.body.appendChild(card);
+    card.getBoundingClientRect();
+    card.classList.add("is-open");
+  }
+
+  async function installApp() {
+    if (installPrompt) {
+      const prompt = installPrompt;
+      installPrompt = null;
+      prompt.prompt();
+      await prompt.userChoice.catch(() => null);
+      syncInstallButton();
+      return;
+    }
+    showInstallCard({ steps: true });
+  }
+
+  function maybeOfferInstall() {
+    if (!isPhone() || !canOfferInstall() || !state.user) return;
+    try {
+      if (localStorage.getItem(INSTALL_HINT_KEY)) return;
+      localStorage.setItem(INSTALL_HINT_KEY, "1");
+    } catch {
+      return;
+    }
+    showInstallCard({ steps: !installPrompt });
+  }
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    syncInstallButton();
+  });
+  window.addEventListener("appinstalled", () => {
+    installPrompt = null;
+    syncInstallButton();
+    closeInstallCard();
+    toast("Listo: abre Omitel desde el ícono en tu pantalla de inicio.");
+  });
+  $("install-app-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    installApp();
+  });
+  syncThemeColor(document.documentElement.getAttribute("data-theme"));
+  syncInstallButton();
+  setTimeout(maybeOfferInstall, 6000);
   async function unlinkWhatsApp() {
     if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel y dejará de atender hasta que lo vuelvas a conectar.")) return;
     const buttons = ["wa-disconnect-btn", "wa-unlink-ready-btn"].map((id) => $(id)).filter(Boolean);
