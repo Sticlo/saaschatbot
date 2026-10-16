@@ -28,6 +28,12 @@ COPY patch-baileys-registration.js /tmp/patch-baileys-registration.js
 RUN node /tmp/patch-baileys-registration.js && \
     grep -q "2a15188050200130003801400148015001580160017001" node_modules/baileys/lib/Utils/validate-connection.js
 
+COPY patch-baileys-pairing.js /tmp/patch-baileys-pairing.js
+RUN node /tmp/patch-baileys-pairing.js && \
+    grep -q "companion_reg_refresh" node_modules/baileys/lib/Socket/socket.js && \
+    node --check node_modules/baileys/lib/Socket/socket.js && \
+    node --check node_modules/baileys/lib/Socket/messages-recv.js
+
 RUN cp .env.example .env && chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
 RUN ./Docker/scripts/generate_database.sh
