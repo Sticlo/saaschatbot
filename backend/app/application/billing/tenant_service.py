@@ -59,6 +59,8 @@ def register_tenant_with_owner(
         slug=slug,
         plan=TenantPlan.TRIAL.value,
         daily_bait_limit=plan.trial_bait_limit,
+        ai_global_enabled=False,
+        ai_autostart_pending=True,
     )
     db.add(tenant)
     db.flush()

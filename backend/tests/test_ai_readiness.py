@@ -135,6 +135,27 @@ def test_ai_cannot_be_turned_on_half_configured(client: TestClient):
 
 
 @requires_db
+def test_new_business_ai_waits_for_the_data_and_then_turns_on_by_itself(client: TestClient):
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+    tenant = client.get("/api/v1/tenants/me", headers=headers).json()
+    assert tenant["ai_global_enabled"] is False and tenant["ai_autostart_pending"] is True
+
+    assert client.put("/api/v1/outbound/business-profile", json=COMPLETE, headers=headers).status_code == 200
+    assert client.get("/api/v1/tenants/me", headers=headers).json()["ai_global_enabled"] is False
+
+    assert client.post("/api/v1/products", json={"name": "Tenis blancos", "price_cop": 150000}, headers=headers).status_code == 201
+    tenant = client.get("/api/v1/tenants/me", headers=headers).json()
+    assert tenant["ai_global_enabled"] is True and tenant["ai_autostart_pending"] is False
+
+    # Si el dueño la apaga, no se vuelve a encender sola.
+    assert client.patch("/api/v1/tenants/me", json={"ai_global_enabled": False}, headers=headers).status_code == 200
+    assert client.put("/api/v1/outbound/business-profile", json=COMPLETE, headers=headers).status_code == 200
+    assert client.get("/api/v1/tenants/me", headers=headers).json()["ai_global_enabled"] is False
+
+
+@requires_db
 @patch("app.application.conversations.interest_alert_service.send_alert")
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")

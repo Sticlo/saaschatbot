@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
 from app.application.billing.tenant_service import log_audit
+from app.application.results.morning_summary import morning_summary
 from app.application.results.results_service import normalize_ticket, tenant_results
 from app.domain.entities import Tenant
 from app.infrastructure.persistence.database import get_db
@@ -33,6 +34,11 @@ def _payload(db: Session, tenant_id) -> dict[str, Any]:
 @router.get("")
 def get_results(current: RequireViewer, db: Session = Depends(get_db)) -> dict[str, Any]:
     return _payload(db, current.tenant_id)
+
+
+@router.get("/morning")
+def get_morning_summary(current: RequireViewer, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return morning_summary(db, current.tenant_id)
 
 
 @router.put("/settings")

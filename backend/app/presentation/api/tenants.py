@@ -62,6 +62,7 @@ def update_my_tenant(
                 Conversation.ai_override_global.is_(True),
             ).update({Conversation.ai_override_global: False}, synchronize_session=False)
         tenant.ai_global_enabled = body.ai_global_enabled
+        tenant.ai_autostart_pending = False
         cache_delete(tenant_cache_key(str(tenant.id), "ai_global"))
 
     log_audit(

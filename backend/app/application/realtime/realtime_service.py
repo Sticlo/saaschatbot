@@ -73,6 +73,7 @@ def publish_tenant_settings(tenant: Tenant) -> None:
             "business_name": tenant.business_name,
             "business_name_is_placeholder": is_placeholder_business_name(tenant.business_name),
             "ai_global_enabled": tenant.ai_global_enabled,
+            "ai_autostart_pending": bool(tenant.ai_autostart_pending),
             "whatsapp_status": tenant.whatsapp_status,
         },
     )

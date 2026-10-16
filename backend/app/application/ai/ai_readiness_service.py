@@ -136,6 +136,34 @@ def tenant_readiness(db: Session, tenant_id: uuid.UUID) -> dict:
     )
 
 
+def autostart_ai_if_ready(db: Session, tenant) -> bool:
+    """Cuenta nueva: enciende la IA la primera vez que el negocio queda listo. No hace commit."""
+    if tenant is None or not tenant.ai_autostart_pending:
+        return False
+    if tenant.ai_global_enabled:
+        tenant.ai_autostart_pending = False
+        return False
+    if not tenant_readiness(db, tenant.id)["ready"]:
+        return False
+    from app.infrastructure.cache.redis_client import cache_delete, tenant_cache_key
+
+    tenant.ai_global_enabled = True
+    tenant.ai_autostart_pending = False
+    cache_delete(tenant_cache_key(str(tenant.id), "ai_global"))
+    return True
+
+
+def autostart_ai_for_tenant_id(db: Session, tenant_id: uuid.UUID) -> None:
+    """Para endpoints que solo tienen el id: intenta el encendido, hace commit y avisa al panel."""
+    from app.application.realtime.realtime_service import publish_tenant_settings
+    from app.domain.entities import Tenant
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if autostart_ai_if_ready(db, tenant):
+        db.commit()
+        publish_tenant_settings(tenant)
+
+
 # «Ropa unisex», «Buzos hombre», «Tortas»: una categoría, no algo que el cliente pueda pedir.
 _GENERIC_NAME_RE = re.compile(
     r"^(?:ropa|productos?|varios|surtidos?|accesorios|catalogo|mercancia|articulos|referencias|prendas|\w{3,}s)\b"

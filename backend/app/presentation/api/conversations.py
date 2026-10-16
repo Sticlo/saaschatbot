@@ -18,6 +18,7 @@ from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
 from app.domain.entities.enums import ConversationMode, MessageSource
 from app.application.whatsapp.whatsapp_status import can_send_whatsapp
+from app.application.conversations.send_once import send_once
 from app.presentation.schemas.whatsapp import (
     ConversationAiUpdate,
     ConversationInterestUpdate,
@@ -476,30 +477,32 @@ def send_message(
     if not ok:
         raise HTTPException(status_code=409, detail=reason)
 
-    try:
-        message = send_text_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            text=body.text.strip(),
-            source=MessageSource.AGENT.value,
-        )
-        log_audit(
-            db,
-            tenant_id=tenant.id,
-            user_id=current.id,
-            action="message.sent_manual",
-            details={"conversation_id": str(conversation.id)},
-            ip_address=request.client.host if request.client else None,
-        )
-        db.commit()
-        db.refresh(message)
-    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    def _send():
+        try:
+            message = send_text_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                text=body.text.strip(),
+                source=MessageSource.AGENT.value,
+            )
+            log_audit(
+                db,
+                tenant_id=tenant.id,
+                user_id=current.id,
+                action="message.sent_manual",
+                details={"conversation_id": str(conversation.id)},
+                ip_address=request.client.host if request.client else None,
+            )
+            db.commit()
+            db.refresh(message)
+        except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return message
 
-    return message
+    return send_once(db, request, current.tenant_id, _send)
 
 
 @router.post("/{conversation_id}/messages/image", response_model=MessageResponse, status_code=201)
@@ -541,33 +544,35 @@ def send_image(
     )
     raw, mime = read_chat_image(file)
     extension = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[mime]
-    try:
-        message = send_image_data_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            data_b64=base64.b64encode(raw).decode("ascii"),
-            mimetype=mime,
-            filename=f"foto.{extension}",
-            caption=caption.strip(),
-            source=MessageSource.AGENT.value,
-        )
-        log_audit(
-            db,
-            tenant_id=tenant.id,
-            user_id=current.id,
-            action="message.sent_image",
-            details={"conversation_id": str(conversation.id), "bytes": len(raw)},
-            ip_address=request.client.host if request.client else None,
-        )
-        db.commit()
-        db.refresh(message)
-    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    def _send():
+        try:
+            message = send_image_data_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                data_b64=base64.b64encode(raw).decode("ascii"),
+                mimetype=mime,
+                filename=f"foto.{extension}",
+                caption=caption.strip(),
+                source=MessageSource.AGENT.value,
+            )
+            log_audit(
+                db,
+                tenant_id=tenant.id,
+                user_id=current.id,
+                action="message.sent_image",
+                details={"conversation_id": str(conversation.id), "bytes": len(raw)},
+                ip_address=request.client.host if request.client else None,
+            )
+            db.commit()
+            db.refresh(message)
+        except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return message
 
-    return message
+    return send_once(db, request, current.tenant_id, _send)
 
 
 def _chat_send_target(db: Session, tenant_id: uuid.UUID, conversation_id: uuid.UUID):
@@ -603,30 +608,33 @@ def send_voice_note(
         message="Enviaste muchas notas de voz seguidas. Espera un momento e intenta de nuevo.",
     )
     raw, mime = read_chat_voice(file)
-    try:
-        message = send_voice_data_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            data_b64=base64.b64encode(raw).decode("ascii"),
-            mimetype=mime,
-            source=MessageSource.AGENT.value,
-        )
-        log_audit(
-            db,
-            tenant_id=tenant.id,
-            user_id=current.id,
-            action="message.sent_voice",
-            details={"conversation_id": str(conversation.id), "bytes": len(raw)},
-            ip_address=request.client.host if request.client else None,
-        )
-        db.commit()
-        db.refresh(message)
-    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return message
+    def _send():
+        try:
+            message = send_voice_data_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                data_b64=base64.b64encode(raw).decode("ascii"),
+                mimetype=mime,
+                source=MessageSource.AGENT.value,
+            )
+            log_audit(
+                db,
+                tenant_id=tenant.id,
+                user_id=current.id,
+                action="message.sent_voice",
+                details={"conversation_id": str(conversation.id), "bytes": len(raw)},
+                ip_address=request.client.host if request.client else None,
+            )
+            db.commit()
+            db.refresh(message)
+        except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return message
+
+    return send_once(db, request, current.tenant_id, _send)
 
 
 @router.post("/{conversation_id}/messages/file", response_model=MessageResponse, status_code=201)
@@ -647,32 +655,35 @@ def send_chat_file(
         message="Enviaste muchos archivos seguidos. Espera un momento e intenta de nuevo.",
     )
     raw, mime, name = read_chat_file(file)
-    try:
-        message = send_document_data_message(
-            db,
-            tenant=tenant,
-            session=session,
-            conversation=conversation,
-            data_b64=base64.b64encode(raw).decode("ascii"),
-            mimetype=mime,
-            file_name=name,
-            caption=caption.strip(),
-            source=MessageSource.AGENT.value,
-        )
-        log_audit(
-            db,
-            tenant_id=tenant.id,
-            user_id=current.id,
-            action="message.sent_file",
-            details={"conversation_id": str(conversation.id), "bytes": len(raw), "mimetype": mime},
-            ip_address=request.client.host if request.client else None,
-        )
-        db.commit()
-        db.refresh(message)
-    except (EvolutionAPIError, WhatsAppGatewayError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return message
+    def _send():
+        try:
+            message = send_document_data_message(
+                db,
+                tenant=tenant,
+                session=session,
+                conversation=conversation,
+                data_b64=base64.b64encode(raw).decode("ascii"),
+                mimetype=mime,
+                file_name=name,
+                caption=caption.strip(),
+                source=MessageSource.AGENT.value,
+            )
+            log_audit(
+                db,
+                tenant_id=tenant.id,
+                user_id=current.id,
+                action="message.sent_file",
+                details={"conversation_id": str(conversation.id), "bytes": len(raw), "mimetype": mime},
+                ip_address=request.client.host if request.client else None,
+            )
+            db.commit()
+            db.refresh(message)
+        except (EvolutionAPIError, WhatsAppGatewayError) as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return message
+
+    return send_once(db, request, current.tenant_id, _send)
 
 
 @router.post("/{conversation_id}/messages/shortcut", response_model=MessageResponse, status_code=201)

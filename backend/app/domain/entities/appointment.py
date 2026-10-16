@@ -43,6 +43,7 @@ class Appointment(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # "ai" = la agendó la IA en el chat; "panel" = alguien del equipo.
     source: Mapped[str] = mapped_column(String(10), nullable=False, default="panel", server_default="panel")
+    reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

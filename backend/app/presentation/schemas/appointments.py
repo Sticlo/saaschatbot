@@ -14,6 +14,7 @@ class AppointmentScheduleResponse(BaseModel):
     ai_booking_enabled: bool = False
     ai_booking_allowed: bool = True
     staff_label: str = ""
+    appointment_reminders: bool = True
 
 
 class AppointmentScheduleUpdate(BaseModel):
@@ -22,6 +23,7 @@ class AppointmentScheduleUpdate(BaseModel):
     slot_minutes: int = Field(ge=15, le=240)
     ai_booking_enabled: Optional[bool] = None
     staff_label: Optional[str] = Field(default=None, max_length=40)
+    appointment_reminders: Optional[bool] = None
 
 
 class AppointmentSlotAppointment(BaseModel):

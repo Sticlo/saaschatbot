@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=89" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=94" />
 </head>
 <body>
   <div id="app">
@@ -443,11 +443,11 @@
               <div class="try-ai-suggestions">
                 <button type="button" class="try-ai-chip">Hola, ¿qué venden?</button>
                 <button type="button" class="try-ai-chip">¿Cuánto vale el envío?</button>
-                <button type="button" class="try-ai-chip">Fotos</button>
+                <button type="button" class="try-ai-chip">¿Tienen fotos?</button>
                 <button type="button" class="try-ai-chip">Quiero comprar</button>
               </div>
               <form id="try-ai-form" class="try-ai-form">
-                <input type="text" id="try-ai-input" maxlength="1000" placeholder="Escribe como si fueras un cliente…" autocomplete="off" />
+                <input type="text" id="try-ai-input" maxlength="1000" placeholder="Escribe como un cliente…" autocomplete="off" />
                 <button type="submit" id="try-ai-send" class="btn primary">Enviar</button>
               </form>
               <div class="try-ai-foot">
@@ -534,7 +534,19 @@
               <p>Lo que la IA ya vendió. Tú solo despachas: al marcarlo despachado, le avisamos al cliente por WhatsApp.</p>
             </header>
 
-            <section class="ai-shortcuts-card">
+            <section id="orders-empty" class="orders-empty hidden">
+              <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7zM9 7V6a3 3 0 0 1 6 0v1"/></svg></span>
+              <strong id="orders-empty-title">Aquí llegan tus ventas</strong>
+              <span id="orders-empty-text"></span>
+              <ol class="orders-empty-steps">
+                <li>Un cliente decide comprar en el chat.</li>
+                <li>La IA le pasa tus datos de pago y anota el pedido aquí.</li>
+                <li>Cuando llega el comprobante, tú lo despachas.</li>
+              </ol>
+              <button type="button" id="orders-empty-btn" class="btn primary hidden"></button>
+            </section>
+
+            <section class="ai-shortcuts-card orders-section">
               <div class="ai-shortcuts-card-head">
                 <h3>Listos para despachar <span id="orders-ready-count" class="orders-count"></span></h3>
                 <p class="muted small">Pagados o contraentrega. Si dice <strong>comprobante sin verificar</strong>, revisa que la plata sí te haya llegado antes de enviarlo.</p>
@@ -543,7 +555,7 @@
               <p id="orders-ready-empty" class="muted small hidden">Nada pendiente por despachar.</p>
             </section>
 
-            <section class="ai-shortcuts-card">
+            <section class="ai-shortcuts-card orders-section">
               <div class="ai-shortcuts-card-head">
                 <h3>Esperando el pago <span id="orders-pending-count" class="orders-count"></span></h3>
                 <p class="muted small">La IA ya cerró la venta y le pasó tus datos de pago. Cuando el cliente mande el comprobante, pasa solo a <strong>Listos para despachar</strong>.</p>
@@ -552,7 +564,7 @@
               <p id="orders-pending-empty" class="muted small hidden">Ningún pago pendiente.</p>
             </section>
 
-            <section class="ai-shortcuts-card">
+            <section class="ai-shortcuts-card orders-section">
               <div class="ai-shortcuts-card-head">
                 <h3>Despachados</h3>
                 <p class="muted small">Los del último mes.</p>
@@ -622,6 +634,13 @@
                 <span>
                   <strong>La IA agenda citas sola</strong>
                   <span class="muted small">Para citas, turnos o reservas: la IA mira los horarios libres, ofrece opciones y agenda. Si también vendes productos, déjalo prendido: la IA agenda y vende en el mismo chat.</span>
+                </span>
+              </label>
+              <label class="appointments-ai-toggle">
+                <input type="checkbox" id="schedule-reminders" checked />
+                <span>
+                  <strong>Recordarle la cita al cliente</strong>
+                  <span class="muted small">2 horas antes le llega un WhatsApp con la hora de su cita. Solo a clientes que ya te escribieron.</span>
                 </span>
               </label>
               <p id="schedule-ai-off" class="appointments-ai-off hidden">La IA no está agendando: cuando un cliente pide cita, el chat te llega a ti. Prende «La IA agenda citas sola».</p>
@@ -886,6 +905,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=164"></script>
+  <script src="/static/panel/app.js?v=169"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
+from app.application.ai.ai_readiness_service import autostart_ai_for_tenant_id
 from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.outbound.tenant_asset_service import delete_asset
 from app.application.products.product_service import (
@@ -46,6 +47,7 @@ def post_product(body: ProductCreate, current: RequireOwner, db: Session = Depen
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
+    autostart_ai_for_tenant_id(db, current.tenant_id)
     return ProductResponse(**product_to_dict(product))
 
 
@@ -62,6 +64,7 @@ def patch_product(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
+    autostart_ai_for_tenant_id(db, current.tenant_id)
     return ProductResponse(**product_to_dict(product))
 
 
@@ -125,4 +128,5 @@ def import_catalog(current: RequireOwner, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Primero sube tu catálogo o carta en Atajos rápidos")
     created = import_from_catalog(db, current.tenant_id, texts)
     db.commit()
+    autostart_ai_for_tenant_id(db, current.tenant_id)
     return ProductImportResponse(created=created, products=_all(db, current.tenant_id))

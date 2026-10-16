@@ -1410,6 +1410,15 @@ def _deliver_reply(
     if _client_kept_writing(db, conversation.id, message):
         log.info("IA no envía: el cliente siguió escribiendo conv=%s", conversation.id)
         return False
+    # Redactar tarda segundos: el dueño pudo apagar la IA o escribir él mientras tanto.
+    db.refresh(tenant)
+    db.refresh(conversation)
+    if not should_ai_respond(tenant, conversation):
+        log.info("IA no envía: la apagaron mientras redactaba conv=%s", conversation.id)
+        return False
+    if _owner_took_over(db, tenant=tenant, conversation=conversation):
+        log.info("IA no envía: el dueño respondió mientras redactaba conv=%s", conversation.id)
+        return False
 
     appointment = None
     repeated = None

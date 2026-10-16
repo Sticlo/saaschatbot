@@ -93,6 +93,7 @@ class TenantResponse(BaseModel):
     slug: str
     plan: str
     ai_global_enabled: bool
+    ai_autostart_pending: bool = False
     whatsapp_status: str
     daily_bait_limit: int
     trial_bait_used: int

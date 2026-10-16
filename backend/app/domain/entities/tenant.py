@@ -24,6 +24,10 @@ class Tenant(Base):
         String(20), nullable=False, default=TenantPlan.TRIAL.value
     )
     ai_global_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Cuenta nueva: la IA se enciende sola la primera vez que el negocio queda listo.
+    ai_autostart_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     whatsapp_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=WhatsAppStatus.DISCONNECTED.value
     )
@@ -106,6 +110,8 @@ class TenantProfile(Base):
     alert_threshold: Mapped[int] = mapped_column(nullable=False, default=10)
     # Horas sin respuesta del cliente antes de que la IA le escriba una vez más. 0 = nunca.
     followup_hours: Mapped[int] = mapped_column(nullable=False, default=4, server_default="4")
+    # Le recuerda la cita al cliente por WhatsApp 2 horas antes (solo a quien ya le escribió al negocio).
+    appointment_reminders: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="true")
     # Lo que vale en promedio un servicio o venta: convierte las citas de la IA en plata.
     avg_ticket_cop: Mapped[Optional[int]] = mapped_column(nullable=True)
     # Mes ("2026-09") del último resumen de resultados enviado al dueño.

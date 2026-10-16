@@ -364,6 +364,10 @@ def _has_conflict(
     return query.first() is not None
 
 
+class SlotTakenError(ValueError):
+    """Otra persona ya tiene esa hora (a veces la tomó un instante antes)."""
+
+
 def _reserve_staff(
     db: Session,
     *,
@@ -379,13 +383,13 @@ def _reserve_staff(
     if not all_staff(db, tenant_id):
         db.query(TenantProfile).filter(TenantProfile.tenant_id == tenant_id).with_for_update().first()
         if _has_conflict(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=None):
-            raise ValueError("Ese horario ya está ocupado")
+            raise SlotTakenError("Ese horario ya está ocupado")
         return None
 
     if staff_id is not None:
         staff = _lock_staff(db, tenant_id, staff_id)
         if _has_conflict(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=staff.id):
-            raise ValueError(f"{staff.name} ya tiene una cita a esa hora")
+            raise SlotTakenError(f"{staff.name} ya tiene una cita a esa hora")
         return staff.id
 
     candidates = free_staff_for_slot(db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at)
@@ -395,7 +399,7 @@ def _reserve_staff(
             db, tenant_id=tenant_id, starts_at=starts_at, ends_at=ends_at, staff_id=candidate.id
         ):
             return candidate.id
-    raise ValueError("No hay nadie libre a esa hora")
+    raise SlotTakenError("No hay nadie libre a esa hora")
 
 
 def create_appointment(
@@ -473,13 +477,13 @@ def update_appointment(
         if _has_conflict(
             db, tenant_id=tenant_id, starts_at=new_start, ends_at=new_end, staff_id=staff.id, exclude_id=row.id
         ):
-            raise ValueError(f"{staff.name} ya tiene una cita a esa hora")
+            raise SlotTakenError(f"{staff.name} ya tiene una cita a esa hora")
     else:
         new_staff = None
         if _has_conflict(
             db, tenant_id=tenant_id, starts_at=new_start, ends_at=new_end, staff_id=None, exclude_id=row.id
         ):
-            raise ValueError("Ese horario ya está ocupado")
+            raise SlotTakenError("Ese horario ya está ocupado")
 
     if client_name is not None:
         if not client_name.strip():
@@ -489,6 +493,8 @@ def update_appointment(
         row.client_phone = client_phone.strip()[:64] or None
     if notes is not None:
         row.notes = notes.strip() or None
+    if new_start != row.starts_at:
+        row.reminder_sent_at = None
     row.starts_at = new_start
     row.ends_at = new_end
     row.staff_id = new_staff

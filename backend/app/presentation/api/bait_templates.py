@@ -11,7 +11,12 @@ from app.application.ai.ai_business_profile_service import (
     build_ai_system_prompt_from_answers,
     business_summary_lines,
 )
-from app.application.ai.ai_readiness_service import has_catalog_text, readiness_from, tenant_sales_tips
+from app.application.ai.ai_readiness_service import (
+    autostart_ai_if_ready,
+    has_catalog_text,
+    readiness_from,
+    tenant_sales_tips,
+)
 from app.application.ai.ai_trial_service import TrialError, try_reply
 from app.application.billing.tenant_service import is_placeholder_business_name, log_audit
 from app.application.products.product_service import list_products
@@ -119,7 +124,10 @@ def get_business_profile(current: RequireViewer, db: Session = Depends(get_db)):
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     profile = get_or_create_tenant_profile(db, tenant.id)
+    ai_started = autostart_ai_if_ready(db, tenant)
     db.commit()
+    if ai_started:
+        publish_tenant_settings(tenant)
     return _profile_response(db, tenant, profile)
 
 
@@ -193,9 +201,11 @@ def update_business_profile(
         action="outbound.business_profile_updated",
         ip_address=request.client.host if request.client else None,
     )
+    db.flush()
+    ai_started = autostart_ai_if_ready(db, tenant)
     db.commit()
     db.refresh(profile)
-    if body.business_name is not None:
+    if body.business_name is not None or ai_started:
         publish_tenant_settings(tenant)
     return _profile_response(db, tenant, profile)
 

@@ -13,6 +13,7 @@ from app.application.appointments.appointment_service import (
     create_appointment,
     delete_appointment,
     get_schedule,
+    SlotTakenError,
     parse_slot_to_datetimes,
     staff_to_dict,
     update_appointment,
@@ -70,6 +71,7 @@ def _schedule_response(profile, *, booking_allowed: bool = True) -> AppointmentS
         ai_booking_enabled=bool(profile.ai_booking_enabled) and booking_allowed,
         ai_booking_allowed=booking_allowed,
         staff_label=profile.staff_label or "",
+        appointment_reminders=bool(profile.appointment_reminders),
     )
 
 
@@ -116,6 +118,8 @@ def put_appointment_schedule(
         profile.ai_booking_enabled = body.ai_booking_enabled
     if body.staff_label is not None:
         profile.staff_label = " ".join(body.staff_label.split()).lower()[:40]
+    if body.appointment_reminders is not None:
+        profile.appointment_reminders = body.appointment_reminders
     log_audit(
         db,
         tenant_id=current.tenant_id,
@@ -264,6 +268,8 @@ def post_appointment(
             conversation_id=body.conversation_id,
             staff_id=body.staff_id,
         )
+    except SlotTakenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     log_audit(
@@ -326,6 +332,8 @@ def patch_appointment(
             ends_at=ends_at,
             **extra,
         )
+    except SlotTakenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     log_audit(

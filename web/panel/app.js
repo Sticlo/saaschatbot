@@ -58,6 +58,7 @@
   const setupProgress = { done: null };
   let stripAction = null;
   let chatHintAction = null;
+  let listEmptyAction = null;
   const CHECK_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   const STRIP_ICONS = {
     pause: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="7" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor"/></svg>',
@@ -431,6 +432,45 @@
     toastTimer = setTimeout(() => el.classList.remove("is-open"), duration || Math.min(7000, 2600 + text.length * 40));
   }
 
+  function waitForNetwork(ms) {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        window.removeEventListener("online", done);
+        resolve();
+      };
+      const timer = setTimeout(done, navigator.onLine === false ? 60000 : ms);
+      window.addEventListener("online", done);
+    });
+  }
+
+  let netPillTimer = null;
+  function setNetPill(offline) {
+    clearTimeout(netPillTimer);
+    let el = $("net-pill");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "net-pill";
+      el.className = "net-pill";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.innerHTML = '<span class="net-pill-dot" aria-hidden="true"></span><span class="net-pill-text"></span>';
+      document.body.appendChild(el);
+      el.getBoundingClientRect();
+    }
+    const text = el.querySelector(".net-pill-text");
+    if (offline) {
+      el.dataset.state = "offline";
+      text.textContent = "Sin conexión · lo que escribas se envía al volver";
+      netPillTimer = setTimeout(() => el.classList.add("is-open"), 700);
+      return;
+    }
+    if (!el.classList.contains("is-open")) return;
+    el.dataset.state = "online";
+    text.textContent = "Conexión restablecida";
+    netPillTimer = setTimeout(() => el.classList.remove("is-open"), 1800);
+  }
+
   const SKEL_W = [62, 48, 70, 55, 40, 66, 58, 44];
   function skeletonHtml(kind, n = 6, tag = "li") {
     const rows = Array.from({ length: n }, (_, i) => i);
@@ -507,7 +547,27 @@
     return h;
   }
 
+  function networkError(msg) {
+    const e = new Error(msg);
+    e.network = true;
+    return e;
+  }
+
+  const READ_RETRY_MS = [1200, 2500, 4000];
+  /** Las lecturas se reintentan solas: un micro-corte de red no debe convertirse en un error en pantalla. */
   async function api(path, options = {}, timeoutMs = 8000) {
+    const isRead = !options.method || options.method === "GET";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await apiOnce(path, options, timeoutMs);
+      } catch (err) {
+        if (!isRead || !err.network || attempt >= READ_RETRY_MS.length || navigator.onLine === false) throw err;
+        await new Promise((resolve) => setTimeout(resolve, READ_RETRY_MS[attempt]));
+      }
+    }
+  }
+
+  async function apiOnce(path, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const isForm = options.body instanceof FormData;
@@ -553,7 +613,7 @@
       }
       return data;
     } catch (err) {
-      if (err.name === "AbortError") throw new Error("Tiempo de espera agotado");
+      if (err.name === "AbortError") throw networkError("La conexión está lenta. Intenta de nuevo.");
       const raw = String(err?.message || err || "");
       if (
         raw === "Load failed" ||
@@ -561,9 +621,7 @@
         raw.includes("NetworkError") ||
         raw.includes("network")
       ) {
-        throw new Error(
-          "No pudimos contactar el servidor. Inicia el backend (puerto 8000) con ./scripts/dev.sh"
-        );
+        throw networkError("Sin conexión a internet. Revisa tu señal.");
       }
       throw err;
     } finally {
@@ -1494,9 +1552,11 @@
         minutes: 3,
         text: started
           ? `Te falta: ${listEs(missing.map((i) => i.label.toLowerCase()))}.`
-          : "Qué vendes, precios, cómo te pagan, envíos y horario. Así responde sin decir «te confirmo».",
+          : state.tenant?.ai_autostart_pending
+            ? "Qué vendes, precios, cómo te pagan, envíos y horario. Al terminar, tu IA se enciende sola."
+            : "Qué vendes, precios, cómo te pagan, envíos y horario. Así responde sin decir «te confirmo».",
         done: !!readiness.ready,
-        doneText: "Tu negocio quedó listo",
+        doneText: state.tenant?.ai_global_enabled ? "Tu negocio quedó listo y tu IA está encendida" : "Tu negocio quedó listo",
         cta: started ? "Seguir" : "Empezar",
         run: () => goToReadinessField(missing[0]?.field || "biz-products"),
       },
@@ -1668,8 +1728,10 @@
       return {
         tone: "pause",
         icon: STRIP_ICONS.pause,
-        title: "Tu IA está en pausa",
-        text: "Para encenderla, termina de contarle qué vendes. Mientras tanto contestas tú.",
+        title: state.tenant.ai_autostart_pending ? "Tu IA se enciende sola al terminar" : "Tu IA está en pausa",
+        text: state.tenant.ai_autostart_pending
+          ? "Cuando le cuentes qué vendes, se enciende y empieza a responder. Mientras tanto contestas tú."
+          : "Para encenderla, termina de contarle qué vendes. Mientras tanto contestas tú.",
         action: { label: "Completar", run: () => goToReadinessField(missingReadiness()[0]?.field || "biz-products") },
       };
     }
@@ -2428,7 +2490,9 @@
       conversationList.appendChild(syncLi);
     }
     const emptyStates = {
-      interested: ["Aún no hay interesados", "Cuando alguien pregunte precios o quiera comprar, la IA lo marca y aparece aquí."],
+      interested: state.tenant?.ai_global_enabled || !state.tenant
+        ? ["Aún no hay interesados", "Cuando alguien pregunte precios o quiera comprar, la IA lo marca y aparece aquí."]
+        : ["Aún no hay interesados", "Tu IA está apagada. Cuando la enciendas, marcará aquí a quien pregunte precios o quiera comprar."],
       not_interested: ["Nadie descartado", "Aquí quedan los contactos que dijeron que no o que solo saludaron."],
       all: state.wa.status === "connected"
         ? ["Todo tranquilo por ahora", "Cuando te escriba un cliente, el chat aparece aquí y tu IA le responde."]
@@ -2450,11 +2514,14 @@
       const [title, hint] = state.searchQuery
         ? ["Sin resultados", `No encontramos chats con «${state.searchQuery}». Prueba con el nombre o el número.`]
         : emptyState;
+      const fix = !state.searchQuery && state.chatListTab === "interested" ? aiOffReason()?.action : null;
+      listEmptyAction = fix || null;
       conversationList.innerHTML = `
         <li class="list-empty">
           <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${state.searchQuery ? "M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4" : "M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"}"/></svg></span>
           <strong>${escapeHtml(title)}</strong>
           <span>${escapeHtml(hint)}</span>
+          ${listEmptyAction ? `<button type="button" class="btn primary list-empty-btn">${escapeHtml(listEmptyAction.label)}</button>` : ""}
         </li>`;
       animateIn(conversationList.firstElementChild, { y: 6, duration: 220 });
       return;
@@ -3391,6 +3458,9 @@
       bookingBox.disabled = !allowed;
       bookingBox.title = allowed ? "" : "Tu plan no incluye que la IA agende citas. Escríbenos para activarlo.";
     }
+    if ($("schedule-reminders") && schedule.appointment_reminders !== undefined) {
+      $("schedule-reminders").checked = !!schedule.appointment_reminders;
+    }
     if ($("schedule-staff-label") && schedule.staff_label !== undefined) {
       $("schedule-staff-label").value = schedule.staff_label || "";
     }
@@ -3531,7 +3601,7 @@
             : "";
           statusHtml = `<span class="appointments-slot-status">Ocupado · ${name}</span>${notes}`;
         } else {
-          statusHtml = '<span class="appointments-slot-status">Libre · clic para agendar</span>';
+          statusHtml = '<span class="appointments-slot-status">Libre<span class="appointments-slot-add" aria-hidden="true">+ Agendar</span></span>';
         }
         const data = busy
           ? `data-appointment-id="${escapeHtml(slot.appointment.id)}"`
@@ -3827,6 +3897,7 @@
         close_time: $("schedule-close")?.value || "18:00",
         slot_minutes: Number($("schedule-slot-minutes")?.value || 60),
         ai_booking_enabled: !!$("schedule-ai-booking")?.checked,
+        appointment_reminders: !!$("schedule-reminders")?.checked,
         staff_label: $("schedule-staff-label")?.value?.trim() || "",
       };
       const saved = await api("/appointments/schedule", { method: "PUT", body: JSON.stringify(payload) });
@@ -3873,6 +3944,11 @@
       await loadAppointmentsDay(state.appointmentsDate);
       setAppointmentsStatus(id ? "Cita actualizada" : "Cita creada");
     } catch (err) {
+      if (err.status === 409) {
+        showAppointmentFormError(`Espacio tomado. ${err.message}. Elige otra hora.`);
+        loadAppointmentsDay(state.appointmentsDate).catch(() => {});
+        return;
+      }
       showAppointmentFormError(err.message);
     } finally {
       btn.disabled = false;
@@ -3969,6 +4045,7 @@
 
   function renderReadiness() {
     syncOrdersTab();
+    syncAutostart();
     const r = state.aiProfile?.readiness;
     const card = $("ai-ready-card");
     card.classList.toggle("hidden", !r);
@@ -3978,12 +4055,14 @@
       $("ai-ready-count").textContent = `${r.done} de ${r.total}`;
       $("ai-ready-note").textContent = r.ready
         ? "Tiene lo que necesita para responder y cerrar sin dejar a nadie esperando. Si te preguntan algo nuevo, te lo anotamos abajo para que se lo enseñes."
-        : "Sin esto la IA le dice «te confirmo» al cliente, gasta respuestas y la venta se enfría. Hasta completarlo no podrás prender la IA.";
+        : state.tenant?.ai_autostart_pending
+          ? "Con estos datos tu IA responde y cierra la venta sin decir «te confirmo». Al completarlos, se enciende sola."
+          : "Con estos datos tu IA responde y cierra la venta sin decir «te confirmo». Complétalos para poder encenderla.";
       $("ai-ready-list").innerHTML = r.items
         .map(
           (i) => `
           <li class="ai-ready-item${i.done ? " is-done" : ""}">
-            <span class="ai-ready-mark" aria-hidden="true">${i.done ? "✓" : "!"}</span>
+            <span class="ai-ready-mark" aria-hidden="true">${i.done ? "✓" : ""}</span>
             <span class="ai-ready-text"><strong>${escapeHtml(i.label)}</strong>${i.done ? "" : `<span>${escapeHtml(i.hint)}</span>`}</span>
             ${i.done ? "" : i.action === "import-catalog"
               ? '<button type="button" class="link-btn ai-ready-import">Importar mi catálogo</button>'
@@ -4582,6 +4661,11 @@
   }
 
   async function loadOrders() {
+    if (!state.orders) {
+      $("orders-empty").classList.add("hidden");
+      showSkeleton($("orders-ready"), "cards", 2, 0);
+      showSkeleton($("orders-pending"), "cards", 1, 0);
+    }
     try {
       state.orders = await api("/orders");
     } catch {
@@ -4649,6 +4733,7 @@
       $(`orders-${key}`).innerHTML = list.map(orderCard).join("");
       $(`orders-${key}-empty`).classList.toggle("hidden", list.length > 0);
     }
+    renderOrdersEmpty(orders.length === 0);
     $("orders-ready-count").textContent = groups.ready.length ? `(${groups.ready.length})` : "";
     $("orders-pending-count").textContent = groups.pending.length ? `(${groups.pending.length})` : "";
     const badge = $("orders-badge");
@@ -4656,6 +4741,34 @@
     badge.classList.toggle("hidden", !groups.ready.length);
     syncOrdersTab();
   }
+
+  let ordersEmptyAction = null;
+  function renderOrdersEmpty(empty) {
+    $("orders-empty").classList.toggle("hidden", !empty);
+    document.querySelectorAll("#orders-panel .orders-section").forEach((el) => el.classList.toggle("hidden", empty));
+    if (!empty) return;
+    const off = aiOffReason();
+    const aiOn = !off && !!state.tenant?.ai_global_enabled;
+    let text = "Todavía no hay pedidos. En cuanto tu IA cierre la primera venta, aparece aquí.";
+    ordersEmptyAction = null;
+    if (off) {
+      text = `Por ahora no pueden llegar pedidos: ${(off.short || off.title).replace(/\.$/, "").toLowerCase()}.`;
+      ordersEmptyAction = off.action || null;
+    } else if (!aiOn) {
+      text = "Por ahora no pueden llegar pedidos: tu IA está apagada.";
+    } else if (state.canManageGlobal) {
+      text = "Todavía no hay pedidos. Pruébalo tú: escríbele a tu IA como si fueras un cliente que quiere comprar.";
+      ordersEmptyAction = { label: "Probar mi IA", run: () => goToReadinessField("try-ai-input") };
+    }
+    $("orders-empty-text").textContent = text;
+    const btn = $("orders-empty-btn");
+    btn.classList.toggle("hidden", !ordersEmptyAction);
+    btn.textContent = ordersEmptyAction?.label || "";
+  }
+  $("orders-empty-btn").addEventListener("click", () => ordersEmptyAction?.run());
+  conversationList.addEventListener("click", (e) => {
+    if (e.target.closest(".list-empty-btn")) listEmptyAction?.run();
+  });
 
   function syncOrdersTab() {
     const sells = Boolean(state.aiProfile?.payment_methods);
@@ -4997,14 +5110,15 @@
       state.aiProfile = profile;
       fillBizForm(profile);
       setBusinessName(profile.business_name, profile.business_name_is_placeholder);
+      await syncAutostart();
       const missing = missingReadiness();
       if (missing.length) {
         setBizSaveStatus(`✓ Guardado — aún falta: ${listEs(missing.map((i) => i.label.toLowerCase()))}`);
       } else {
         setBizSaveStatus(
           state.tenant?.ai_global_enabled
-            ? "✓ Guardado — tu IA ya puede vender sola"
-            : "✓ Guardado — tu IA está lista. Préndela arriba (IA global)",
+            ? "✓ Guardado: tu IA está encendida y ya puede vender sola"
+            : "✓ Guardado: tu IA está lista. Enciéndela arriba, en IA",
         );
       }
       renderOnboarding();
@@ -5262,6 +5376,32 @@
 
   function aiAllowedInChat(conv) {
     return !state.tenant || !!state.tenant.ai_global_enabled || !!conv?.ai_override_global;
+  }
+
+  function applyTenantAi(fresh) {
+    if (!state.tenant || !fresh) return;
+    const autostarted = !!state.tenant.ai_autostart_pending && !state.tenant.ai_global_enabled && !!fresh.ai_global_enabled;
+    state.tenant.ai_autostart_pending = !!fresh.ai_autostart_pending;
+    if (state.tenant.ai_global_enabled === fresh.ai_global_enabled) return;
+    state.tenant.ai_global_enabled = fresh.ai_global_enabled;
+    $("toggle-ai-global").checked = fresh.ai_global_enabled;
+    renderReadyBanner();
+    onAiGlobalChanged(fresh.ai_global_enabled);
+    if (autostarted) toast("¡Tu IA ya está encendida! Desde ahora les responde a tus clientes.", { tone: "ok", duration: 6000 });
+  }
+
+  let autostartChecking = false;
+  async function syncAutostart() {
+    if (autostartChecking || !state.tenant?.ai_autostart_pending || state.tenant.ai_global_enabled) return;
+    if (!state.aiProfile?.readiness?.ready) return;
+    autostartChecking = true;
+    try {
+      applyTenantAi(await api("/tenants/me"));
+    } catch {
+      /* lo vuelve a intentar en la próxima carga */
+    } finally {
+      autostartChecking = false;
+    }
   }
 
   function onAiGlobalChanged(enabled) {
@@ -5576,12 +5716,90 @@
       connectWs();
       startWaHeartbeat();
       if (state.wa.status === "connected") startLivePoll();
+      maybeShowMorningSummary();
     } catch (err) {
       conversationList.innerHTML = `<li class="conversation-item"><span class="error">${escapeHtml(err.message)}</span></li>`;
     } finally {
       renderWaUi();
     }
   }
+
+  function plural(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
+  }
+
+  function morningSummaryText(s) {
+    const parts = [];
+    if (s.attended) {
+      const interested = s.interested
+        ? ` y ${s.interested === 1 ? "1 quedó interesado" : `${s.interested} quedaron interesados`}`
+        : "";
+      parts.push(`Anoche tu IA atendió a ${plural(s.attended, "cliente", "clientes")}${interested}.`);
+    }
+    if (s.appointments_today) {
+      const next = s.next_appointment_at ? `; la próxima es a las ${s.next_appointment_at}` : "";
+      const line = `Hoy tienes ${plural(s.appointments_today, "cita", "citas")}${next}`;
+      parts.push(line.endsWith(".") ? line : `${line}.`);
+    }
+    return parts.join(" ");
+  }
+
+  /** Una vez al día, al abrir el panel en la mañana: lo que pasó mientras el dueño dormía. */
+  let morningLoading = false;
+  async function maybeShowMorningSummary() {
+    const hour = new Date().getHours();
+    if (!state.user?.tenant_id || hour < 5 || hour >= 12 || $("morning-card") || morningLoading) return;
+    const seenKey = `omitel_morning_${state.user.tenant_id}`;
+    let summary;
+    morningLoading = true;
+    try {
+      summary = await api("/results/morning");
+    } catch {
+      return;
+    } finally {
+      morningLoading = false;
+    }
+    if (localStorage.getItem(seenKey) === summary.date) return;
+    const text = morningSummaryText(summary);
+    if (!text) return;
+    localStorage.setItem(seenKey, summary.date);
+
+    const first = (state.user?.full_name || "").trim().split(/\s+/)[0];
+    const actions = [];
+    if (summary.interested) actions.push({ label: "Ver interesados", run: () => { $("mode-chats")?.click(); $("tab-chats-interested")?.click(); } });
+    if (summary.appointments_today) actions.push({ label: "Ver citas de hoy", run: () => $("mode-appointments")?.click() });
+    const card = document.createElement("div");
+    card.id = "morning-card";
+    card.className = "morning-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-label", "Resumen de la mañana");
+    card.innerHTML = `
+      <button type="button" class="morning-card-close" aria-label="Cerrar">×</button>
+      <span class="morning-card-sun" aria-hidden="true"></span>
+      <p class="morning-card-hello">¡Buen día${first ? `, ${escapeHtml(first)}` : ""}!</p>
+      <p class="morning-card-text">${escapeHtml(text)}</p>
+      <div class="morning-card-actions">${actions
+        .map((a, i) => `<button type="button" class="btn ${i ? "ghost" : "primary"} small" data-i="${i}">${escapeHtml(a.label)}</button>`)
+        .join("")}</div>`;
+    const close = () => {
+      card.classList.remove("is-open");
+      setTimeout(() => card.remove(), 260);
+    };
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".morning-card-close")) return close();
+      const btn = e.target.closest("[data-i]");
+      if (!btn) return;
+      actions[Number(btn.dataset.i)]?.run();
+      close();
+    });
+    document.body.appendChild(card);
+    card.getBoundingClientRect();
+    card.classList.add("is-open");
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.user) maybeShowMorningSummary();
+  });
 
   function connectWs() {
     disconnectWs();
@@ -5709,10 +5927,7 @@
       case "tenant.settings":
         if (state.tenant) {
           setBusinessName(event.business_name, event.business_name_is_placeholder);
-          state.tenant.ai_global_enabled = event.ai_global_enabled;
-          $("toggle-ai-global").checked = event.ai_global_enabled;
-          renderReadyBanner();
-          onAiGlobalChanged(event.ai_global_enabled);
+          applyTenantAi(event);
         }
         if (event.whatsapp_status) {
           applyWaSession({
@@ -6386,6 +6601,7 @@
   $("mode-ai").addEventListener("click", () => switchPanelMode("ai"));
   $("schedule-save-btn")?.addEventListener("click", () => saveAppointmentSchedule());
   $("schedule-ai-booking")?.addEventListener("change", () => saveAppointmentSchedule());
+  $("schedule-reminders")?.addEventListener("change", () => saveAppointmentSchedule());
   $("appointments-prev-day")?.addEventListener("click", () => {
     loadAppointmentsDay(shiftDateISO(state.appointmentsDate, -1));
   });
@@ -6763,10 +6979,28 @@
     return tmp;
   }
 
+  const SEND_RETRY_MS = [1500, 3000, 6000, 10000, 15000];
+  function sendKey() {
+    return window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  /** Con la misma Idempotency-Key el servidor no lo envía dos veces aunque el primer intento sí haya salido. */
+  async function sendWithRetry(tmp) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await tmp.send({ "Idempotency-Key": tmp.key });
+      } catch (err) {
+        if (!err.network || attempt >= SEND_RETRY_MS.length) throw err;
+        await waitForNetwork(SEND_RETRY_MS[attempt]);
+      }
+    }
+  }
+
   async function deliverPending(tmp, send) {
     tmp.send = send;
+    tmp.key = tmp.key || sendKey();
     try {
-      const msg = await send();
+      const msg = await sendWithRetry(tmp);
       pendingOut.splice(pendingOut.indexOf(tmp), 1);
       const media = mediaCache.get(tmp.id);
       if (media && msg?.id) mediaCache.set(msg.id, media);
@@ -6788,6 +7022,23 @@
     tmp.status = "pending";
     renderMessages();
     deliverPending(tmp, tmp.send);
+  });
+
+  window.addEventListener("offline", () => setNetPill(true));
+  window.addEventListener("online", async () => {
+    setNetPill(false);
+    if (!state.user) return;
+    if (!state.ws || state.ws.readyState > 1) connectWs();
+    pullActiveChat();
+    try {
+      const rows = await fetchConversations();
+      if (rows.length) {
+        setConversations(rows);
+        renderConversationList();
+      }
+    } catch {
+      /* el sondeo normal lo vuelve a intentar */
+    }
   });
 
   function resetComposerText() {
@@ -6881,7 +7132,7 @@
     const tmp = addPending(conversationId, "[audio]", {
       media: base64 ? { ok: true, base64, media_type: "audio", mimetype: mimetype.split(";")[0] } : null,
     });
-    deliverPending(tmp, () => api(`/conversations/${conversationId}/messages/audio`, { method: "POST", body: fd }, 60000));
+    deliverPending(tmp, (h) => api(`/conversations/${conversationId}/messages/audio`, { method: "POST", body: fd, headers: h }, 60000));
   }
 
   $("voice-btn").addEventListener("click", startVoiceNote);
@@ -6901,7 +7152,7 @@
       clearPendingImage();
       resetComposerText();
       const tmp = addPending(conversationId, ["[document]", file.name, text].filter(Boolean).join("\n"), { file });
-      deliverPending(tmp, () => api(`/conversations/${conversationId}/messages/file`, { method: "POST", body: fd }, 60000));
+      deliverPending(tmp, (h) => api(`/conversations/${conversationId}/messages/file`, { method: "POST", body: fd, headers: h }, 60000));
       return;
     }
     if (pendingImage) {
@@ -6920,7 +7171,7 @@
       const tmp = addPending(image.conversationId, text ? `[image]\n${text}` : "[image]", {
         media: base64 ? { ok: true, base64, media_type: "image", mimetype: image.mimetype } : null,
       });
-      deliverPending(tmp, () => api(`/conversations/${image.conversationId}/messages/image`, { method: "POST", body: fd }, 30000));
+      deliverPending(tmp, (h) => api(`/conversations/${image.conversationId}/messages/image`, { method: "POST", body: fd, headers: h }, 30000));
       return;
     }
     if (!text) return;
@@ -6928,8 +7179,8 @@
     const conversationId = state.activeId;
     resetComposerText();
     const tmp = addPending(conversationId, text);
-    deliverPending(tmp, () =>
-      api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ text }) })
+    deliverPending(tmp, (h) =>
+      api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ text }), headers: h })
     );
   });
 

@@ -184,3 +184,65 @@ def test_ai_does_not_switch_itself_on_where_the_owner_writes(mock_classify):
 
     mock_classify.assert_not_called()
     assert conv.ai_active is False
+
+
+def _meanwhile(change):
+    """Lo que pasa en el panel mientras la IA redacta: otra sesión, otro commit."""
+    def _generate(*_args, **_kwargs):
+        from app.infrastructure.persistence.database import SessionLocal
+
+        with SessionLocal() as other:
+            change(other)
+            other.commit()
+        return AiGeneratedReply(message="Claro, te cuento los precios 😊")
+
+    return _generate
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_owner_turns_ai_off_while_it_is_drafting(_sleep, mock_generate, mock_send):
+    from app.domain.entities import Tenant
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _run, _seed
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="¿Cuánto valen?")
+        msg.created_at = _now()
+        db.commit()
+        tenant_id = tenant.id
+        mock_generate.side_effect = _meanwhile(
+            lambda other: other.query(Tenant).filter(Tenant.id == tenant_id).update({"ai_global_enabled": False})
+        )
+        _run(db, tenant, conv, msg)
+
+    mock_generate.assert_called_once()
+    mock_send.assert_not_called()
+
+
+@requires_db
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_owner_answers_while_ai_is_drafting(_sleep, mock_generate, mock_send):
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _run, _seed
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="¿Cuánto valen?")
+        msg.created_at = _now() - timedelta(seconds=30)
+        db.commit()
+
+        def _owner_writes(other):
+            from app.domain.entities import Conversation
+
+            _add(other, other.get(Conversation, conv.id), direction="out", source="agent", body="Ya te digo", at=_now())
+
+        mock_generate.side_effect = _meanwhile(_owner_writes)
+        _run(db, tenant, conv, msg)
+
+    mock_generate.assert_called_once()
+    mock_send.assert_not_called()
+    assert conv.ai_active is False and conv.mode == "manual"

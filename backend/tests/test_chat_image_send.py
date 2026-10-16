@@ -124,3 +124,22 @@ def test_another_business_cannot_send_photos_to_this_chat(mock_send, client, cha
 
     assert response.status_code == 404
     mock_send.assert_not_called()
+
+
+@requires_db
+@patch(
+    "app.application.whatsapp.whatsapp_service.gateway_send_image",
+    side_effect=lambda *a, **k: {"key": {"id": f"WA-{uuid.uuid4().hex[:8]}"}},
+)
+def test_retry_after_a_network_cut_does_not_send_the_photo_twice(mock_send, client, chat):
+    conversation_id, headers = chat
+    retry = {**headers, "Idempotency-Key": f"tmp-{uuid.uuid4().hex}"}
+
+    first = _post(client, conversation_id, retry, data=PNG, caption="Te la mando")
+    again = _post(client, conversation_id, retry, data=PNG, caption="Te la mando")
+    other = _post(client, conversation_id, {**headers, "Idempotency-Key": f"tmp-{uuid.uuid4().hex}"}, data=PNG)
+
+    assert first.status_code == again.status_code == other.status_code == 201
+    assert again.json()["id"] == first.json()["id"]
+    assert other.json()["id"] != first.json()["id"]
+    assert mock_send.call_count == 2
