@@ -1885,7 +1885,7 @@
   to {
     opacity: 1;
     transform: translateY(0);
-    filter: blur(0);
+    filter: none;
   }
 }
 
@@ -1904,37 +1904,40 @@
     radial-gradient(ellipse 45% 35% at 70% 65%, rgba(255, 107, 0, 0.04) 0%, transparent 55%);
 }
 
+/* Halo de un disco con blur(120px), pintado como degradado: el blur se recalculaba en cada frame
+   sobre el fondo WebGL y en GPUs integradas de PC bajaba la landing a 20-30 fps. */
 .hero-bloom {
+  --bloom-size: min(55vw, 520px);
+  --bloom-halo: 240px;
   position: absolute;
+  width: calc(var(--bloom-size) + 2 * var(--bloom-halo));
+  height: calc(var(--bloom-size) + 2 * var(--bloom-halo));
   border-radius: 50%;
-  filter: blur(120px);
+  background: radial-gradient(closest-side, var(--bloom-color) 0%, var(--bloom-color) 18%, transparent 100%);
   will-change: transform;
 }
 
 .hero-bloom--peach {
-  width: min(55vw, 520px);
-  height: min(55vw, 520px);
-  top: 5%;
-  right: -5%;
-  background: rgba(255, 175, 120, 0.12);
+  --bloom-color: rgba(255, 175, 120, 0.11);
+  top: calc(5% - var(--bloom-halo));
+  right: calc(-5% - var(--bloom-halo));
   animation: bloom-breathe 24s ease-in-out infinite;
 }
 
 .hero-bloom--mist {
-  width: min(65vw, 640px);
-  height: min(65vw, 640px);
-  bottom: -25%;
-  left: -15%;
-  background: rgba(255, 255, 255, 0.7);
+  --bloom-size: min(65vw, 640px);
+  --bloom-color: rgba(255, 255, 255, 0.63);
+  bottom: calc(-25% - var(--bloom-halo));
+  left: calc(-15% - var(--bloom-halo));
   animation: bloom-breathe 24s ease-in-out infinite reverse;
 }
 
 :host-context([data-theme='dark']) .hero-bloom--mist {
-  background: rgba(255, 128, 48, 0.07);
+  --bloom-color: rgba(255, 128, 48, 0.063);
 }
 
 :host-context([data-theme='dark']) .hero-bloom--peach {
-  background: rgba(255, 140, 60, 0.1);
+  --bloom-color: rgba(255, 140, 60, 0.09);
 }
 
 @keyframes bloom-breathe {
@@ -2291,7 +2294,6 @@
   z-index: 0;
   opacity: 0;
   border-radius: 50%;
-  filter: blur(28px);
   transition: opacity 0.5s ease;
   pointer-events: none;
 }
@@ -2615,7 +2617,6 @@
 
 .device-glow--warm {
   background: radial-gradient(ellipse, rgba(255, 150, 80, 0.14) 0%, transparent 70%);
-  filter: blur(52px);
   transition: opacity 0.55s ease;
 }
 
@@ -2625,7 +2626,6 @@
   background:
     radial-gradient(ellipse 90% 85% at 50% 48%, rgba(37, 211, 102, 0.42) 0%, transparent 62%),
     radial-gradient(ellipse 70% 70% at 50% 50%, rgba(16, 185, 80, 0.28) 0%, transparent 68%);
-  filter: blur(36px);
   transition: opacity 0.55s ease;
 }
 
@@ -2688,7 +2688,6 @@
     rgba(0, 0, 0, 0.08) 50%,
     transparent 72%
   );
-  filter: blur(10px);
 }
 
 .device-aura {
@@ -2707,7 +2706,6 @@
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 50%, rgba(255, 138, 50, 0.32) 0%, rgba(255, 107, 0, 0.12) 36%, transparent 66%);
-  filter: blur(44px);
   opacity: 0.6;
   animation: aura-pulse 6.4s ease-in-out infinite;
 }
@@ -4272,10 +4270,11 @@
   }
 }
 
-/* Modo liviano (teléfonos y tablets): debe coincidir con LITE_QUERY de lite-mode.ts.
-   Un desenfoque sobre contenido que se mueve se recalcula en cada frame; en la GPU de un Android
-   medio eso solo ya baja el scroll a 20-30 fps. Las luces quedan quietas y sin blur. */
-@media (max-width: 900px), (pointer: coarse) {
+/* Modo liviano: teléfonos y tablets (LITE_QUERY de lite-mode.ts) y PCs cuya GPU no llega a 50 fps
+   (`is-lite-gpu`, lo pone data-fabric tras medir). Un desenfoque sobre contenido que se mueve se
+   recalcula en cada frame; en la GPU de un Android medio o de un portátil con gráficos integrados
+   eso solo ya baja el scroll a 20-30 fps. Las luces quedan quietas y sin blur. */
+@mixin lite-effects {
   .home-page,
   .home-page * {
     -webkit-backdrop-filter: none !important;
@@ -4299,4 +4298,12 @@
     filter: none;
     opacity: 0.6;
   }
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  @include lite-effects;
+}
+
+:host-context(.is-lite-gpu) {
+  @include lite-effects;
 }

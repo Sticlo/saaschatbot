@@ -15,7 +15,7 @@ import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectCom
 import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 import { AtmosphereService } from './atmosphere.service';
-import { isLiteDevice } from './lite-mode';
+import { isLiteDevice, markLiteGpu } from './lite-mode';
 
 const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 const BLOOM_QUERY = '(min-width: 901px)';
@@ -29,6 +29,17 @@ const RENDER_SCALE_DESKTOP = 0.66;
 const RENDER_SCALE_MOBILE = 0.55;
 /* Un pelo por debajo de 16.67 ms para no saltarse frames por jitter del rAF. */
 const MIN_FRAME_MS = 1000 / 60 - 2.5;
+/**
+ * Vigía de fps: en un portátil con gráficos integrados la landing completa (este lienzo con bloom
+ * más los desenfoques CSS encima) cae a 20-30 fps. Tras el arranque se mide la mediana del
+ * intervalo entre frames en ventanas de WATCH_FRAMES; si pasa de SLOW_FRAME_MS (< ~50 fps) primero
+ * se quita el bloom y se baja la resolución, y si sigue lento se pasa al modo liviano del móvil.
+ */
+const WATCH_WARMUP_MS = 2500;
+const WATCH_FRAMES = 90;
+const SLOW_FRAME_MS = 20;
+/* Un salto así es una pestaña en segundo plano o una pausa del sistema, no la GPU. */
+const WATCH_GAP_MS = 250;
 /**
  * Umbral del bloom según la atmósfera. Sobre fondo claro (luminancia ≈ 0.96) el umbral debe quedar
  * por encima del fondo, si no la imagen entera "florece" y se quema a blanco; solo las partículas
@@ -279,6 +290,9 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
   private lastRender = 0;
   private readonly pointerTarget = { x: 0, y: 0 };
   private cleanups: Array<() => void> = [];
+  private lastTick = 0;
+  private frameIntervals: number[] = [];
+  private qualityReduced = false;
 
   ngAfterViewInit(): void {
     if (!this.isBrowser) {
@@ -307,6 +321,10 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
     window.clearTimeout(this.resizeTimer);
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
+    this.disposeScene();
+  }
+
+  private disposeScene(): void {
     const s = this.scene3d;
     if (s) {
       s.disposables.forEach((d) => d.dispose());
@@ -315,6 +333,59 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
       s.renderer.forceContextLoss();
       this.scene3d = null;
     }
+  }
+
+  /** `true` si la GPU no dio la talla y el lienzo se apagó (ya no hay que pintar). */
+  private watchFps(now: number): boolean {
+    const interval = now - this.lastTick;
+    this.lastTick = now;
+    if (interval > WATCH_GAP_MS || now - this.startTime < WATCH_WARMUP_MS) {
+      this.frameIntervals.length = 0;
+      return false;
+    }
+    this.frameIntervals.push(interval);
+    if (this.frameIntervals.length < WATCH_FRAMES) {
+      return false;
+    }
+    const sorted = this.frameIntervals.sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+    this.frameIntervals = [];
+    if (median <= SLOW_FRAME_MS) {
+      return false;
+    }
+    if (!this.qualityReduced) {
+      this.reduceQuality();
+      return false;
+    }
+    this.goLite();
+    return true;
+  }
+
+  private reduceQuality(): void {
+    const s = this.scene3d;
+    if (!s) {
+      return;
+    }
+    this.qualityReduced = true;
+    if (s.bloom) {
+      s.composer.removePass(s.bloom);
+      s.bloom.dispose();
+      s.bloom = null;
+    }
+    s.renderer.setPixelRatio(RENDER_SCALE_MOBILE);
+    this.resize();
+  }
+
+  private goLite(): void {
+    if (this.raf) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    }
+    this.cleanups.forEach((fn) => fn());
+    this.cleanups = [];
+    this.disposeScene();
+    this.host.nativeElement.classList.add('is-lite');
+    markLiteGpu();
   }
 
   private async boot(canvas: HTMLCanvasElement): Promise<void> {
@@ -503,6 +574,9 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
       return;
     }
     if (document.hidden) {
+      return;
+    }
+    if (this.watchFps(now)) {
       return;
     }
     /* Tope a ~60 renders/s: en pantallas de 120 Hz el campo no necesita el doble de pases de bloom. */
