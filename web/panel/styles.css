@@ -5416,3 +5416,178 @@ body.lightbox-open { overflow: hidden; }
   .vp-wave span { transition: none; }
 }
 [data-theme="light"] .chat-toggles .toggle-row input:not(:checked) { background: #c4cad3; }
+
+/* Primeros pasos */
+.setup-guide { width: min(440px, 100%); text-align: left; }
+.setup-guide.hidden { display: none; }
+.setup-guide-hello { margin: 0 0 0.15rem; color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+.setup-guide-head h3 { margin: 0 0 0.85rem; color: var(--text); font-size: 1.4rem; line-height: 1.2; letter-spacing: -0.01em; }
+.setup-guide-progress { height: 6px; border-radius: 999px; background: var(--surface2); overflow: hidden; }
+.setup-guide-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #00a884;
+  transition: width 500ms var(--ease-out);
+}
+.setup-guide-count { margin: 0.45rem 0 0; color: var(--muted); font-size: 0.8rem; }
+.setup-guide-steps { list-style: none; margin: 1.1rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.setup-step {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.8rem 0.85rem;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
+}
+.setup-step.is-current {
+  border-color: color-mix(in srgb, #00a884 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, #00a884 14%, transparent), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.setup-step.is-done { background: transparent; border-color: transparent; padding-block: 0.45rem; }
+.setup-step-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.setup-step.is-current .setup-step-mark { border-color: #00a884; background: #00a884; color: #fff; }
+.setup-step.is-done .setup-step-mark { border-color: transparent; background: color-mix(in srgb, #00a884 18%, transparent); color: #00a884; }
+.setup-step-body { min-width: 0; }
+.setup-step-head { display: flex; align-items: center; gap: 0.5rem; min-height: 28px; }
+.setup-step-head strong { color: var(--text); font-size: 0.95rem; font-weight: 600; }
+.setup-step.is-done .setup-step-head strong { color: var(--muted); font-weight: 500; }
+.setup-step-time {
+  flex: none;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.setup-step-text { margin: 0.2rem 0 0.75rem; color: var(--muted); font-size: 0.87rem; line-height: 1.45; }
+.setup-step-action .btn { width: 100%; min-height: 44px; }
+.setup-step-go { align-self: center; font-size: 0.82rem; white-space: nowrap; }
+.setup-step #wa-setup { max-width: none; text-align: left; }
+.setup-step #wa-setup-title,
+.setup-step #wa-setup-text { display: none; }
+.setup-step #wa-setup-btn { width: 100%; min-height: 44px; }
+.setup-step .wa-setup-alt { margin: 0.6rem 0 0; font-size: 0.82rem; text-align: left; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Barrita de estado: por qué la IA no responde o qué paso sigue */
+.ai-alert-banner.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.55rem 0.75rem 0;
+  padding: 0.5rem 0.55rem 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  color: var(--text);
+  font-size: 0.86rem;
+  text-align: left;
+}
+.ai-alert-banner.status-strip.hidden { display: none; }
+.status-strip-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface2);
+  color: var(--muted);
+}
+.status-strip-count { font-size: 0.72rem; font-weight: 800; letter-spacing: -0.02em; }
+.status-strip[data-tone="setup"] .status-strip-icon { background: color-mix(in srgb, #00a884 18%, transparent); color: #00a884; }
+.status-strip[data-tone="pause"] .status-strip-icon { background: color-mix(in srgb, #8696a0 22%, transparent); color: var(--text); }
+.status-strip[data-tone="warn"] .status-strip-icon { background: color-mix(in srgb, #f5a623 22%, transparent); color: #f5a623; }
+.status-strip[data-tone="error"] .status-strip-icon,
+.status-strip[data-tone="info"] .status-strip-icon { background: color-mix(in srgb, #e35d6a 20%, transparent); color: #e35d6a; }
+.status-strip-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.45rem; row-gap: 0.05rem; }
+.status-strip-title { font-weight: 600; }
+.status-strip-text { color: var(--muted); }
+.status-strip-btn {
+  flex: none;
+  min-height: 34px;
+  padding: 0.35rem 0.85rem;
+  border: none;
+  border-radius: 999px;
+  background: #00a884;
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), filter 150ms ease;
+}
+.status-strip-btn:active { transform: scale(0.96); }
+.status-strip-btn.hidden { display: none; }
+.status-strip[data-tone="pause"] .status-strip-btn,
+.status-strip[data-tone="warn"] .status-strip-btn { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+@media (hover: hover) {
+  .status-strip-btn:hover { filter: brightness(1.08); }
+}
+@media (max-width: 768px) {
+  .ai-alert-banner.status-strip { margin: 0.45rem 0.5rem 0; font-size: 0.82rem; padding: 0.45rem 0.45rem 0.45rem 0.5rem; }
+  .status-strip-body { display: grid; }
+  .status-strip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* Dentro del chat: por qué la IA no responde aquí */
+.chat-ai-hint:not(.hidden) { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--muted); }
+.chat-ai-hint-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-ai-hint-btn {
+  flex: none;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid color-mix(in srgb, #00a884 55%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: #00a884;
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-ai-hint-btn:active { transform: scale(0.96); }
+
+/* Tu negocio: lo opcional plegado */
+.ai-more { margin: 0.2rem 0 0.4rem; border-top: 1px solid var(--border); }
+.ai-more > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+  padding: 0.9rem 0.2rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text);
+  font-weight: 600;
+}
+.ai-more > summary::-webkit-details-marker { display: none; }
+.ai-more > summary::before { content: "+"; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface2); color: var(--muted); font-weight: 700; transition: transform 200ms var(--ease-out); }
+.ai-more[open] > summary::before { transform: rotate(45deg); }
+.ai-more-hint { flex-basis: 100%; padding-left: calc(22px + 0.6rem); color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-guide-progress span, .setup-step, .ai-more > summary::before { transition: none; }
+}
+@media (max-width: 480px) {
+  .setup-step:not(.is-current) .setup-step-time { display: none; }
+}
+@media (max-width: 768px) {
+  body:has(.status-strip[data-tone="setup"]:not(.hidden) .status-strip-btn:not(.hidden)) #wa-connect-btn { display: none; }
+}

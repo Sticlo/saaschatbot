@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=87" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=89" />
 </head>
 <body>
   <div id="app">
@@ -136,10 +136,13 @@
         </div>
       </header>
 
-      <div id="ai-alert-banner" class="ai-alert-banner hidden"></div>
-      <div id="ai-ready-banner" class="ai-alert-banner ai-ready-banner hidden">
-        <span id="ai-ready-banner-text"></span>
-        <button type="button" id="ai-ready-banner-btn" class="link-btn">Completar ahora</button>
+      <div id="ai-alert-banner" class="ai-alert-banner status-strip hidden" role="status" aria-live="polite">
+        <span class="status-strip-icon" aria-hidden="true"></span>
+        <span class="status-strip-body">
+          <strong class="status-strip-title"></strong>
+          <span class="status-strip-text"></span>
+        </span>
+        <button type="button" class="status-strip-btn hidden"></button>
       </div>
 
       <div class="layout">
@@ -176,6 +179,15 @@
 
         <main class="chat-area" id="chat-area">
             <div id="empty-chat" class="empty-state">
+            <section id="setup-guide" class="setup-guide hidden" aria-labelledby="setup-guide-title">
+              <header class="setup-guide-head">
+                <p id="setup-guide-hello" class="setup-guide-hello"></p>
+                <h3 id="setup-guide-title">Deja tu IA vendiendo</h3>
+                <div class="setup-guide-progress" aria-hidden="true"><span id="setup-guide-bar"></span></div>
+                <p id="setup-guide-count" class="setup-guide-count"></p>
+              </header>
+              <ol id="setup-guide-steps" class="setup-guide-steps"></ol>
+            </section>
             <div id="wa-setup" class="wa-setup">
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
               <p id="wa-setup-text" class="muted">Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.</p>
@@ -343,24 +355,6 @@
                 <div class="ai-step">
                   <span class="ai-step-num">4</span>
                   <label class="ai-field">
-                    <span>¿A quién le vendes?</span>
-                    <span class="ai-field-hint">Tu cliente típico.</span>
-                    <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
-                  </label>
-                </div>
-
-                <div class="ai-step">
-                  <span class="ai-step-num">5</span>
-                  <label class="ai-field">
-                    <span>¿Precios o rangos?</span>
-                    <span class="ai-field-hint">Solo de referencia. Los precios exactos van en Inventario: con esos cotiza la IA.</span>
-                    <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
-                  </label>
-                </div>
-
-                <div class="ai-step">
-                  <span class="ai-step-num">6</span>
-                  <label class="ai-field">
                     <span>¿Cómo te pagan?</span>
                     <span class="ai-field-hint">Con esto la IA cierra la venta sola. Escríbelo tal cual se lo darías a un cliente.</span>
                     <textarea id="biz-payments" rows="2" maxlength="1000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
@@ -368,7 +362,7 @@
                 </div>
 
                 <div class="ai-step">
-                  <span class="ai-step-num">7</span>
+                  <span class="ai-step-num">5</span>
                   <label class="ai-field">
                     <span>¿Haces envíos o domicilios?</span>
                     <span class="ai-field-hint">A dónde, cuánto cuesta y cuánto tarda. Es de lo que más preguntan. Si no envías, escribe «Solo se recoge en el local».</span>
@@ -376,12 +370,32 @@
                   </label>
                 </div>
 
-                <div class="ai-step">
-                  <span class="ai-step-num">8</span>
+                <div class="ai-step ai-step-last">
+                  <span class="ai-step-num">6</span>
                   <label class="ai-field">
                     <span>¿Dónde estás y cuándo atiendes?</span>
                     <span class="ai-field-hint">Ciudad, barrio u horario.</span>
                     <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
+                  </label>
+                </div>
+
+                <details class="ai-more" id="biz-more">
+                  <summary><span>Más detalles</span><span class="ai-more-hint">Opcional · tono, a quién le vendes y qué no debe decir</span></summary>
+                <div class="ai-step">
+                  <span class="ai-step-num">7</span>
+                  <label class="ai-field">
+                    <span>¿A quién le vendes?</span>
+                    <span class="ai-field-hint">Tu cliente típico.</span>
+                    <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
+                  </label>
+                </div>
+
+                <div class="ai-step">
+                  <span class="ai-step-num">8</span>
+                  <label class="ai-field">
+                    <span>¿Precios o rangos?</span>
+                    <span class="ai-field-hint">Solo de referencia. Los precios exactos van en Inventario: con esos cotiza la IA.</span>
+                    <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
                   </label>
                 </div>
 
@@ -398,10 +412,11 @@
                   <span class="ai-step-num">10</span>
                   <label class="ai-field">
                     <span>¿Algo que no debe decir?</span>
-                    <span class="ai-field-hint">Opcional — descuentos, promesas, etc.</span>
+                    <span class="ai-field-hint">Descuentos, promesas, etc.</span>
                     <textarea id="biz-restrictions" rows="2" maxlength="1000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
                   </label>
                 </div>
+                </details>
 
                 <div class="ai-save-row">
                   <button type="button" id="biz-save-btn" class="btn primary ai-save-btn">Guardar mi negocio</button>
@@ -871,6 +886,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=162"></script>
+  <script src="/static/panel/app.js?v=164"></script>
 </body>
 </html>

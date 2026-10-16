@@ -55,6 +55,15 @@
 
   const tour = { active: false, autoChecked: false, steps: [], index: 0, root: null, target: null, cleanup: null, raf: 0 };
   const diag = { data: null, timer: 0, polls: 0, wasConnected: false, loading: false };
+  const setupProgress = { done: null };
+  let stripAction = null;
+  let chatHintAction = null;
+  const CHECK_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  const STRIP_ICONS = {
+    pause: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="7" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" fill="currentColor"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 7.5v5.5M12 16.6v.01"/></svg>',
+    wa: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M20 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 20 12zM4 4l16 16"/></svg>',
+  };
   // El QR no se puede escanear con el mismo celular que lo muestra: ahí se vincula con código.
   const waLink = { mode: "qr", editingPhone: false };
   const PAIR_PHONE_KEY = "omitel.pairPhone";
@@ -624,7 +633,8 @@
     $("appointments-panel").classList.add("hidden");
     $("inventory-panel").classList.add("hidden");
     $("orders-panel").classList.add("hidden");
-    $("ai-ready-banner").classList.add("hidden");
+    $("ai-alert-banner").classList.add("hidden");
+    setupProgress.done = null;
     $("ai-questions-badge").classList.add("hidden");
     $("orders-badge").classList.add("hidden");
     msgCache.clear();
@@ -1128,7 +1138,7 @@
         ? "Prefiero escanear un código QR"
         : "¿Solo tienes este celular? Conéctate con un código";
     }
-    $("empty-ready")?.classList.toggle("hidden", !connected);
+    renderSetupGuide();
     if (connected && !diag.wasConnected) {
       diag.polls = 0;
       loadDiagnostic();
@@ -1448,24 +1458,277 @@
   }
 
   function setupIncomplete() {
-    const p = state.aiProfile || {};
-    return (
-      state.wa.status !== "connected" ||
-      !p.industry?.trim() ||
-      !p.products_services?.trim() ||
-      !(state.onboarding.alertCount > 0)
-    );
+    return !!setupSteps()?.some((s) => !s.done);
   }
 
   function renderOnboarding() {
     $("guide-btn")?.classList.toggle("hidden", !canSeeGuide());
-    if (tour.active || tour.autoChecked || !canSeeGuide()) return;
-    tour.autoChecked = true;
-    if (localStorage.getItem(tourStorageKey()) === "1" || !setupIncomplete()) return;
-    setTimeout(() => {
-      if (!tour.active && $("qr-modal")?.classList.contains("hidden") !== false) startTour();
-    }, 700);
+    renderSetupGuide();
   }
+
+  // —— Primeros pasos: lo que falta para que la IA venda, en orden y con un botón cada uno ——
+
+
+  function setupSteps() {
+    if (!state.user || !state.canManageGlobal || !state.aiProfile || state.onboarding.alertCount === null) return null;
+    const onPhone = preferredWaMode() === "code";
+    const readiness = state.aiProfile.readiness || { ready: true, total: 0, items: [] };
+    const missing = readiness.items.filter((i) => !i.done);
+    const started = missing.length < readiness.total;
+    const tips = state.aiProfile.tips || [];
+    const ownNumber = tips.some((t) => t.key === "alerts-own");
+    return [
+      {
+        key: "wa",
+        title: "Conecta tu WhatsApp",
+        minutes: 1,
+        text: onPhone ? "Desde este mismo celular, con un código. Tus chats siguen en tu WhatsApp." : "Escaneas un código con tu celular y listo. Tus chats siguen en tu WhatsApp.",
+        done: state.wa.status === "connected",
+        doneText: "WhatsApp conectado",
+        cta: onPhone ? "Conectar con código" : "Mostrar código QR",
+        run: () => connectWhatsApp(),
+      },
+      {
+        key: "biz",
+        title: "Cuéntale qué vendes",
+        minutes: 3,
+        text: started
+          ? `Te falta: ${listEs(missing.map((i) => i.label.toLowerCase()))}.`
+          : "Qué vendes, precios, cómo te pagan, envíos y horario. Así responde sin decir «te confirmo».",
+        done: !!readiness.ready,
+        doneText: "Tu negocio quedó listo",
+        cta: started ? "Seguir" : "Empezar",
+        run: () => goToReadinessField(missing[0]?.field || "biz-products"),
+      },
+      {
+        key: "alerts",
+        title: "¿A dónde te avisamos?",
+        minutes: 0.5,
+        text: ownNumber
+          ? "Pusiste el número del negocio y así el aviso no suena. Pon tu WhatsApp personal."
+          : "Tu WhatsApp personal. Te escribimos cuando alguien quiera comprar.",
+        done: state.onboarding.alertCount > 0 && !ownNumber,
+        doneText: "Ya sabemos a dónde avisarte",
+        cta: ownNumber ? "Cambiar número" : "Poner mi número",
+        run: () => goToReadinessField("alert-recipients"),
+      },
+      {
+        key: "try",
+        title: "Pruébala tú primero",
+        minutes: 2,
+        text: "Escríbele como si fueras un cliente. No se le envía nada a nadie.",
+        done: !tips.some((t) => t.key === "try"),
+        doneText: "Ya la probaste",
+        cta: "Probar mi IA",
+        run: () => goToReadinessField("try-ai-input"),
+      },
+    ];
+  }
+
+  function setupGuideActive(steps) {
+    if (!steps || steps.every((s) => s.done)) return false;
+    return !(state.wa.status !== "connected" && state.conversations.length > 0);
+  }
+
+  function announceSetupProgress(steps) {
+    const doneKeys = steps.filter((s) => s.done).map((s) => s.key);
+    const before = setupProgress.done;
+    setupProgress.done = doneKeys;
+    if (!before) return;
+    const fresh = steps.find((s) => s.done && !before.includes(s.key));
+    if (!fresh) return;
+    const next = steps.find((s) => !s.done);
+    if (next) {
+      toast(`${fresh.doneText}. Sigue: «${next.title}».`, { duration: 6000 });
+    } else {
+      toast(
+        state.tenant?.ai_global_enabled
+          ? "¡Listo! Tu IA quedó lista para vender."
+          : "¡Listo! Ya puedes encender tu IA arriba a la derecha.",
+        { duration: 7000 }
+      );
+    }
+  }
+
+  function renderSetupGuide() {
+    const guide = $("setup-guide");
+    const waSetup = $("wa-setup");
+    const list = $("setup-guide-steps");
+    if (!guide || !waSetup) return;
+    const steps = setupSteps();
+    const active = setupGuideActive(steps);
+    if (list.contains(waSetup)) guide.after(waSetup);
+    guide.classList.toggle("hidden", !active);
+    $("empty-ready")?.classList.toggle("hidden", active || state.wa.status !== "connected");
+    if (steps) announceSetupProgress(steps);
+    if (!active) {
+      renderStatusStrip();
+      return;
+    }
+
+    const doneCount = steps.filter((s) => s.done).length;
+    const left = steps.length - doneCount;
+    const current = steps.find((s) => !s.done);
+    const first = (state.user?.full_name || "").trim().split(/\s+/)[0];
+    const minutes = Math.max(1, Math.ceil(steps.filter((s) => !s.done).reduce((n, s) => n + s.minutes, 0)));
+    $("setup-guide-hello").textContent = doneCount ? `Vas muy bien${first ? `, ${first}` : ""}` : `Hola${first ? `, ${first}` : ""}`;
+    $("setup-guide-title").textContent = doneCount
+      ? `Te ${left === 1 ? "falta 1 paso" : `faltan ${left} pasos`}`
+      : `Deja tu IA vendiendo en ${steps.length} pasos`;
+    $("setup-guide-count").textContent = `${doneCount} de ${steps.length} listos · unos ${minutes} min`;
+    $("setup-guide-bar").style.width = `${Math.max(4, Math.round((doneCount / steps.length) * 100))}%`;
+    list.innerHTML = steps
+      .map((s, i) => {
+        const isCurrent = s === current;
+        const cls = ["setup-step", s.done && "is-done", isCurrent && "is-current"].filter(Boolean).join(" ");
+        return `<li class="${cls}" data-step="${s.key}">
+          <span class="setup-step-mark" aria-hidden="true">${s.done ? CHECK_ICON : i + 1}</span>
+          <div class="setup-step-body">
+            <div class="setup-step-head">
+              <strong>${escapeHtml(s.done ? s.doneText : s.title)}</strong>
+              ${s.done ? '<span class="sr-only">(listo)</span>' : `<span class="setup-step-time">${s.minutes < 1 ? "30 seg" : `${s.minutes} min`}</span>`}
+            </div>
+            ${isCurrent ? `<p class="setup-step-text">${escapeHtml(s.text)}</p><div class="setup-step-action"></div>` : ""}
+          </div>
+          ${!s.done && !isCurrent ? `<button type="button" class="link-btn setup-step-go">${escapeHtml(s.cta)}</button>` : ""}
+        </li>`;
+      })
+      .join("");
+    const action = list.querySelector(".is-current .setup-step-action");
+    if (current.key === "wa") {
+      action.appendChild(waSetup);
+    } else {
+      action.innerHTML = `<button type="button" class="btn primary setup-step-cta">${escapeHtml(current.cta)}</button>`;
+    }
+    renderStatusStrip();
+  }
+
+  $("setup-guide-steps").addEventListener("click", (e) => {
+    const btn = e.target.closest(".setup-step-cta, .setup-step-go");
+    if (!btn) return;
+    const key = btn.closest(".setup-step")?.dataset.step;
+    setupSteps()?.find((s) => s.key === key)?.run();
+  });
+
+  // —— Por qué la IA no responde: siempre en palabras del negocio y con qué hacer ——
+
+  const goToPlan = () => {
+    location.href = siteUrl("/mi-plan");
+  };
+  function turnOnGlobalAi() {
+    const input = $("toggle-ai-global");
+    if (!input || input.checked) return;
+    input.checked = true;
+    input.dispatchEvent(new Event("change"));
+  }
+
+  function aiOffReason() {
+    const sub = state.subscription;
+    const ai = state.aiStatus;
+    if (sub?.trial_expired || sub?.needs_payment || ai?.plan_required) {
+      return {
+        tone: "warn",
+        icon: STRIP_ICONS.warn,
+        title: sub?.needs_payment ? "Tu plan venció: la IA no está respondiendo" : "Tu prueba gratis terminó: la IA no está respondiendo",
+        short: sub?.needs_payment ? "Plan vencido: la IA no responde." : "Prueba terminada: la IA no responde.",
+        text: "Tus clientes no reciben respuesta automática hasta que actives tu plan.",
+        action: { label: "Activar plan", run: goToPlan },
+      };
+    }
+    if (ai && (ai.configured === false || ai.provider_ok === false)) {
+      return {
+        tone: "error",
+        icon: STRIP_ICONS.warn,
+        title: "La IA tiene una falla de nuestro lado",
+        short: "Falla nuestra, no tuya: ya la revisamos.",
+        text: "No es nada de tu configuración: ya lo estamos revisando. Mientras tanto, responde tú desde aquí.",
+      };
+    }
+    if (ai && !ai.daily_replies_unlimited && ai.daily_replies_remaining === 0) {
+      return {
+        tone: "warn",
+        icon: STRIP_ICONS.warn,
+        title: "La IA llegó al límite de respuestas de hoy",
+        short: "Límite de hoy: mañana vuelve.",
+        text: "Mañana vuelve a responder sola. Si te escriben mucho, mejora tu plan.",
+        action: { label: "Ver planes", run: goToPlan },
+      };
+    }
+    if (state.wa.status !== "connected" && state.conversations.length > 0) {
+      return {
+        tone: "warn",
+        icon: STRIP_ICONS.wa,
+        title: "WhatsApp desconectado",
+        short: "WhatsApp desconectado.",
+        text: "No llegan mensajes nuevos y la IA no puede responder. Tus chats están guardados.",
+        action: state.canConnectWa ? { label: "Reconectar", run: () => connectWhatsApp() } : null,
+      };
+    }
+    if (state.tenant && !state.tenant.ai_global_enabled && state.canManageGlobal && state.aiProfile && !state.aiProfile.readiness?.ready) {
+      return {
+        tone: "pause",
+        icon: STRIP_ICONS.pause,
+        title: "Tu IA está en pausa",
+        text: "Para encenderla, termina de contarle qué vendes. Mientras tanto contestas tú.",
+        action: { label: "Completar", run: () => goToReadinessField(missingReadiness()[0]?.field || "biz-products") },
+      };
+    }
+    if (state.tenant && !state.tenant.ai_global_enabled) {
+      return {
+        tone: "pause",
+        icon: STRIP_ICONS.pause,
+        title: "Tu IA está en pausa",
+        text: state.canManageGlobal
+          ? "No le responde a nadie: aquí contestas tú. Enciéndela cuando quieras."
+          : "No le responde a nadie. El dueño de la cuenta la puede encender.",
+        action: state.canManageGlobal ? { label: "Encender", run: turnOnGlobalAi } : null,
+      };
+    }
+    return null;
+  }
+
+  function statusStripInfo() {
+    if (state.aiNotice) {
+      return {
+        tone: state.aiNotice.isError ? "error" : "info",
+        icon: STRIP_ICONS.warn,
+        title: state.aiNotice.isError ? "La IA no pudo responder un mensaje" : "Aviso de tu IA",
+        text: state.aiNotice.text,
+      };
+    }
+    const off = aiOffReason();
+    if (off) return off;
+    const steps = setupSteps();
+    if (!steps || steps.every((s) => s.done) || $("setup-guide").getClientRects().length) return null;
+    const done = steps.filter((s) => s.done).length;
+    const next = steps.find((s) => !s.done);
+    return {
+      tone: "setup",
+      icon: `<span class="status-strip-count">${done}/${steps.length}</span>`,
+      title: "Primeros pasos",
+      text: `Sigue: ${next.title}`,
+      action: { label: next.cta, run: next.run },
+    };
+  }
+
+  function renderStatusStrip() {
+    const strip = $("ai-alert-banner");
+    if (!strip) return;
+    const info = statusStripInfo();
+    strip.classList.toggle("hidden", !info);
+    stripAction = info?.action?.run || null;
+    renderPlanStatus();
+    if (!info) return;
+    strip.dataset.tone = info.tone;
+    strip.querySelector(".status-strip-icon").innerHTML = info.icon;
+    strip.querySelector(".status-strip-title").textContent = info.title;
+    strip.querySelector(".status-strip-text").textContent = info.text || "";
+    const btn = strip.querySelector(".status-strip-btn");
+    btn.textContent = info.action?.label || "";
+    btn.classList.toggle("hidden", !info.action);
+  }
+
+  $("ai-alert-banner").querySelector(".status-strip-btn").addEventListener("click", () => stripAction?.());
 
   function buildTourSteps() {
     const steps = [
@@ -2015,7 +2278,7 @@
     if (!e.target.closest?.("[data-diag-cta]")) return;
     const configure = setupIncomplete();
     closeDiagnostic();
-    if (configure) startTour();
+    if (configure) setupSteps()?.find((s) => !s.done)?.run();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("diag-modal")?.classList.contains("hidden")) closeDiagnostic();
@@ -3041,6 +3304,7 @@
       }
     }
     renderQuickShortcuts();
+    renderStatusStrip();
     if (changed) {
       if (isChats) {
         animateIn($("sidebar-chats"), { y: 6, duration: 220 });
@@ -3687,6 +3951,7 @@
     $("biz-hours").value = profile?.location_hours || "";
     $("biz-tone").value = profile?.tone || "";
     $("biz-restrictions").value = profile?.restrictions || "";
+    if (["biz-target", "biz-prices", "biz-tone", "biz-restrictions"].some((id) => $(id).value.trim())) $("biz-more").open = true;
     renderBizSummary(profile);
     renderReadiness();
     updateAiSetupControls();
@@ -3838,27 +4103,8 @@
   }
 
   function renderReadyBanner() {
-    const missing = missingReadiness();
-    const ownNumber = (state.aiProfile?.tips || []).some((t) => t.key === "alerts-own");
     renderAvisosDot();
-    const show = Boolean(state.canManageGlobal && (ownNumber || (missing.length && state.tenant?.ai_global_enabled)));
-    $("ai-ready-banner").classList.toggle("hidden", !show);
-    $("ai-ready-banner").dataset.target = ownNumber ? "alert-recipients" : "";
-    $("ai-ready-banner").classList.toggle("error", ownNumber);
-    $("ai-ready-banner-btn").textContent = ownNumber ? "Cambiar número" : "Completar";
-    if (show && ownNumber) {
-      $("ai-ready-banner-text").textContent =
-        "Los avisos de venta van al mismo WhatsApp del negocio: te llegan como mensaje a ti mismo y no suenan. " +
-        "Pon tu número personal.";
-    } else if (show) {
-      const labels = missing.map((i) => i.label.toLowerCase());
-      const extra = '<span class="banner-extra"> para vender sin decir «te confirmo»</span>.';
-      $("ai-ready-banner-text").innerHTML =
-        missing.length === 1
-          ? `A tu IA solo le falta ${escapeHtml(labels[0])}${extra}`
-          : `A tu IA le faltan ${missing.length} datos${extra}`;
-      $("ai-ready-banner-text").title = listEs(labels);
-    }
+    renderSetupGuide();
   }
 
   function goToReadinessField(fieldId) {
@@ -3868,6 +4114,8 @@
     }
     if (state.panelMode !== "ai") switchPanelMode("ai");
     const target = (fieldId && $(fieldId)) || $("ai-ready-card");
+    const folded = target.closest("details");
+    if (folded) folded.open = true;
     revealAiGroup(target);
     target.scrollIntoView({ behavior: "smooth", block: "center" });
     if (target.focus) target.focus({ preventScroll: true });
@@ -5027,19 +5275,44 @@
     }
   }
 
+  function setManualMode(on) {
+    const input = $("toggle-mode-manual");
+    if (!input || input.checked === on || input.disabled) return;
+    input.checked = on;
+    input.dispatchEvent(new Event("change"));
+  }
+
   function aiBlockReasonForConv(conv) {
-    if (!conv) return "";
+    if (!conv) return null;
+    const off = aiOffReason();
+    if (off && off.tone !== "pause") return { text: off.short || off.title, action: off.action };
+    const canEdit = state.canWrite && state.wa.status === "connected";
     if (!aiAllowedInChat(conv)) {
-      return "IA global apagada. Activa «IA activa» para que responda solo en este chat.";
+      return {
+        text: "IA en pausa: respondes tú.",
+        action: canEdit ? { label: "Que responda aquí", run: () => patchConversationAi(true) } : null,
+      };
     }
     if (!conv.ai_active) {
-      if (conv.imported_legacy && !conv.bait_sent) {
-        return "Chat personal — activa «IA activa» si quieres que responda en este hilo.";
-      }
-      return "Activa «IA activa» para que responda sola a este contacto.";
+      const personal = conv.imported_legacy && !conv.bait_sent;
+      return {
+        text: personal ? "Chat personal: la IA no responde." : "IA apagada en este chat.",
+        action: canEdit ? { label: personal ? "Que responda aquí" : "Encender aquí", run: () => patchConversationAi(true) } : null,
+      };
     }
-    if (conv.mode === "manual") return "Modo manual activo — apágalo para que la IA responda";
-    return "";
+    if (conv.mode === "manual") {
+      return {
+        text: "Modo manual: respondes tú.",
+        action: canEdit ? { label: "Volver a la IA", run: () => setManualMode(false) } : null,
+      };
+    }
+    if (state.canManageGlobal && state.aiProfile?.readiness && !state.aiProfile.readiness.ready) {
+      return {
+        text: "A tu IA le faltan datos del negocio.",
+        action: { label: "Completar", run: () => goToReadinessField(missingReadiness()[0]?.field || null) },
+      };
+    }
+    return null;
   }
 
   async function patchConversationAi(enabled) {
@@ -5103,23 +5376,12 @@
   }
 
   function renderAiAlerts() {
-    const banner = $("ai-alert-banner");
-    const parts = [];
-    if (state.tenant && !state.tenant.ai_global_enabled) {
-      parts.push("IA global apagada — solo responde en los chats donde actives «IA activa».");
-    }
-    if (state.aiNotice) parts.push(state.aiNotice.text);
-    if (!parts.length) {
-      banner.classList.add("hidden");
-      banner.textContent = "";
-      renderPlanStatus();
-      return;
-    }
-    banner.textContent = parts.join(" · ");
-    banner.classList.toggle("error", !!state.aiNotice?.isError);
-    banner.classList.remove("hidden");
-    renderPlanStatus();
+    renderStatusStrip();
   }
+
+  $("chat-ai-hint").addEventListener("click", (e) => {
+    if (e.target.closest(".chat-ai-hint-btn")) chatHintAction?.();
+  });
 
   function syncChatToggles(conv) {
     $("toggle-mode-manual").checked = conv.mode === "manual";
@@ -5133,8 +5395,11 @@
     $("ai-retry-btn").disabled = !canRetry;
     const hint = aiBlockReasonForConv(conv);
     const hintEl = $("chat-ai-hint");
+    chatHintAction = hint?.action?.run || null;
     if (hint) {
-      hintEl.textContent = hint;
+      hintEl.innerHTML = `<span class="chat-ai-hint-text">${escapeHtml(hint.text)}</span>${
+        hint.action ? `<button type="button" class="chat-ai-hint-btn">${escapeHtml(hint.action.label)}</button>` : ""
+      }`;
       hintEl.classList.remove("hidden");
     } else {
       hintEl.textContent = "";
@@ -5206,6 +5471,7 @@
     syncChatToggles(conv);
     renderConversationList();
     renderQuickShortcuts();
+    renderStatusStrip();
 
     const cached = msgCache.get(id);
     let stopSkel = () => {};
@@ -6074,6 +6340,7 @@
     activeChat.classList.add("hidden");
     renderConversationList();
     renderQuickShortcuts();
+    renderStatusStrip();
     if (isPhoneLayout()) animateIn(document.querySelector(".sidebar"), { x: -24, opacity: 0.5, duration: 280, easing: EASE_DRAWER });
   }
 
@@ -6146,9 +6413,6 @@
   });
   $("staff-modal-backdrop")?.addEventListener("click", hideStaffModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
-  $("ai-ready-banner-btn").addEventListener("click", () =>
-    goToReadinessField($("ai-ready-banner").dataset.target || null)
-  );
   $("ai-ready-list").addEventListener("click", (e) => {
     if (e.target.closest(".ai-ready-import")) {
       if (state.canManageGlobal) importCatalogFromReadiness();
