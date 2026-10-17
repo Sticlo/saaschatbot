@@ -5946,6 +5946,53 @@ body.lightbox-open { overflow: hidden; }
   box-shadow: 0 0 0 1px var(--border);
 }
 
+/* WhatsApp se cayó en una cuenta que ya tenía chats */
+.badge.wa-disconnected.wa-dropped {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: color-mix(in srgb, #e35d6a 14%, transparent);
+  border: 1px solid color-mix(in srgb, #e35d6a 35%, transparent);
+  color: #f08a94;
+}
+.badge.wa-dropped::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e35d6a;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #e35d6a 25%, transparent);
+}
+#wa-connect-btn.is-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  #wa-connect-btn.is-secondary:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+}
+.status-strip[data-tone="danger"] {
+  background: color-mix(in srgb, #e35d6a 10%, var(--surface));
+  border-color: color-mix(in srgb, #e35d6a 32%, transparent);
+}
+.status-strip[data-tone="danger"] .status-strip-icon { background: color-mix(in srgb, #e35d6a 20%, transparent); color: #e35d6a; }
+.status-strip[data-tone="danger"] .status-strip-text { color: color-mix(in srgb, var(--text) 78%, transparent); }
+.status-strip[data-tone="danger"] .status-strip-btn { background: transparent; color: var(--text); border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); }
+.wa-dropped-art,
+.setup-guide .wa-setup.is-dropped .wa-dropped-art { display: none; }
+.wa-setup.is-dropped { max-width: 400px; }
+.wa-setup.is-dropped .wa-dropped-art {
+  display: block;
+  width: 180px;
+  height: auto;
+  margin: 0 auto 1.4rem;
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+}
+.wa-setup.is-dropped h3 { font-size: 1.5rem; letter-spacing: -0.02em; margin-bottom: 0.6rem; }
+.wa-setup.is-dropped #wa-setup-text { font-size: 0.95rem; line-height: 1.5; margin-bottom: 1.25rem; }
+.wa-setup.is-dropped #wa-setup-btn { width: 100%; min-height: 46px; }
+
 /* Barra de arriba en celular: solo lo que el dueño necesita ver */
 .cta-short { display: none; }
 #app :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--accent); }
@@ -5981,4 +6028,90 @@ body.lightbox-open { overflow: hidden; }
   .appointments-schedule-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.75rem 0 0.85rem; }
   .appointments-schedule-grid label:nth-child(3) { grid-column: 1 / -1; }
   .appointments-schedule-grid input { min-width: 0; width: 100%; }
+}
+
+/* Computador: secciones en una barra vertical a la izquierda */
+@media (min-width: 769px) {
+  .layout { grid-template-columns: 76px auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .sidebar { display: contents; }
+  #sidebar-chats {
+    grid-column: 2;
+    grid-row: 1;
+    width: 320px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .chat-area { grid-column: 3; grid-row: 1; min-width: 0; }
+
+  .sidebar-mode-tabs {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.3rem;
+    margin: 0;
+    padding: 0.75rem 0.45rem;
+    border-radius: 0;
+    border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .sidebar-mode-tabs .tab-pill { display: none; }
+  .sidebar-mode-tabs .sidebar-mode-tab,
+  .sidebar-mode-tabs.has-pill > .sidebar-mode-tab {
+    position: relative;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.6rem 0.15rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    box-shadow: none;
+  }
+  .sidebar-mode-tabs .sidebar-mode-tab.hidden { display: none; }
+  .sidebar-mode-tabs .mode-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .sidebar-mode-tabs .mode-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-mode-tabs .sidebar-mode-tab.active,
+  .sidebar-mode-tabs.has-pill > .sidebar-mode-tab.active {
+    color: var(--accent);
+    font-weight: 700;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .sidebar-mode-tabs .sidebar-mode-tab.active::before {
+    content: "";
+    position: absolute;
+    left: -0.45rem;
+    top: 22%;
+    bottom: 22%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+  }
+  .sidebar-mode-tabs .tab-count-badge {
+    position: absolute;
+    top: 0.3rem;
+    left: calc(50% + 6px);
+    margin: 0;
+    min-width: 1rem;
+    height: 1rem;
+    font-size: 0.6rem;
+  }
+}
+@media (min-width: 769px) and (hover: hover) {
+  .sidebar-mode-tabs .sidebar-mode-tab:not(.active):hover { color: var(--text); background: var(--surface2); }
 }

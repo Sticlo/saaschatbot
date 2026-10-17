@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=106" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=109" />
 </head>
 <body>
   <div id="app">
@@ -196,6 +196,15 @@
               <ol id="setup-guide-steps" class="setup-guide-steps"></ol>
             </section>
             <div id="wa-setup" class="wa-setup">
+              <svg class="wa-dropped-art" viewBox="0 0 200 120" aria-hidden="true">
+                <rect x="38" y="6" width="62" height="108" rx="11" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-width="3"/>
+                <rect x="58" y="12" width="22" height="5" rx="2.5" fill="currentColor"/>
+                <circle cx="69" cy="60" r="15" fill="currentColor" fill-opacity="0.35"/>
+                <path d="M63.5 54.5c.6-1 1.6-1 2.2-.2l1.6 2.3c.4.6.3 1.4-.2 1.9l-1 .9c.8 1.9 2.4 3.5 4.3 4.3l.9-1c.5-.5 1.3-.6 1.9-.2l2.3 1.6c.8.6.8 1.6-.2 2.2-1.6 1-3.6 1.1-5.4.2a14 14 0 0 1-6.6-6.6c-.9-1.8-.8-3.8.2-5.4z" fill="currentColor"/>
+                <path d="M114 53h10M114 67h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                <rect x="124" y="45" width="20" height="30" rx="5" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="3"/>
+                <path d="M144 60h6c14 0 14 18 28 18h12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
               <p id="wa-setup-text" class="muted">Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.</p>
               <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
@@ -912,6 +921,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=174"></script>
+  <script src="/static/panel/app.js?v=175"></script>
 </body>
 </html>

@@ -819,7 +819,7 @@
     } else if (state.wa.status === "connecting") {
       waStatus.textContent = "WA: Escanea el QR";
     } else {
-      waStatus.textContent = "WA: Desconectado";
+      waStatus.textContent = "Desconectado";
     }
     waStatus.className = "badge " + (state.wa.status === "connected" ? "wa-connected" : "wa-disconnected");
     renderWaUi();
@@ -1187,6 +1187,9 @@
     $("wa-setup")?.classList.toggle("hidden", !needsConnect);
     if (connected && currentTourStep()?.key === "wa") tourGo(tour.index + 1);
     const dropped = needsConnect && state.conversations.length > 0;
+    waStatus.classList.toggle("wa-dropped", dropped);
+    $("wa-connect-btn")?.classList.toggle("is-secondary", dropped);
+    $("wa-setup")?.classList.toggle("is-dropped", dropped);
     const setupTitle = $("wa-setup-title");
     if (setupTitle) {
       const onPhone = preferredWaMode() === "code";
@@ -1721,7 +1724,7 @@
     }
     if (state.wa.status !== "connected" && state.conversations.length > 0) {
       return {
-        tone: "warn",
+        tone: "danger",
         icon: STRIP_ICONS.wa,
         title: "WhatsApp desconectado",
         short: "WhatsApp desconectado.",
