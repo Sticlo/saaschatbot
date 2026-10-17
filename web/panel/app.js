@@ -1634,12 +1634,12 @@
     const doneCount = steps.filter((s) => s.done).length;
     const left = steps.length - doneCount;
     const current = steps.find((s) => !s.done);
-    const first = (state.user?.full_name || "").trim().split(/\s+/)[0];
+    const first = firstName();
     const minutes = Math.max(1, Math.ceil(steps.filter((s) => !s.done).reduce((n, s) => n + s.minutes, 0)));
     $("setup-guide-hello").textContent = doneCount ? `Vas muy bien${first ? `, ${first}` : ""}` : `Hola${first ? `, ${first}` : ""}`;
     $("setup-guide-title").textContent = doneCount
       ? `Te ${left === 1 ? "falta 1 paso" : `faltan ${left} pasos`}`
-      : `Deja tu IA vendiendo en ${steps.length} pasos`;
+      : `Tu IA lista en ${steps.length} pasos`;
     $("setup-guide-count").textContent = `${doneCount} de ${steps.length} listos · unos ${minutes} min`;
     $("setup-guide-bar").style.width = `${Math.max(4, Math.round((doneCount / steps.length) * 100))}%`;
     list.innerHTML = steps
@@ -1738,6 +1738,7 @@
           ? "Cuando le cuentes qué vendes, se enciende y empieza a responder. Mientras tanto contestas tú."
           : "Para encenderla, termina de contarle qué vendes. Mientras tanto contestas tú.",
         action: { label: "Completar", run: () => goToReadinessField(missingReadiness()[0]?.field || "biz-products") },
+        readinessPause: true,
       };
     }
     if (state.tenant && !state.tenant.ai_global_enabled) {
@@ -1763,10 +1764,12 @@
         text: state.aiNotice.text,
       };
     }
+    const guideOnScreen = $("setup-guide").getClientRects().length > 0;
     const off = aiOffReason();
-    if (off) return off;
+    // La guía ya explica que la IA se enciende al completar el negocio: repetirlo arriba es ruido.
+    if (off && !(guideOnScreen && off.readinessPause)) return off;
     const steps = setupSteps();
-    if (!steps || steps.every((s) => s.done) || $("setup-guide").getClientRects().length) return null;
+    if (!steps || steps.every((s) => s.done) || guideOnScreen) return null;
     const done = steps.filter((s) => s.done).length;
     const next = steps.find((s) => !s.done);
     return {
@@ -4014,6 +4017,7 @@
     $("business-name").textContent = name;
     if (state.tenant) state.tenant.business_name = name;
     $("business-name-cta").classList.toggle("hidden", !isPlaceholder || !state.canManageGlobal);
+    document.querySelector(".topbar")?.classList.toggle("has-placeholder-name", !!isPlaceholder && state.canManageGlobal);
   }
 
   function openBusinessNameSetup() {
@@ -5729,6 +5733,14 @@
     }
   }
 
+  /** «OPERADORES» o «laura» → «Operadores», «Laura»: un saludo en mayúsculas se lee como un grito. */
+  function firstName() {
+    const word = (state.user?.full_name || "").trim().split(/\s+/)[0] || "";
+    if (!word || word.includes("@")) return "";
+    const rest = word === word.toLocaleUpperCase("es") ? word.slice(1).toLocaleLowerCase("es") : word.slice(1);
+    return word.charAt(0).toLocaleUpperCase("es") + rest;
+  }
+
   function plural(n, one, many) {
     return `${n} ${n === 1 ? one : many}`;
   }
@@ -5769,7 +5781,7 @@
     if (!text) return;
     localStorage.setItem(seenKey, summary.date);
 
-    const first = (state.user?.full_name || "").trim().split(/\s+/)[0];
+    const first = firstName();
     const actions = [];
     if (summary.interested) actions.push({ label: "Ver interesados", run: () => { $("mode-chats")?.click(); $("tab-chats-interested")?.click(); } });
     if (summary.appointments_today) actions.push({ label: "Ver citas de hoy", run: () => $("mode-appointments")?.click() });

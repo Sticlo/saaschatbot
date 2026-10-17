@@ -4049,7 +4049,7 @@ textarea { resize: vertical; min-height: 44px; }
   #wa-status { flex: none; max-width: 9.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar:has(#wa-connect-btn:not(.hidden)) #wa-status,
   #panel-view:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #wa-connect-btn { display: none; }
-  #panel-view:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #wa-status { display: inline-block; }
+  #panel-view:has(#empty-chat:not(.hidden) #wa-setup:not(.hidden)) #wa-status:not(.wa-disconnected) { display: inline-block; }
   .topbar-actions .plan-status-bar { display: none; }
 
   .ai-alert-banner {
@@ -5948,4 +5948,16 @@ body.lightbox-open { overflow: hidden; }
   margin-bottom: 0.7rem;
   border-radius: 11px;
   box-shadow: 0 0 0 1px var(--border);
+}
+
+/* Barra de arriba en celular: solo lo que el dueño necesita ver */
+.cta-short { display: none; }
+@media (max-width: 768px) {
+  .topbar.has-placeholder-name #business-name { display: none; }
+  .business-name-cta { white-space: nowrap; padding: 0.35rem 0.75rem; font-size: 0.8125rem; border-style: solid; border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .business-name-cta .cta-long { display: none; }
+  .business-name-cta .cta-short { display: inline; }
+  #wa-status.wa-disconnected,
+  .topbar .sync-status { display: none; }
+  .setup-guide-head h3 { font-size: 1.25rem; }
 }
