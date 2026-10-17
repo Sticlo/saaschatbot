@@ -200,6 +200,25 @@ def _extract_message_body(message_obj: dict) -> str:
     return ""
 
 
+def extract_quote(item: dict) -> tuple[str, str]:
+    """(id de WhatsApp, texto) del mensaje al que responde, o ("", "") si no es respuesta."""
+    if not isinstance(item, dict):
+        return "", ""
+    contexts = [item.get("contextInfo")]
+    message = item.get("message")
+    if isinstance(message, dict):
+        wrapped = message.get("documentWithCaptionMessage")
+        if isinstance(wrapped, dict) and isinstance(wrapped.get("message"), dict):
+            message = {**message, **wrapped["message"]}
+        contexts += [v.get("contextInfo") for v in message.values() if isinstance(v, dict)]
+    for ctx in contexts:
+        if isinstance(ctx, dict) and ctx.get("stanzaId"):
+            quoted = ctx.get("quotedMessage")
+            body = _extract_message_body(quoted) if isinstance(quoted, dict) else ""
+            return str(ctx["stanzaId"])[:128], body[:1000]
+    return "", ""
+
+
 def find_conversation_for_contact(
     db: Session,
     *,
@@ -465,6 +484,8 @@ def _save_message(
     increment_unread: bool,
     created_at: Optional[datetime] = None,
     publish: bool = True,
+    quoted_id: str = "",
+    quoted_body: str = "",
 ) -> Message:
     ts = created_at or datetime.now(timezone.utc)
     existing = _find_existing_message(
@@ -479,6 +500,9 @@ def _save_message(
         if evolution_message_id and not existing.evolution_message_id:
             # Sin el id, los checks de entregado/leído de este mensaje nunca lo encontrarían.
             existing.evolution_message_id = evolution_message_id
+        if quoted_id and not existing.quoted_evolution_id:
+            existing.quoted_evolution_id = quoted_id
+            existing.quoted_body = quoted_body or None
         bump_conversation_last_message_at(conversation, ts)
         return existing
 
@@ -490,6 +514,8 @@ def _save_message(
         body=body.strip(),
         status=status,
         evolution_message_id=evolution_message_id or None,
+        quoted_evolution_id=quoted_id or None,
+        quoted_body=quoted_body or None,
     )
     message.created_at = ts
     bump_conversation_last_message_at(conversation, ts)
@@ -524,6 +550,8 @@ def save_inbound_message(
     publish: bool = True,
     created_at: Optional[datetime] = None,
     live: Optional[bool] = None,
+    quoted_id: str = "",
+    quoted_body: str = "",
 ) -> Optional[Message]:
     """`live`: mensaje que acaba de llegar (puede activar la IA del chat). Por defecto sigue a
     `publish`; el webhook y el pull en vivo publican ellos mismos pero son tráfico en vivo."""
@@ -651,6 +679,8 @@ def save_inbound_message(
         increment_unread=True,
         created_at=created_at,
         publish=publish,
+        quoted_id=quoted_id,
+        quoted_body=quoted_body,
     )
 
     from app.application.ai.ai_auto_enable_service import maybe_auto_enable_ai_for_inbound
@@ -745,6 +775,8 @@ def save_outbound_from_phone(
     instance_name: str = "",
     publish: bool = True,
     created_at: Optional[datetime] = None,
+    quoted_id: str = "",
+    quoted_body: str = "",
 ) -> Optional[Message]:
     """Sincroniza mensajes enviados desde el celular (fromMe=true)."""
     if not body.strip() or whatsapp_connection_id is None:
@@ -868,6 +900,8 @@ def save_outbound_from_phone(
         increment_unread=False,
         created_at=created_at,
         publish=False,
+        quoted_id=quoted_id,
+        quoted_body=quoted_body,
     )
 
     if publish:
@@ -1062,6 +1096,8 @@ def import_messages_batch(
                 lid_jid=item.get("lid_jid") or "",
                 whatsapp_connection_id=whatsapp_connection_id,
                 created_at=item.get("timestamp"),
+                quoted_id=item.get("quoted_id") or "",
+                quoted_body=item.get("quoted_body") or "",
             )
         else:
             msg = save_inbound_message(
@@ -1075,6 +1111,8 @@ def import_messages_batch(
                 lid_jid=item.get("lid_jid") or "",
                 whatsapp_connection_id=whatsapp_connection_id,
                 created_at=item.get("timestamp"),
+                quoted_id=item.get("quoted_id") or "",
+                quoted_body=item.get("quoted_body") or "",
             )
         if msg:
             imported += 1
@@ -1145,6 +1183,7 @@ def parse_messages_upsert(data: Any) -> list[dict]:
             if isinstance(mdata, dict) and mdata.get("mimetype"):
                 mimetype = mdata["mimetype"]
                 break
+        quoted_id, quoted_body = extract_quote(item)
         if (phone_jid or lid_jid) and msg_id:
             parsed.append(
                 {
@@ -1158,6 +1197,8 @@ def parse_messages_upsert(data: Any) -> list[dict]:
                     "base64": b64_data,
                     "mimetype": mimetype,
                     "timestamp": parse_whatsapp_timestamp(item.get("messageTimestamp")),
+                    "quoted_id": quoted_id,
+                    "quoted_body": quoted_body,
                 }
             )
     return parsed

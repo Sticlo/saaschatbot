@@ -37,6 +37,7 @@ class WhatsAppStatusResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4096)
+    reply_to_message_id: Optional[uuid.UUID] = None
 
 
 class SendShortcutRequest(BaseModel):
@@ -115,6 +116,8 @@ class MessageResponse(BaseModel):
     transcript: Optional[str] = None
     status: str
     evolution_message_id: Optional[str]
+    quoted_evolution_id: Optional[str] = None
+    quoted_body: Optional[str] = None
     created_at: datetime
 
 

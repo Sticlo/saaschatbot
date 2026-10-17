@@ -101,6 +101,9 @@ class Message(Base):
         String(128), nullable=True, index=True
     )
     chatwoot_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    # Respuesta a otro mensaje: su id de WhatsApp y el texto citado (el original puede no estar aquí).
+    quoted_evolution_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    quoted_body: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )

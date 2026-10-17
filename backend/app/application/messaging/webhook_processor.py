@@ -587,6 +587,8 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 instance_name=session.instance_name,
                                 publish=False,
                                 created_at=item.get("timestamp"),
+                                quoted_id=item.get("quoted_id") or "",
+                                quoted_body=item.get("quoted_body") or "",
                             )
                             event_type = "message.out"
                         else:
@@ -604,6 +606,8 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                                 publish=False,
                                 live=True,
                                 created_at=item.get("timestamp"),
+                                quoted_id=item.get("quoted_id") or "",
+                                quoted_body=item.get("quoted_body") or "",
                             )
                             event_type = "message.in"
 

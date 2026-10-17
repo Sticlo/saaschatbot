@@ -477,6 +477,18 @@ def send_message(
     if not ok:
         raise HTTPException(status_code=409, detail=reason)
 
+    reply_to = None
+    if body.reply_to_message_id:
+        reply_to = (
+            db.query(Message)
+            .filter(
+                Message.id == body.reply_to_message_id,
+                Message.tenant_id == current.tenant_id,
+                Message.conversation_id == conversation.id,
+            )
+            .first()
+        )
+
     def _send():
         try:
             message = send_text_message(
@@ -486,6 +498,7 @@ def send_message(
                 conversation=conversation,
                 text=body.text.strip(),
                 source=MessageSource.AGENT.value,
+                reply_to=reply_to,
             )
             log_audit(
                 db,

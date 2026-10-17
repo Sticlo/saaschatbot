@@ -165,6 +165,12 @@ def format_history(messages: list[Message], *, limit: Optional[int] = None) -> l
             body = f"(envió {_MEDIA_LABELS.get(media_type, 'un archivo')} sin texto)"
         if not body:
             continue
+        quoted = (getattr(msg, "quoted_body", None) or "").strip()
+        if role == "user" and quoted:
+            quoted_media = _detect_media_type_from_body(quoted)
+            if quoted_media:
+                quoted = media_caption(quoted) or _MEDIA_LABELS.get(quoted_media, "un archivo")
+            body = f"(respondiendo a «{' '.join(quoted.split())[:200]}») {body}"
         formatted.append({"role": role, "content": body})
     return formatted
 

@@ -432,7 +432,7 @@
       el.getBoundingClientRect();
     }
     el.dataset.tone = tone;
-    el.querySelector(".omi-toast-icon").textContent = tone === "error" ? "!" : "✓";
+    el.querySelector(".omi-toast-icon").textContent = tone === "error" ? "!" : tone === "info" ? "i" : "✓";
     el.querySelector(".omi-toast-text").textContent = text;
     el.classList.add("is-open");
     clearTimeout(toastTimer);
@@ -3096,6 +3096,79 @@
     if (pinnedToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function waStem(id) {
+    return String(id || "").split(":", 1)[0];
+  }
+
+  const QUOTE_LABELS = { image: "📷 Foto", video: "🎥 Video", audio: "🎤 Nota de voz", ptt: "🎤 Nota de voz", sticker: "Sticker" };
+
+  function quotePreview(body) {
+    const text = (body || "").trim();
+    if (text.startsWith("📄 ")) return text.split("\n")[0];
+    const type = detectMediaType(text);
+    if (!type) return text;
+    const caption = mediaCaption(text);
+    if (type === "document") return `📄 ${caption.split("\n")[0] || "Documento"}`;
+    return [QUOTE_LABELS[type] || "Archivo", caption].filter(Boolean).join(" · ");
+  }
+
+  function quoteAuthor(m) {
+    if (m.direction === "out") return "Tú";
+    const conv = state.conversations.find((c) => c.id === m.conversation_id);
+    return conv ? convTitle(conv) : "Cliente";
+  }
+
+  function buildQuote(m, byWid) {
+    const qid = waStem(m.quoted_evolution_id);
+    const orig = byWid.get(qid);
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = `msg-quote${orig?.direction === "out" ? " is-mine" : ""}`;
+    el.dataset.quote = qid;
+    el.title = "Ir al mensaje";
+    const who = orig ? quoteAuthor(orig) : "";
+    const text = quotePreview(orig ? orig.body : m.quoted_body) || "Mensaje";
+    el.innerHTML = `${who ? `<strong>${escapeHtml(who)}</strong>` : ""}<span>${escapeHtml(text)}</span>`;
+    return el;
+  }
+
+  function canReplyTo(m) {
+    return !!(state.canWrite && !m.pending && m.id && m.evolution_message_id);
+  }
+
+  function jumpToMessage(wid) {
+    const target = [...messagesEl.querySelectorAll(".msg[data-wid]")].find((el) => el.dataset.wid === wid);
+    if (!target) {
+      toast("Ese mensaje es más antiguo y ya no está en este chat.", { tone: "info" });
+      return;
+    }
+    target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    target.classList.remove("is-flash");
+    void target.offsetWidth;
+    target.classList.add("is-flash");
+    setTimeout(() => target.classList.remove("is-flash"), 1600);
+  }
+
+  let replyTo = null;
+
+  function startReply(m) {
+    if (!canReplyTo(m)) return;
+    replyTo = m;
+    $("reply-bar-who").textContent = quoteAuthor(m);
+    $("reply-bar-text").textContent = quotePreview(m.body) || "Mensaje";
+    $("reply-bar").classList.toggle("is-mine", m.direction === "out");
+    const bar = $("reply-bar");
+    const wasHidden = bar.classList.contains("hidden");
+    bar.classList.remove("hidden");
+    if (wasHidden) animateIn(bar, { y: 8, duration: 180 });
+    messageInput.focus();
+  }
+
+  function clearReply() {
+    replyTo = null;
+    $("reply-bar")?.classList.add("hidden");
+  }
+
   function renderMessages({ toBottom = false } = {}) {
     const sameChat = renderedMsgs.convId === state.activeId && renderedMsgs.ids.size > 0;
     const stick = toBottom || !sameChat || pinnedToBottom;
@@ -3107,6 +3180,8 @@
     let prevDay = "";
     let prevDir = "";
     const shown = dedupeMessages(state.messages);
+    const byWid = new Map();
+    for (const m of shown) if (m.evolution_message_id) byWid.set(waStem(m.evolution_message_id), m);
     const list = shown.slice();
     for (const p of visiblePending(shown)) {
       const at = Date.parse(p.created_at);
@@ -3143,6 +3218,15 @@
         div.className = "msg " + (m.direction === "in" ? "in" : "out");
         const caption = m.body && !detectMediaType(m.body) ? escapeHtml(m.body) : escapeHtml(m.body);
         div.innerHTML = `<span class="msg-text">${caption}</span>${timeHtml}`;
+      }
+      if (m.evolution_message_id) div.dataset.wid = waStem(m.evolution_message_id);
+      if (m.quoted_evolution_id) div.prepend(buildQuote(m, byWid));
+      if (canReplyTo(m)) {
+        div.dataset.mid = m.id;
+        div.insertAdjacentHTML(
+          "beforeend",
+          '<button type="button" class="msg-reply-btn" aria-label="Responder" title="Responder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 7 5 12l5 5M5 12h9a5 5 0 0 1 5 5v1"/></svg></button>',
+        );
       }
       if (m.pending) {
         div.classList.add(m.status === "failed" ? "is-failed" : "is-pending");
@@ -4935,7 +5019,8 @@
     let text = "Todavía no hay pedidos. En cuanto tu IA cierre la primera venta, aparece aquí.";
     ordersEmptyAction = null;
     if (off) {
-      text = `Por ahora no pueden llegar pedidos: ${(off.short || off.title).replace(/\.$/, "").toLowerCase()}.`;
+      const reason = (off.short || off.title).replace(/\.$/, "");
+      text = `Por ahora no pueden llegar pedidos: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`;
       ordersEmptyAction = off.action || null;
     } else if (!aiOn) {
       text = "Por ahora no pueden llegar pedidos: tu IA está apagada.";
@@ -5797,6 +5882,7 @@
       clearPendingImage();
     }
     cancelVoiceNote();
+    if (state.activeId !== id) clearReply();
     if (state.activeId && state.activeId !== id) cacheMessages(state.activeId, state.messages);
     state.activeId = id;
     state.messages = [];
@@ -6858,6 +6944,7 @@
 
   function closeActiveChat() {
     if (!state.activeId) return;
+    $("chat-more-btn").closest(".chat-header").classList.remove("is-sheet-open");
     cancelVoiceNote();
     if (pendingImage) clearPendingImage();
     cacheMessages(state.activeId, state.messages);
@@ -6876,7 +6963,38 @@
     if (history.state?.omitelChat) history.back();
     else closeActiveChat();
   });
+
+  const chatSheet = { header: $("chat-more-btn").closest(".chat-header"), popping: false };
+  const chatSheetOpen = () => chatSheet.header.classList.contains("is-sheet-open");
+  function openChatSheet() {
+    chatSheet.header.classList.add("is-sheet-open");
+    $("chat-more-btn").setAttribute("aria-expanded", "true");
+    if (!history.state?.omitelSheet) history.pushState({ ...(history.state || {}), omitelSheet: true }, "");
+  }
+  function closeChatSheet(fromHistory = false) {
+    if (!chatSheetOpen()) return;
+    chatSheet.header.classList.remove("is-sheet-open");
+    $("chat-more-btn").setAttribute("aria-expanded", "false");
+    if (!fromHistory && history.state?.omitelSheet) {
+      chatSheet.popping = true;
+      history.back();
+    }
+  }
+  $("chat-more-btn").addEventListener("click", () => (chatSheetOpen() ? closeChatSheet() : openChatSheet()));
+  $("chat-sheet-backdrop").addEventListener("click", () => closeChatSheet());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && chatSheetOpen()) closeChatSheet();
+  });
+
   window.addEventListener("popstate", () => {
+    if (chatSheet.popping) {
+      chatSheet.popping = false;
+      return;
+    }
+    if (chatSheetOpen()) {
+      closeChatSheet(true);
+      return;
+    }
     if (lightbox.popping) {
       lightbox.popping = false;
       return;
@@ -7296,7 +7414,7 @@
   }
 
   let pendingSeq = 0;
-  function addPending(conversationId, body, { media = null, file = null } = {}) {
+  function addPending(conversationId, body, { media = null, file = null, quoted = null } = {}) {
     const tmp = {
       id: `tmp-${++pendingSeq}`,
       conversation_id: conversationId,
@@ -7307,6 +7425,8 @@
       status: "pending",
       pending: true,
       file,
+      quoted_evolution_id: quoted ? waStem(quoted.evolution_message_id) : null,
+      quoted_body: quoted ? quoted.body : null,
     };
     if (media) mediaCache.set(tmp.id, media);
     pendingOut.push(tmp);
@@ -7357,10 +7477,70 @@
   messagesEl.addEventListener("loadedmetadata", keepPinned, true);
   if ("ResizeObserver" in window) new ResizeObserver(keepPinned).observe(messagesEl);
 
+  function messageForBubble(el) {
+    const id = el?.closest(".msg")?.dataset.mid;
+    return id ? state.messages.find((m) => m.id === id) : null;
+  }
+
+  messagesEl.addEventListener("click", (e) => {
+    const quote = e.target.closest(".msg-quote");
+    if (quote) {
+      jumpToMessage(quote.dataset.quote);
+      return;
+    }
+    const replyBtn = e.target.closest(".msg-reply-btn");
+    if (replyBtn) {
+      const m = messageForBubble(replyBtn);
+      if (m) startReply(m);
+    }
+  });
+
+  const swipe = { el: null, x: 0, y: 0, dx: 0, locked: false };
+  messagesEl.addEventListener("touchstart", (e) => {
+    const bubble = e.target.closest(".msg[data-mid]");
+    if (!bubble || e.touches.length > 1 || e.target.closest(".voice-player, input, audio, video")) return;
+    Object.assign(swipe, { el: bubble, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, locked: false });
+  }, { passive: true });
+  messagesEl.addEventListener("touchmove", (e) => {
+    if (!swipe.el) return;
+    const dx = e.touches[0].clientX - swipe.x;
+    const dy = e.touches[0].clientY - swipe.y;
+    if (!swipe.locked) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+        swipe.el = null;
+        return;
+      }
+      if (dx < 10) return;
+      swipe.locked = true;
+    }
+    swipe.dx = Math.max(0, Math.min(dx, 90));
+    swipe.el.style.transition = "none";
+    swipe.el.style.transform = `translateX(${swipe.dx * 0.7}px)`;
+    swipe.el.classList.toggle("is-swiping", swipe.dx > 56);
+  }, { passive: true });
+  messagesEl.addEventListener("touchend", () => {
+    const { el, dx } = swipe;
+    swipe.el = null;
+    if (!el) return;
+    el.style.transition = "transform 200ms var(--ease-out)";
+    el.style.transform = "";
+    el.classList.remove("is-swiping");
+    if (dx > 56) {
+      navigator.vibrate?.(10);
+      const m = messageForBubble(el);
+      if (m) startReply(m);
+    }
+  });
+
+  $("reply-bar-close").addEventListener("click", clearReply);
+  messageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && replyTo) clearReply();
+  });
+
   messagesEl.addEventListener("click", (e) => {
     const bubble = e.target.closest(".msg.is-failed");
     const tmp = bubble && pendingOut.find((p) => p.id === bubble.dataset.pending);
-    if (!tmp || e.target.closest(".doc-card, .voice-player, .media-img")) return;
+    if (!tmp || e.target.closest(".doc-card, .voice-player, .media-img, .msg-quote")) return;
     tmp.status = "pending";
     renderMessages();
     deliverPending(tmp, tmp.send);
@@ -7519,10 +7699,13 @@
     if (!text) return;
 
     const conversationId = state.activeId;
+    const quoted = replyTo && replyTo.conversation_id === conversationId ? replyTo : null;
     resetComposerText();
-    const tmp = addPending(conversationId, text);
+    clearReply();
+    const tmp = addPending(conversationId, text, { quoted });
+    const payload = quoted ? { text, reply_to_message_id: quoted.id } : { text };
     deliverPending(tmp, (h) =>
-      api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ text }), headers: h })
+      api(`/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify(payload), headers: h })
     );
   });
 

@@ -47,7 +47,12 @@ from app.infrastructure.evolution.evolution_store import (
     fetch_stored_counts,
     fetch_stored_messages,
 )
-from app.application.messaging.message_service import _extract_message_body, get_or_create_conversation, _find_existing_message
+from app.application.messaging.message_service import (
+    _extract_message_body,
+    _find_existing_message,
+    extract_quote,
+    get_or_create_conversation,
+)
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
 from app.application.whatsapp.whatsapp_service import refresh_session_status
 
@@ -147,6 +152,7 @@ def _parse_evolution_message(
         except (TypeError, ValueError):
             created_at = None
 
+    quoted_id, quoted_body = extract_quote(record)
     return {
         "message_id": str(msg_id),
         "phone": phone,
@@ -154,6 +160,8 @@ def _parse_evolution_message(
         "body": body.strip(),
         "from_me": bool(key.get("fromMe")),
         "created_at": created_at,
+        "quoted_id": quoted_id,
+        "quoted_body": quoted_body,
     }
 
 
@@ -651,6 +659,8 @@ def _import_messages(
             if direction == MessageDirection.IN.value
             else MessageStatus.SENT.value,
             evolution_message_id=msg_id,
+            quoted_evolution_id=parsed["quoted_id"] or None,
+            quoted_body=parsed["quoted_body"] or None,
         )
         if parsed["created_at"]:
             message.created_at = parsed["created_at"]

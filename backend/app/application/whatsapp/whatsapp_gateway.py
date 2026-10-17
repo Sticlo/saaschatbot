@@ -240,7 +240,9 @@ def connection_state(name: str) -> dict:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
-def send_text(session_name: str, recipient: str, text: str, *, typing_ms: int = 0) -> dict:
+def send_text(
+    session_name: str, recipient: str, text: str, *, typing_ms: int = 0, quoted: dict | None = None
+) -> dict:
     if uses_waha():
         from app.infrastructure.waha.waha_client import WahaAPIError, waha_client
         from app.shared.core.phone import phone_to_evolution_number
@@ -255,7 +257,7 @@ def send_text(session_name: str, recipient: str, text: str, *, typing_ms: int = 
     from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 
     try:
-        return evolution_client.send_text(session_name, recipient, text, typing_ms=typing_ms)
+        return evolution_client.send_text(session_name, recipient, text, typing_ms=typing_ms, quoted=quoted)
     except EvolutionAPIError as exc:
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 

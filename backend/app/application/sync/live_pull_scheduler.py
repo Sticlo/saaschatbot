@@ -132,6 +132,8 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
                         instance_name=session.instance_name,
                         publish=False,
                         created_at=item.get("timestamp"),
+                        quoted_id=item.get("quoted_id") or "",
+                        quoted_body=item.get("quoted_body") or "",
                     )
                     event_type = "message.out"
                 else:
@@ -149,6 +151,8 @@ def pull_recent_evolution_messages(tenant_id: uuid.UUID) -> int:
                         publish=False,
                         live=True,
                         created_at=item.get("timestamp"),
+                        quoted_id=item.get("quoted_id") or "",
+                        quoted_body=item.get("quoted_body") or "",
                     )
                     event_type = "message.in"
 

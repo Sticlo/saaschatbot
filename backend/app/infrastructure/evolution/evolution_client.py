@@ -199,10 +199,20 @@ class EvolutionClient:
     def delete_instance(self, instance_name: str) -> dict:
         return self._request("DELETE", f"/instance/delete/{instance_name}", timeout=20.0)
 
-    def send_text(self, instance_name: str, number: str, text: str, *, typing_ms: int = 0) -> dict:
+    def send_text(
+        self,
+        instance_name: str,
+        number: str,
+        text: str,
+        *,
+        typing_ms: int = 0,
+        quoted: Optional[dict] = None,
+    ) -> dict:
         payload: dict = {"number": number, "text": text}
         if typing_ms > 0:
             payload["delay"] = typing_ms
+        if quoted:
+            payload["quoted"] = quoted
         return self._request(
             "POST", f"/message/sendText/{instance_name}", json=payload, timeout=30.0 + typing_ms / 1000
         )

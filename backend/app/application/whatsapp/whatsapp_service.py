@@ -788,6 +788,7 @@ def send_text_message(
     conversation: Conversation,
     text: str,
     source: str,
+    reply_to: Optional[Message] = None,
 ) -> Message:
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
@@ -806,8 +807,18 @@ def send_text_message(
         conversation=conversation,
     )
 
+    quoted_id = (reply_to.evolution_message_id or "").split(":", 1)[0] if reply_to is not None else ""
+    quoted_body = (reply_to.body or "")[:1000] if quoted_id else ""
+    quoted = None
+    if quoted_id:
+        jid = recipient if "@" in recipient else f"{phone_to_evolution_number(recipient)}@s.whatsapp.net"
+        quoted = {
+            "key": {"id": quoted_id, "remoteJid": jid, "fromMe": reply_to.direction == MessageDirection.OUT.value},
+            "message": {"conversation": quoted_body},
+        }
+
     typing_ms = typing_delay_ms(text) if source == MessageSource.BOT.value else 0
-    result = gateway_send_text(session.instance_name, recipient, text, typing_ms=typing_ms)
+    result = gateway_send_text(session.instance_name, recipient, text, typing_ms=typing_ms, quoted=quoted)
     from app.application.messaging.message_service import extract_whatsapp_message_id
 
     evolution_id = extract_whatsapp_message_id(result)
@@ -820,6 +831,8 @@ def send_text_message(
         body=text,
         status=MessageStatus.SENT.value,
         evolution_message_id=str(evolution_id) if evolution_id else None,
+        quoted_evolution_id=quoted_id or None,
+        quoted_body=quoted_body or None,
     )
     conversation.last_message_at = datetime.now(timezone.utc)
     db.add(message)

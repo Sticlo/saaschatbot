@@ -6397,3 +6397,282 @@ body.lightbox-open { overflow: hidden; }
 @media (min-width: 769px) {
   .ai-pane[data-ai-pane="empty"] > .ai-pane-head { display: none; }
 }
+
+/* Responder a un mensaje, como en WhatsApp */
+.msg-quote {
+  --quote-color: #53bdeb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  width: 100%;
+  min-width: 10rem;
+  margin: 0 0 0.3rem;
+  padding: 0.35rem 0.6rem 0.4rem;
+  border: 0;
+  border-left: 4px solid var(--quote-color);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.msg-quote.is-mine { --quote-color: var(--accent); }
+.msg-quote strong { color: var(--quote-color); font-weight: 600; }
+.msg-quote span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  white-space: pre-line;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.msg-quote:active { background: color-mix(in srgb, currentColor 14%, transparent); }
+
+.msg-reply-btn {
+  position: absolute;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  opacity: 0;
+  transform: translateY(-50%) scale(0.9);
+  transition: opacity 120ms ease, transform 160ms var(--ease-out);
+  cursor: pointer;
+}
+.msg.in > .msg-reply-btn { right: -40px; }
+.msg.out > .msg-reply-btn { left: -40px; }
+.msg-reply-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+@media (hover: hover) {
+  .msg-reply-btn { display: grid; }
+  .msg:hover > .msg-reply-btn,
+  .msg-reply-btn:focus-visible { opacity: 1; transform: translateY(-50%) scale(1); }
+  .msg-reply-btn:hover { color: var(--text); }
+}
+
+.msg.is-flash { animation: msg-flash 1.6s ease-out; }
+@keyframes msg-flash {
+  0%, 35% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent); }
+  100% { box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13); }
+}
+.msg.is-swiping { filter: brightness(1.08); }
+
+.reply-bar {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.4rem 0.45rem 0.7rem;
+  border-left: 4px solid #53bdeb;
+  border-radius: 8px;
+  background: var(--surface2);
+}
+.reply-bar.is-mine { border-left-color: var(--accent); }
+.reply-bar-quote { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 0.84rem; line-height: 1.3; }
+.reply-bar-quote strong { color: #53bdeb; font-weight: 600; }
+.reply-bar.is-mine .reply-bar-quote strong { color: var(--accent); }
+.reply-bar-quote span { overflow: hidden; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.reply-bar-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.reply-bar-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .msg.is-flash { animation-duration: 0.01s; }
+}
+
+/* Celular: el encabezado del chat en una sola fila, como WhatsApp; las opciones van en una hoja */
+.chat-more-btn,
+.chat-sheet-backdrop,
+.chat-sheet-title,
+.sheet-only { display: none; }
+@media (max-width: 768px) {
+  .chat-header { flex-wrap: wrap; align-items: center; row-gap: 0; }
+  .chat-header-main { display: contents; }
+  .chat-header-name { flex: 1; min-width: 0; }
+  .chat-more-btn {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    margin-right: -0.35rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .chat-more-btn svg { fill: currentColor; }
+  .chat-more-btn:active { background: var(--surface2); }
+  .chat-header .chat-ai-hint:not(.hidden) {
+    order: 5;
+    flex-basis: 100%;
+    justify-content: space-between;
+    margin: 0.4rem 0 0 0.3rem;
+    padding: 0.3rem 0.3rem 0.3rem 0.7rem;
+    border-radius: 10px;
+    background: var(--surface2);
+    font-size: 0.8rem;
+  }
+  .chat-header .chat-ai-hint-btn { flex: none; }
+
+  .chat-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms ease;
+  }
+  .chat-header.is-sheet-open .chat-sheet-backdrop { opacity: 1; pointer-events: auto; }
+  .chat-header .chat-header-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 81;
+    flex-basis: auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.9rem;
+    max-height: 85dvh;
+    padding: 0.6rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    border-radius: 18px 18px 0 0;
+    background: var(--surface);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.35);
+    transform: translateY(105%);
+    visibility: hidden;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s linear 280ms;
+  }
+  .chat-header.is-sheet-open .chat-header-actions {
+    transform: none;
+    visibility: visible;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .chat-sheet-title {
+    display: block;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    text-align: center;
+  }
+  .chat-sheet-title::before {
+    content: "";
+    display: block;
+    width: 38px;
+    height: 4px;
+    margin: 0 auto 0.75rem;
+    border-radius: 999px;
+    background: var(--border);
+  }
+  .chat-header .chat-interest-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .chat-header .chat-interest-btns .interest-btn { min-height: 44px; padding: 0.6rem; font-size: 0.92rem; }
+  .chat-header .chat-toggles { flex-direction: column; align-items: stretch; gap: 0; flex-wrap: nowrap; }
+  .chat-header .chat-toggles .toggle-row {
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 0;
+    border-top: 1px solid var(--border);
+    white-space: normal;
+  }
+  .chat-header .chat-toggles .toggle-row > span { font-size: 0.95rem; color: var(--text); }
+  .chat-header .chat-toggles .toggle-row:has(#toggle-mode-manual, #toggle-ai-chat) > span::before { content: none; }
+  .chat-header .sheet-only { display: block; margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted); }
+  .chat-header #ai-retry-btn { width: 100%; min-height: 44px; }
+  .chat-header #ai-retry-btn.hidden { display: none; }
+}
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .chat-header .chat-header-actions,
+  .chat-header.is-sheet-open .chat-header-actions { transition: none; }
+}
+
+/* Celular: Citas y Pedidos con pestañas arriba en vez de ir y volver */
+@media (max-width: 768px) {
+  .split-view.phone-tabs { display: flex; flex-direction: column; }
+  .phone-tabs .ai-list,
+  .split-view.phone-tabs.is-open .ai-list {
+    visibility: visible;
+    flex: none;
+    flex-direction: row;
+    gap: 0.35rem;
+    height: auto;
+    padding: 0.6rem;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    scrollbar-width: none;
+  }
+  .phone-tabs .ai-list::-webkit-scrollbar { display: none; }
+  .phone-tabs :is(.ai-list-head, .ai-row-icon, .ai-row-sub, .ai-pane-back) { display: none; }
+  .phone-tabs .ai-row {
+    flex: 1 0 auto;
+    justify-content: center;
+    gap: 0.35rem;
+    width: auto;
+    min-height: 38px;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    touch-action: manipulation;
+  }
+  .phone-tabs .ai-row.active {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent);
+  }
+  .phone-tabs .ai-row-body { flex: none; padding: 0; }
+  .phone-tabs .ai-row-body strong { font-size: 0.86rem; white-space: nowrap; }
+  .phone-tabs .ai-row-body strong[data-short] { font-size: 0; }
+  .phone-tabs .ai-row-body strong[data-short]::before { content: attr(data-short); font-size: 0.86rem; }
+  .phone-tabs .ai-row-mark[data-state="ok"],
+  #orders-panel .ai-row-mark[data-ai-mark="done"] { display: none; }
+  .phone-tabs .ai-row-mark[data-state="todo"],
+  .phone-tabs .ai-row-mark[data-state="tip"] { width: 7px; height: 7px; }
+  .phone-tabs .ai-row-mark[data-state="count"] { min-width: 18px; height: 18px; padding: 0 5px; font-size: 0.68rem; }
+  .phone-tabs .ai-detail {
+    position: static;
+    visibility: visible;
+    flex: 1;
+    min-height: 0;
+  }
+  .phone-tabs .ai-pane-head:not(.appointments-day-head) { position: static; margin: 0 0 0.85rem; padding: 0; }
+  .phone-tabs .ai-pane-head:not(.appointments-day-head) h3 { display: none; }
+  .phone-tabs .ai-pane-head:not(.appointments-day-head):not(:has(p)) { display: none; }
+  #orders-panel[data-pane="empty"] .ai-list { display: none; }
+}
+
+/* Celular: barra de arriba limpia y sin zoom al escribir en iPhone */
+@media (max-width: 768px) {
+  #wa-status.wa-connected,
+  #refresh-chats { display: none; }
+}
+@media (pointer: coarse) {
+  #app :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
+  .composer textarea#message-input,
+  .composer-field textarea#message-input { font-size: 16px; }
+}

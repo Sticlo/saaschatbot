@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=112" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=113" />
 </head>
 <body>
   <div id="app">
@@ -225,22 +225,29 @@
               </button>
               <span id="chat-avatar" class="avatar chat-avatar" aria-hidden="true"></span>
               <div class="chat-header-main">
-                <h3 id="chat-title">—</h3>
-                <span id="chat-phone" class="chat-contact-phone muted"></span>
+                <div class="chat-header-name">
+                  <h3 id="chat-title">—</h3>
+                  <span id="chat-phone" class="chat-contact-phone muted"></span>
+                </div>
                 <p id="chat-ai-hint" class="chat-ai-hint hidden"></p>
               </div>
-              <div class="chat-header-actions">
+              <button type="button" id="chat-more-btn" class="chat-more-btn" aria-label="Opciones del chat" aria-expanded="false" aria-controls="chat-header-actions">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="5.5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="18.5" r="1.7"/></svg>
+              </button>
+              <div id="chat-sheet-backdrop" class="chat-sheet-backdrop" aria-hidden="true"></div>
+              <div id="chat-header-actions" class="chat-header-actions">
+                <p class="chat-sheet-title">Este chat</p>
                 <div class="chat-interest-btns">
                   <button type="button" id="mark-interested-btn" class="interest-btn">Interesado</button>
                   <button type="button" id="mark-not-interested-btn" class="interest-btn">No interesado</button>
                 </div>
                 <div class="chat-toggles">
                   <label class="toggle-row">
-                    <span>Modo manual</span>
+                    <span>Modo manual<small class="sheet-only">Respondes tú y la IA no escribe.</small></span>
                     <input type="checkbox" id="toggle-mode-manual" role="switch" />
                   </label>
                   <label class="toggle-row">
-                    <span>IA activa</span>
+                    <span>IA activa<small class="sheet-only">La IA le responde a este cliente.</small></span>
                     <input type="checkbox" id="toggle-ai-chat" role="switch" />
                   </label>
                   <button type="button" id="ai-retry-btn" class="btn ghost small" title="Reintentar respuesta IA">Reintentar IA</button>
@@ -255,6 +262,13 @@
             </div>
 
             <form id="send-form" class="composer">
+              <div id="reply-bar" class="reply-bar hidden">
+                <div class="reply-bar-quote">
+                  <strong id="reply-bar-who"></strong>
+                  <span id="reply-bar-text"></span>
+                </div>
+                <button type="button" id="reply-bar-close" class="reply-bar-close" aria-label="Cancelar respuesta">×</button>
+              </div>
               <div id="composer-attachment" class="composer-attachment hidden">
                 <img id="composer-attachment-img" alt="Foto para enviar" />
                 <span id="composer-attachment-doc" class="composer-attachment-doc hidden" aria-hidden="true">
@@ -600,7 +614,7 @@
             <p id="biz-save-status" class="ai-save-status muted small"></p>
           </div>
 
-          <div id="orders-panel" class="appointments-panel orders-panel split-view hidden">
+          <div id="orders-panel" class="appointments-panel orders-panel split-view phone-tabs hidden">
             <nav class="ai-list" aria-label="Pedidos">
               <header class="ai-list-head">
                 <h2>Pedidos</h2>
@@ -608,17 +622,17 @@
               </header>
               <button type="button" class="ai-row" data-ai-open="ready">
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9zM3 7.5 12 12l9-4.5M12 12v9"/></svg></span>
-                <span class="ai-row-body"><strong>Por despachar</strong><span class="ai-row-sub" data-ai-sub="ready">Pagados o contraentrega</span></span>
+                <span class="ai-row-body"><strong data-short="Por enviar">Por despachar</strong><span class="ai-row-sub" data-ai-sub="ready">Pagados o contraentrega</span></span>
                 <span class="ai-row-mark" data-ai-mark="ready"></span>
               </button>
               <button type="button" class="ai-row" data-ai-open="pending">
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg></span>
-                <span class="ai-row-body"><strong>Esperando el pago</strong><span class="ai-row-sub" data-ai-sub="pending">Ya tienen tus datos de pago</span></span>
+                <span class="ai-row-body"><strong data-short="Por pagar">Esperando el pago</strong><span class="ai-row-sub" data-ai-sub="pending">Ya tienen tus datos de pago</span></span>
                 <span class="ai-row-mark" data-ai-mark="pending"></span>
               </button>
               <button type="button" class="ai-row" data-ai-open="done">
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17.5 19 7"/></svg></span>
-                <span class="ai-row-body"><strong>Despachados</strong><span class="ai-row-sub" data-ai-sub="done">Los del último mes</span></span>
+                <span class="ai-row-body"><strong data-short="Enviados">Despachados</strong><span class="ai-row-sub" data-ai-sub="done">Los del último mes</span></span>
                 <span class="ai-row-mark" data-ai-mark="done"></span>
               </button>
             </nav>
@@ -692,7 +706,7 @@
             <p id="products-status" class="ai-save-status muted small"></p>
           </div>
 
-          <div id="appointments-panel" class="appointments-panel split-view hidden">
+          <div id="appointments-panel" class="appointments-panel split-view phone-tabs hidden">
             <nav class="ai-list" aria-label="Citas">
               <header class="ai-list-head">
                 <h2>Citas</h2>
@@ -1019,6 +1033,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=179"></script>
+  <script src="/static/panel/app.js?v=180"></script>
 </body>
 </html>
