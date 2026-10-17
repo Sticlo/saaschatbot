@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=109" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=112" />
 </head>
 <body>
   <div id="app">
@@ -314,386 +314,484 @@
             </form>
           </div>
 
-          <div id="ai-setup-panel" class="ai-setup-panel hidden" data-section="negocio">
-            <nav class="ai-sections" aria-label="Secciones de tu IA">
-              <button type="button" class="ai-section-tab active" data-ai-section="negocio">Tu negocio</button>
-              <button type="button" class="ai-section-tab" data-ai-section="probar">Probar</button>
-              <button type="button" class="ai-section-tab" data-ai-section="avisos">Avisos <span id="ai-avisos-dot" class="ai-section-dot hidden" aria-label="Falta tu número"></span></button>
-              <button type="button" class="ai-section-tab" data-ai-section="respuestas">Respuestas <span id="ai-respuestas-badge" class="tab-count-badge hidden">0</span></button>
+          <div id="ai-setup-panel" class="ai-setup-panel ai-settings split-view hidden" data-section="negocio">
+            <nav class="ai-list" aria-label="Ajustes de tu IA">
+              <header class="ai-list-head">
+                <h2>Tu IA</h2>
+                <p id="ai-list-status" class="ai-list-status"></p>
+                <div class="ai-list-progress" aria-hidden="true"><span id="ai-list-bar"></span></div>
+              </header>
+
+              <p class="ai-list-group">Lo que sabe</p>
+              <button type="button" class="ai-row" data-ai-open="negocio">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h16l-1.5-5h-13L4 10zM5 10v9h14v-9M10 19v-5h4v5"/></svg></span>
+                <span class="ai-row-body"><strong>Tu negocio</strong><span class="ai-row-sub" data-ai-sub="negocio"></span></span>
+                <span class="ai-row-mark" data-ai-mark="negocio"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="productos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8L3 12zM7.5 7.5h.01"/></svg></span>
+                <span class="ai-row-body"><strong>Qué vendes</strong><span class="ai-row-sub" data-ai-sub="productos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="productos"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="pagos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h18v11H3zM3 10h18M7 14.5h3"/></svg></span>
+                <span class="ai-row-body"><strong>Cómo te pagan</strong><span class="ai-row-sub" data-ai-sub="pagos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="pagos"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="envios">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 18.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17 18.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg></span>
+                <span class="ai-row-body"><strong>Envíos y entregas</strong><span class="ai-row-sub" data-ai-sub="envios"></span></span>
+                <span class="ai-row-mark" data-ai-mark="envios"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="horario">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 7v3l2 1.5"/></svg></span>
+                <span class="ai-row-body"><strong>Dónde estás y horario</strong><span class="ai-row-sub" data-ai-sub="horario"></span></span>
+                <span class="ai-row-mark" data-ai-mark="horario"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="estilo">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12zM8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span>
+                <span class="ai-row-body"><strong>Cómo habla</strong><span class="ai-row-sub" data-ai-sub="estilo"></span></span>
+                <span class="ai-row-mark" data-ai-mark="estilo"></span>
+              </button>
+
+              <p class="ai-list-group">Cómo trabaja</p>
+              <button type="button" class="ai-row" data-ai-open="probar">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5L8 5.5z"/></svg></span>
+                <span class="ai-row-body"><strong>Probar mi IA</strong><span class="ai-row-sub" data-ai-sub="probar"></span></span>
+                <span class="ai-row-mark" data-ai-mark="probar"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="respuestas">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg></span>
+                <span class="ai-row-body"><strong>Preguntas sin responder</strong><span class="ai-row-sub" data-ai-sub="respuestas"></span></span>
+                <span class="ai-row-mark" data-ai-mark="respuestas"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="atajos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13h6l-1 8 8-10h-6l1-8z"/></svg></span>
+                <span class="ai-row-body"><strong>Atajos rápidos</strong><span class="ai-row-sub" data-ai-sub="atajos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="atajos"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="avisos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15L6 16zM10 20a2 2 0 0 0 4 0"/></svg></span>
+                <span class="ai-row-body"><strong>Alertas a tu WhatsApp</strong><span class="ai-row-sub" data-ai-sub="avisos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="avisos"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="seguimiento">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg></span>
+                <span class="ai-row-body"><strong>Seguimiento</strong><span class="ai-row-sub" data-ai-sub="seguimiento"></span></span>
+                <span class="ai-row-mark" data-ai-mark="seguimiento"></span>
+              </button>
             </nav>
-            <header class="ai-setup-hero" data-ai-group="negocio">
-              <h2>Cuéntanos de tu negocio</h2>
-              <p>Con esto tu IA responde, cotiza y cierra la venta sola.</p>
-            </header>
 
-            <section id="ai-ready-card" class="ai-ready-card hidden" data-ai-group="negocio">
-              <div class="ai-ready-head">
-                <h3 id="ai-ready-title">¿Tu IA está lista para vender?</h3>
-                <span id="ai-ready-count" class="ai-ready-count"></span>
-              </div>
-              <p id="ai-ready-note" class="muted small"></p>
-              <ul id="ai-ready-list" class="ai-ready-list"></ul>
-              <div id="ai-tips" class="ai-tips hidden">
-                <h4>Para que no pierdas ventas</h4>
-                <ul id="ai-tips-list" class="ai-ready-list"></ul>
-              </div>
-            </section>
+            <div class="ai-detail">
+              <section class="ai-pane" data-ai-pane="negocio" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Tu negocio</h3><p>Así se presenta la IA con tus clientes.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span>Nombre</span>
+                  <input type="text" id="biz-name" maxlength="255" placeholder="Hotel Casa Andina" />
+                </label>
+                <label class="ai-field">
+                  <span>¿A qué se dedica?</span>
+                  <input type="text" id="biz-industry" maxlength="255" placeholder="Restaurante, peluquería, tienda online…" />
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-            <div class="ai-setup-layout" data-ai-group="negocio">
-              <section class="ai-setup-form-card">
-                <div class="ai-step">
-                  <span class="ai-step-num">1</span>
-                  <label class="ai-field">
-                    <span>¿Cómo se llama tu negocio?</span>
-                    <span class="ai-field-hint">Así se presentará la IA con tus clientes.</span>
-                    <input type="text" id="biz-name" maxlength="255" placeholder="Hotel Casa Andina" />
-                  </label>
+              <section class="ai-pane" data-ai-pane="productos" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Qué vendes</h3><p>Lo principal que tus clientes te piden.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Qué vendes u ofreces</span>
+                  <textarea id="biz-products" rows="4" maxlength="2000" placeholder="Almuerzos, menú del día, domicilios en la zona…"></textarea>
+                </label>
+                <div class="ai-pane-note">
+                  <span>Los <strong>precios exactos</strong> van en Inventario: con esos cotiza la IA.</span>
+                  <button type="button" class="link-btn" data-go-inventory>Ir a Inventario</button>
                 </div>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-                <div class="ai-step">
-                  <span class="ai-step-num">2</span>
-                  <label class="ai-field">
-                    <span>¿A qué se dedica tu negocio?</span>
-                    <span class="ai-field-hint">Ej: restaurante, peluquería, tienda online…</span>
-                    <input type="text" id="biz-industry" maxlength="255" placeholder="Restaurante de comida rápida" />
-                  </label>
-                </div>
+              <section class="ai-pane" data-ai-pane="pagos" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Cómo te pagan</h3><p>Escríbelo tal cual se lo darías a un cliente. Con esto la IA cierra la venta sola.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Cómo te pagan</span>
+                  <textarea id="biz-payments" rows="3" maxlength="1000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-                <div class="ai-step">
-                  <span class="ai-step-num">3</span>
-                  <label class="ai-field">
-                    <span>¿Qué vendes u ofreces?</span>
-                    <span class="ai-field-hint">Lo principal que tus clientes te piden.</span>
-                    <textarea id="biz-products" rows="3" maxlength="2000" placeholder="Almuerzos, menú del día, domicilios en la zona…"></textarea>
-                  </label>
-                </div>
+              <section class="ai-pane" data-ai-pane="envios" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Envíos y entregas</h3><p>A dónde, cuánto cuesta y cuánto tarda. Si no envías, escribe «Solo se recoge en el local».</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Envíos y entregas</span>
+                  <textarea id="biz-delivery" rows="3" maxlength="1000" placeholder="Envíos a todo Colombia por Interrapidísimo, $15.000, llegan en 2-3 días. Domicilio en Medellín $8.000 el mismo día."></textarea>
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-                <div class="ai-step">
-                  <span class="ai-step-num">4</span>
-                  <label class="ai-field">
-                    <span>¿Cómo te pagan?</span>
-                    <span class="ai-field-hint">Con esto la IA cierra la venta sola. Escríbelo tal cual se lo darías a un cliente.</span>
-                    <textarea id="biz-payments" rows="2" maxlength="1000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
-                  </label>
-                </div>
+              <section class="ai-pane" data-ai-pane="horario" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Dónde estás y horario</h3><p>Ciudad, barrio y a qué horas atiendes.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Dónde estás y horario</span>
+                  <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-                <div class="ai-step">
-                  <span class="ai-step-num">5</span>
-                  <label class="ai-field">
-                    <span>¿Haces envíos o domicilios?</span>
-                    <span class="ai-field-hint">A dónde, cuánto cuesta y cuánto tarda. Es de lo que más preguntan. Si no envías, escribe «Solo se recoge en el local».</span>
-                    <textarea id="biz-delivery" rows="2" maxlength="1000" placeholder="Envíos a todo Colombia por Interrapidísimo, $15.000, llegan en 2-3 días. Domicilio en Medellín $8.000 el mismo día."></textarea>
-                  </label>
-                </div>
+              <section class="ai-pane" data-ai-pane="estilo" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Cómo habla</h3><p>Opcional. El tono y lo que no debe decir.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span>Tono</span>
+                  <input type="text" id="biz-tone" maxlength="120" placeholder="Cercano y amable, como un amigo" />
+                </label>
+                <label class="ai-field">
+                  <span>Lo que no debe decir</span>
+                  <textarea id="biz-restrictions" rows="2" maxlength="1000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
+                </label>
+                <label class="ai-field">
+                  <span>A quién le vendes</span>
+                  <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
+                </label>
+                <label class="ai-field">
+                  <span>Precios de referencia</span>
+                  <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
 
-                <div class="ai-step ai-step-last">
-                  <span class="ai-step-num">6</span>
-                  <label class="ai-field">
-                    <span>¿Dónde estás y cuándo atiendes?</span>
-                    <span class="ai-field-hint">Ciudad, barrio u horario.</span>
-                    <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
-                  </label>
-                </div>
-
-                <details class="ai-more" id="biz-more">
-                  <summary><span>Más detalles</span><span class="ai-more-hint">Opcional · tono, a quién le vendes y qué no debe decir</span></summary>
-                <div class="ai-step">
-                  <span class="ai-step-num">7</span>
-                  <label class="ai-field">
-                    <span>¿A quién le vendes?</span>
-                    <span class="ai-field-hint">Tu cliente típico.</span>
-                    <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
-                  </label>
-                </div>
-
-                <div class="ai-step">
-                  <span class="ai-step-num">8</span>
-                  <label class="ai-field">
-                    <span>¿Precios o rangos?</span>
-                    <span class="ai-field-hint">Solo de referencia. Los precios exactos van en Inventario: con esos cotiza la IA.</span>
-                    <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
-                  </label>
-                </div>
-
-                <div class="ai-step">
-                  <span class="ai-step-num">9</span>
-                  <label class="ai-field">
-                    <span>¿Cómo quieres que hable?</span>
-                    <span class="ai-field-hint">Formal, cercano, divertido…</span>
-                    <input type="text" id="biz-tone" maxlength="120" placeholder="Cercano y amable, como un amigo" />
-                  </label>
-                </div>
-
-                <div class="ai-step ai-step-last">
-                  <span class="ai-step-num">10</span>
-                  <label class="ai-field">
-                    <span>¿Algo que no debe decir?</span>
-                    <span class="ai-field-hint">Descuentos, promesas, etc.</span>
-                    <textarea id="biz-restrictions" rows="2" maxlength="1000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
-                  </label>
-                </div>
-                </details>
-
-                <div class="ai-save-row">
-                  <button type="button" id="biz-save-btn" class="btn primary ai-save-btn">Guardar mi negocio</button>
-                  <p id="biz-save-status" class="ai-save-status muted small"></p>
+              <section class="ai-pane" data-ai-pane="probar" data-ai-group="probar">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Probar mi IA</h3><p>Escríbele como un cliente. Responde igual que en WhatsApp, <strong>sin enviarle nada a nadie</strong>.</p></div>
+                </header>
+                <div id="try-ai-card" class="try-ai-card">
+                  <div id="try-ai-messages" class="try-ai-messages hidden" aria-live="polite"></div>
+                  <div class="try-ai-suggestions">
+                    <button type="button" class="try-ai-chip">Hola, ¿qué venden?</button>
+                    <button type="button" class="try-ai-chip">¿Cuánto vale el envío?</button>
+                    <button type="button" class="try-ai-chip">¿Tienen fotos?</button>
+                    <button type="button" class="try-ai-chip">Quiero comprar</button>
+                  </div>
+                  <form id="try-ai-form" class="try-ai-form">
+                    <input type="text" id="try-ai-input" maxlength="1000" placeholder="Escribe como un cliente…" autocomplete="off" />
+                    <button type="submit" id="try-ai-send" class="btn primary">Enviar</button>
+                  </form>
+                  <div class="try-ai-foot">
+                    <p id="try-ai-status" class="ai-save-status muted small"></p>
+                    <button type="button" id="try-ai-reset" class="link-btn hidden">Empezar de nuevo</button>
+                  </div>
                 </div>
               </section>
 
-              <aside class="ai-setup-preview-card">
-                <div class="ai-preview-badge">Vista previa</div>
-                <h3 id="biz-preview-title">Tu IA atenderá sabiendo esto</h3>
-                <p id="biz-preview-note" class="ai-preview-note">Saluda, responde preguntas, envía atajos (menú, fotos…) y te pasa el chat cuando quieran comprar.</p>
-                <ul id="biz-summary-list" class="biz-summary-list">
-                  <li class="muted">Completa las preguntas y pulsa guardar.</li>
+              <section class="ai-pane" data-ai-pane="respuestas" data-ai-group="respuestas">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Preguntas sin responder</h3><p>Lo que te preguntaron y la IA no sabía. Respóndelo una vez y lo aprende para todos tus chats.</p></div>
+                </header>
+                <div id="ai-questions-card">
+                  <ul id="ai-questions-list" class="ai-questions-list"></ul>
+                  <details id="ai-learned-wrap" class="ai-learned hidden">
+                    <summary id="ai-learned-summary">Lo que la IA ya aprendió</summary>
+                    <ul id="ai-learned-list" class="ai-questions-list"></ul>
+                  </details>
+                  <p id="ai-questions-status" class="ai-save-status muted small"></p>
+                </div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="atajos" data-ai-group="respuestas">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Atajos rápidos</h3><p>Menú, precios, fotos… Los envías con un clic y la IA también los usa sola.</p></div>
+                </header>
+                <ul id="ai-shortcuts-summary" class="ai-shortcuts-summary">
+                  <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
                 </ul>
-              </aside>
+                <div class="ai-pane-actions"><button type="button" id="ai-shortcuts-config-btn" class="btn primary">Configurar atajos</button></div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="avisos" data-ai-group="avisos">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Alertas a tu WhatsApp</h3><p>Te escribimos cuando la IA cierra un pedido, llega un comprobante o se agenda una cita.</p></div>
+                </header>
+                <div id="alerts-card">
+                  <div class="alert-recipients-head">
+                    <span>Números que reciben las alertas</span>
+                    <span class="ai-field-hint">Con indicativo. Hasta 5: tú, el encargado o quienes despachan.</span>
+                  </div>
+                  <div id="alert-recipients" class="alert-recipients"></div>
+                  <p id="alert-warning" class="alert-warning hidden" role="alert"></p>
+                  <button type="button" id="alert-add-btn" class="btn ghost small alert-add-btn">+ Agregar otro número</button>
+                  <details class="ai-more ai-pane-more">
+                    <summary><span>Más opciones</span></summary>
+                    <label class="ai-field">
+                      <span>Avisar de interesados sin responder cuando haya</span>
+                      <span class="ai-field-hint">Llega solo a los números con «Todas las alertas».</span>
+                      <input type="number" id="alert-threshold" min="1" max="500" value="10" />
+                    </label>
+                    <p id="alert-pending" class="muted small"></p>
+                  </details>
+                  <div class="ai-pane-actions">
+                    <button type="button" id="alert-save-btn" class="btn primary">Guardar</button>
+                    <button type="button" id="alert-test-btn" class="btn ghost">Enviar prueba</button>
+                  </div>
+                  <p id="alert-save-status" class="ai-save-status muted small"></p>
+                </div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="seguimiento" data-ai-group="avisos">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Seguimiento</h3><p>Si un cliente deja de contestar, la IA le escribe <strong>una sola vez</strong> retomando la conversación. Solo de 8 a. m. a 8 p. m.</p></div>
+                </header>
+                <div id="followup-card">
+                  <label class="ai-field">
+                    <span>Escribirle cuando lleve sin responder</span>
+                    <select id="followup-hours">
+                      <option value="0">Nunca (apagado)</option>
+                      <option value="1">1 hora</option>
+                      <option value="2">2 horas</option>
+                      <option value="4">4 horas</option>
+                      <option value="8">8 horas</option>
+                      <option value="12">12 horas</option>
+                      <option value="24">24 horas</option>
+                    </select>
+                  </label>
+                  <p id="followup-status" class="ai-save-status muted small"></p>
+                </div>
+              </section>
             </div>
 
-            <section id="try-ai-card" class="ai-shortcuts-card try-ai-card" data-ai-group="probar">
-              <div class="ai-shortcuts-card-head">
-                <h3>Prueba tu IA</h3>
-                <p class="muted small">Escríbele como si fueras un cliente. Te responde igual que en WhatsApp, con lo que tengas guardado (precios, fotos, medios de pago), <strong>sin enviarle nada a nadie</strong>.</p>
-              </div>
-              <div id="try-ai-messages" class="try-ai-messages hidden" aria-live="polite"></div>
-              <div class="try-ai-suggestions">
-                <button type="button" class="try-ai-chip">Hola, ¿qué venden?</button>
-                <button type="button" class="try-ai-chip">¿Cuánto vale el envío?</button>
-                <button type="button" class="try-ai-chip">¿Tienen fotos?</button>
-                <button type="button" class="try-ai-chip">Quiero comprar</button>
-              </div>
-              <form id="try-ai-form" class="try-ai-form">
-                <input type="text" id="try-ai-input" maxlength="1000" placeholder="Escribe como un cliente…" autocomplete="off" />
-                <button type="submit" id="try-ai-send" class="btn primary">Enviar</button>
-              </form>
-              <div class="try-ai-foot">
-                <p id="try-ai-status" class="ai-save-status muted small"></p>
-                <button type="button" id="try-ai-reset" class="link-btn hidden">Empezar de nuevo</button>
-              </div>
-            </section>
-
-            <section id="ai-questions-card" class="ai-shortcuts-card" data-ai-group="respuestas">
-              <div class="ai-shortcuts-card-head">
-                <h3>Preguntas que la IA no supo responder</h3>
-                <p class="muted small">Cuando un cliente pregunta algo que no le has contado, la IA le dice que le confirmas y te lo anota aquí. <strong>Respóndelo una vez</strong> y la IA lo aprende para todos tus chats.</p>
-              </div>
-              <ul id="ai-questions-list" class="ai-questions-list"></ul>
-              <details id="ai-learned-wrap" class="ai-learned hidden">
-                <summary id="ai-learned-summary">Lo que la IA ya aprendió</summary>
-                <ul id="ai-learned-list" class="ai-questions-list"></ul>
-              </details>
-              <p id="ai-questions-status" class="ai-save-status muted small"></p>
-            </section>
-
-            <section class="ai-shortcuts-card" data-ai-group="respuestas">
-              <div class="ai-shortcuts-card-head">
-                <h3>Atajos rápidos</h3>
-                <p class="muted small">Los mismos para <strong>todos tus chats</strong> — menú, precios, fotos… Un clic envía al cliente; la <strong>IA también puede enviarlos sola</strong> cuando pregunten por eso.</p>
-              </div>
-              <ul id="ai-shortcuts-summary" class="ai-shortcuts-summary">
-                <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
-              </ul>
-              <button type="button" id="ai-shortcuts-config-btn" class="btn ghost small">Configurar atajos</button>
-            </section>
-
-            <section id="alerts-card" class="ai-shortcuts-card" data-ai-group="avisos">
-              <div class="ai-shortcuts-card-head">
-                <h3>Alertas por WhatsApp</h3>
-                <p class="muted small">Le escribimos al WhatsApp personal de cada persona de tu equipo: a ti cuando se acumulen <strong>interesados sin responder</strong>, y a quien despacha cuando la IA <strong>cierra un pedido</strong>, llega un <strong>comprobante de pago</strong> o se agenda una cita, con sus datos.</p>
-              </div>
-              <div class="alert-recipients-head">
-                <span>Números que reciben las alertas</span>
-                <span class="ai-field-hint">Con indicativo. Hasta 5: tú, el encargado o quienes despachan.</span>
-              </div>
-              <div id="alert-recipients" class="alert-recipients"></div>
-              <p id="alert-warning" class="alert-warning hidden" role="alert"></p>
-              <button type="button" id="alert-add-btn" class="btn ghost small alert-add-btn">+ Agregar otro número</button>
-              <div class="alert-settings-row">
-                <label class="ai-field">
-                  <span>Avisar de interesados sin responder cuando haya</span>
-                  <span class="ai-field-hint">Llega solo a los números con «Todas las alertas».</span>
-                  <input type="number" id="alert-threshold" min="1" max="500" value="10" />
-                </label>
-              </div>
-              <p id="alert-pending" class="muted small"></p>
-              <div class="alert-actions">
-                <button type="button" id="alert-save-btn" class="btn primary">Guardar alertas</button>
-                <button type="button" id="alert-test-btn" class="btn ghost small">Enviar prueba</button>
-              </div>
-              <p id="alert-save-status" class="ai-save-status muted small"></p>
-            </section>
-
-            <section id="followup-card" class="ai-shortcuts-card" data-ai-group="avisos">
-              <div class="ai-shortcuts-card-head">
-                <h3>Seguimiento a clientes que no responden</h3>
-                <p class="muted small">Si un cliente deja de contestar, la IA le escribe <strong>una sola vez</strong> retomando lo que hablaban y le pregunta si sigue interesado. No insiste más hasta que el cliente vuelva a escribir, y solo escribe de 8 a. m. a 8 p. m. dentro de tu horario.</p>
-              </div>
-              <label class="ai-field">
-                <span>Escribirle cuando lleve sin responder</span>
-                <select id="followup-hours">
-                  <option value="0">Nunca (apagado)</option>
-                  <option value="1">1 hora</option>
-                  <option value="2">2 horas</option>
-                  <option value="4">4 horas</option>
-                  <option value="8">8 horas</option>
-                  <option value="12">12 horas</option>
-                  <option value="24">24 horas</option>
-                </select>
-              </label>
-              <p id="followup-status" class="ai-save-status muted small"></p>
-            </section>
+            <div class="ai-legacy" hidden>
+              <nav class="ai-sections">
+                <button type="button" class="ai-section-tab active" data-ai-section="negocio">Tu negocio</button>
+                <span id="ai-avisos-dot" class="ai-section-dot hidden"></span>
+                <span id="ai-respuestas-badge" class="tab-count-badge hidden">0</span>
+              </nav>
+              <section id="ai-ready-card" class="ai-ready-card hidden">
+                <h3 id="ai-ready-title"></h3>
+                <span id="ai-ready-count"></span>
+                <p id="ai-ready-note"></p>
+                <ul id="ai-ready-list"></ul>
+                <div id="ai-tips" class="hidden"><ul id="ai-tips-list"></ul></div>
+              </section>
+              <details id="biz-more"></details>
+              <h3 id="biz-preview-title"></h3>
+              <p id="biz-preview-note"></p>
+              <ul id="biz-summary-list"></ul>
+              <button type="button" id="biz-save-btn">Guardar</button>
+            </div>
+            <p id="biz-save-status" class="ai-save-status muted small"></p>
           </div>
 
-          <div id="orders-panel" class="appointments-panel orders-panel hidden">
-            <header class="appointments-hero">
-              <h2>Pedidos</h2>
-              <p>Lo que la IA ya vendió. Tú solo despachas.</p>
-            </header>
+          <div id="orders-panel" class="appointments-panel orders-panel split-view hidden">
+            <nav class="ai-list" aria-label="Pedidos">
+              <header class="ai-list-head">
+                <h2>Pedidos</h2>
+                <p class="ai-list-status">Lo que la IA ya vendió. Tú solo despachas.</p>
+              </header>
+              <button type="button" class="ai-row" data-ai-open="ready">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9zM3 7.5 12 12l9-4.5M12 12v9"/></svg></span>
+                <span class="ai-row-body"><strong>Por despachar</strong><span class="ai-row-sub" data-ai-sub="ready">Pagados o contraentrega</span></span>
+                <span class="ai-row-mark" data-ai-mark="ready"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="pending">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg></span>
+                <span class="ai-row-body"><strong>Esperando el pago</strong><span class="ai-row-sub" data-ai-sub="pending">Ya tienen tus datos de pago</span></span>
+                <span class="ai-row-mark" data-ai-mark="pending"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="done">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17.5 19 7"/></svg></span>
+                <span class="ai-row-body"><strong>Despachados</strong><span class="ai-row-sub" data-ai-sub="done">Los del último mes</span></span>
+                <span class="ai-row-mark" data-ai-mark="done"></span>
+              </button>
+            </nav>
 
-            <section id="orders-empty" class="orders-empty hidden">
-              <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7zM9 7V6a3 3 0 0 1 6 0v1"/></svg></span>
-              <strong id="orders-empty-title">Aquí llegan tus ventas</strong>
-              <span id="orders-empty-text"></span>
-              <ol class="orders-empty-steps">
-                <li>Un cliente decide comprar en el chat.</li>
-                <li>La IA le pasa tus datos de pago y anota el pedido aquí.</li>
-                <li>Cuando llega el comprobante, tú lo despachas.</li>
-              </ol>
-              <button type="button" id="orders-empty-btn" class="btn primary hidden"></button>
-            </section>
+            <div class="ai-detail">
+              <section class="ai-pane" data-ai-pane="empty">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Pedidos</h3></div>
+                </header>
+                <section id="orders-empty" class="orders-empty hidden">
+                  <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7zM9 7V6a3 3 0 0 1 6 0v1"/></svg></span>
+                  <strong id="orders-empty-title">Aquí llegan tus ventas</strong>
+                  <span id="orders-empty-text"></span>
+                  <ol class="orders-empty-steps">
+                    <li>Un cliente decide comprar en el chat.</li>
+                    <li>La IA le pasa tus datos de pago y anota el pedido aquí.</li>
+                    <li>Cuando llega el comprobante, tú lo despachas.</li>
+                  </ol>
+                  <button type="button" id="orders-empty-btn" class="btn primary hidden"></button>
+                </section>
+              </section>
 
-            <section class="ai-shortcuts-card orders-section">
-              <div class="ai-shortcuts-card-head">
-                <h3>Listos para despachar <span id="orders-ready-count" class="orders-count"></span></h3>
-                <p class="muted small">Pagados o contraentrega. Si dice <strong>comprobante sin verificar</strong>, revisa que la plata sí te haya llegado antes de enviarlo.</p>
-              </div>
-              <div id="orders-ready" class="orders-list"></div>
-              <p id="orders-ready-empty" class="muted small hidden">Nada pendiente por despachar.</p>
-            </section>
+              <section class="ai-pane orders-section" data-ai-pane="ready">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Por despachar</h3><p>Si dice <strong>comprobante sin verificar</strong>, revisa que la plata sí te llegó antes de enviarlo.</p></div>
+                </header>
+                <div id="orders-ready" class="orders-list"></div>
+                <p id="orders-ready-empty" class="muted small hidden">Nada pendiente por despachar.</p>
+              </section>
 
-            <section class="ai-shortcuts-card orders-section">
-              <div class="ai-shortcuts-card-head">
-                <h3>Esperando el pago <span id="orders-pending-count" class="orders-count"></span></h3>
-                <p class="muted small">La IA ya cerró la venta y le pasó tus datos de pago. Cuando el cliente mande el comprobante, pasa solo a <strong>Listos para despachar</strong>.</p>
-              </div>
-              <div id="orders-pending" class="orders-list"></div>
-              <p id="orders-pending-empty" class="muted small hidden">Ningún pago pendiente.</p>
-            </section>
+              <section class="ai-pane orders-section" data-ai-pane="pending">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Esperando el pago</h3><p>Cuando el cliente mande el comprobante, pasa solo a <strong>Por despachar</strong>.</p></div>
+                </header>
+                <div id="orders-pending" class="orders-list"></div>
+                <p id="orders-pending-empty" class="muted small hidden">Ningún pago pendiente.</p>
+              </section>
 
-            <section class="ai-shortcuts-card orders-section">
-              <div class="ai-shortcuts-card-head">
-                <h3>Despachados</h3>
-                <p class="muted small">Los del último mes.</p>
-              </div>
-              <div id="orders-done" class="orders-list"></div>
-              <p id="orders-done-empty" class="muted small hidden">Todavía no has despachado nada.</p>
-            </section>
-            <p id="orders-status" class="ai-save-status muted small"></p>
+              <section class="ai-pane orders-section" data-ai-pane="done">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Despachados</h3><p>Los del último mes.</p></div>
+                </header>
+                <div id="orders-done" class="orders-list"></div>
+                <p id="orders-done-empty" class="muted small hidden">Todavía no has despachado nada.</p>
+              </section>
+              <p id="orders-status" class="ai-save-status muted small"></p>
+            </div>
           </div>
 
           <div id="inventory-panel" class="appointments-panel inventory-panel hidden">
-            <header class="appointments-hero">
-              <h2>Inventario</h2>
-              <p>Lo que vendes y cuántos quedan. La IA solo ofrece lo que hay.</p>
-            </header>
-
-            <section id="products-card" class="ai-shortcuts-card">
-              <div class="ai-shortcuts-card-head">
-                <h3>Tus productos</h3>
+            <header class="tab-head">
+              <div>
+                <h2>Inventario</h2>
                 <p id="products-summary" class="products-summary hidden"></p>
-                <p class="muted small products-help">En <strong>Quedan</strong> pon cuántos tienes: vacío si no llevas la cuenta, en 0 queda agotado. Con <strong>Agregar foto</strong> sube hasta 4 fotos: si un cliente pide verlo, la IA se las manda con el precio. Se guarda solo.</p>
               </div>
-              <div id="products-head" class="product-row product-row-head hidden" aria-hidden="true">
-                <span>Producto</span><span>Precio</span><span>Quedan</span><span>Detalles</span><span></span>
-              </div>
-              <div id="products-list" class="products-list"></div>
-              <p id="products-empty" class="muted small hidden">Agrega lo que vendes, o créalo de una vez desde tu catálogo. Si solo das citas o servicios, puedes dejarlo vacío.</p>
-              <div class="alert-actions">
-                <button type="button" id="products-add-btn" class="btn ghost small">+ Agregar producto</button>
-                <button type="button" id="products-import-btn" class="btn ghost small hidden">Crear desde mi catálogo</button>
-              </div>
-              <p id="products-status" class="ai-save-status muted small"></p>
+              <button type="button" id="products-add-btn" class="btn primary">+ Agregar</button>
+            </header>
+            <div id="products-list" class="products-list"></div>
+            <section id="products-empty" class="list-empty products-empty hidden">
+              <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9zM3 7.5 12 12l9-4.5M12 12v9"/></svg></span>
+              <strong>Agrega lo que vendes</strong>
+              <span>Con precio y foto: la IA cotiza y manda la foto sola. Si solo das citas o servicios, puedes dejarlo vacío.</span>
             </section>
+            <div class="alert-actions products-actions">
+              <button type="button" id="products-import-btn" class="btn ghost small hidden">Crear desde mi catálogo</button>
+            </div>
+            <p id="products-status" class="ai-save-status muted small"></p>
           </div>
 
-          <div id="appointments-panel" class="appointments-panel hidden">
-            <header class="appointments-hero">
-              <h2>Citas</h2>
-              <p>Tu horario y tu agenda: qué está libre y qué ocupado.</p>
-            </header>
+          <div id="appointments-panel" class="appointments-panel split-view hidden">
+            <nav class="ai-list" aria-label="Citas">
+              <header class="ai-list-head">
+                <h2>Citas</h2>
+                <p class="ai-list-status">Tu agenda y tu horario.</p>
+              </header>
+              <button type="button" class="ai-row" data-ai-open="agenda">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16V20H4zM4 10h16M8 4v4M16 4v4"/></svg></span>
+                <span class="ai-row-body"><strong>Agenda</strong><span class="ai-row-sub" data-ai-sub="agenda">Qué está libre y qué ocupado</span></span>
+                <span class="ai-row-mark" data-ai-mark="agenda"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="horario">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg></span>
+                <span class="ai-row-body"><strong>Horario</strong><span class="ai-row-sub" data-ai-sub="horario"></span></span>
+                <span class="ai-row-mark" data-ai-mark="horario"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="equipo">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20a6 6 0 0 0-3.5-5.5"/></svg></span>
+                <span class="ai-row-body"><strong>Equipo</strong><span class="ai-row-sub" data-ai-sub="equipo"></span></span>
+                <span class="ai-row-mark" data-ai-mark="equipo"></span>
+              </button>
+            </nav>
 
-            <div class="results-slot hidden"></div>
+            <div class="ai-detail">
+              <section class="ai-pane" data-ai-pane="agenda">
+                <header class="ai-pane-head appointments-day-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div class="appointments-day-title">
+                    <h3 id="appointments-day-heading">Agenda</h3>
+                    <p id="appointments-today-label" class="appointments-day-date">—</p>
+                  </div>
+                  <div class="appointments-day-nav">
+                    <button type="button" id="appointments-prev-day" class="btn ghost small" title="Día anterior" aria-label="Día anterior">‹</button>
+                    <button type="button" id="appointments-today-btn" class="btn ghost small">Hoy</button>
+                    <button type="button" id="appointments-next-day" class="btn ghost small" title="Día siguiente" aria-label="Día siguiente">›</button>
+                  </div>
+                </header>
+                <p id="schedule-ai-off" class="appointments-ai-off hidden">La IA no está agendando: cuando piden cita, el chat te llega a ti. <button type="button" class="link-btn" data-ai-open="horario">Activarla</button></p>
+                <div class="results-slot hidden"></div>
+                <div id="appointments-staff-chips" class="appointments-staff-chips hidden" role="tablist" aria-label="Agenda de"></div>
+                <ul class="appointments-slot-list" id="appointments-slot-list">
+                  <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li><li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li><li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
+                </ul>
+                <div class="ai-pane-actions"><button type="button" id="appointments-add-btn" class="btn primary">+ Nueva cita</button></div>
+                <p id="appointments-load-status" class="appointments-status muted small"></p>
+              </section>
 
-            <section class="appointments-schedule-card">
-              <h3>Horario del negocio</h3>
-              <p class="muted small">A qué hora abres y cuánto dura cada cita.</p>
-              <div class="appointments-schedule-grid">
-                <label>
-                  Apertura
-                  <input type="time" id="schedule-open" value="08:00" />
-                </label>
-                <label>
-                  Cierre
-                  <input type="time" id="schedule-close" value="18:00" />
-                </label>
-                <label>
-                  Cada cita dura (min)
-                  <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
-                </label>
-              </div>
-              <label class="appointments-staff-label">
-                ¿Cómo llamas a quien atiende?
-                <input type="text" id="schedule-staff-label" maxlength="40" placeholder="barbero, estilista, médico…" />
-              </label>
-              <label class="appointments-ai-toggle">
-                <input type="checkbox" id="schedule-ai-booking" />
-                <span>
-                  <strong>La IA agenda citas sola</strong>
-                  <span class="muted small">Mira los horarios libres, ofrece opciones y agenda. También puede vender en el mismo chat.</span>
-                </span>
-              </label>
-              <label class="appointments-ai-toggle">
-                <input type="checkbox" id="schedule-reminders" checked />
-                <span>
-                  <strong>Recordarle la cita al cliente</strong>
-                  <span class="muted small">2 horas antes le llega un WhatsApp con la hora de su cita. Solo a clientes que ya te escribieron.</span>
-                </span>
-              </label>
-              <p id="schedule-ai-off" class="appointments-ai-off hidden">La IA no está agendando: cuando un cliente pide cita, el chat te llega a ti. Prende «La IA agenda citas sola».</p>
-              <button type="button" id="schedule-save-btn" class="btn primary small">Guardar horario</button>
-              <p id="schedule-save-status" class="appointments-status muted small"></p>
-            </section>
-
-            <section class="appointments-schedule-card appointments-team-card">
-              <div class="appointments-team-head">
-                <div>
-                  <h3>Equipo</h3>
-                  <p class="muted small">Si atienden varias personas, cada una tiene su agenda. La IA reparte las citas parejo.</p>
+              <section class="ai-pane appointments-schedule-pane" data-ai-pane="horario">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Horario</h3><p>A qué hora abres y cuánto dura cada cita.</p></div>
+                </header>
+                <div class="appointments-schedule-grid">
+                  <label>
+                    Apertura
+                    <input type="time" id="schedule-open" value="08:00" />
+                  </label>
+                  <label>
+                    Cierre
+                    <input type="time" id="schedule-close" value="18:00" />
+                  </label>
+                  <label>
+                    Cada cita dura (min)
+                    <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
+                  </label>
                 </div>
-                <button type="button" id="staff-add-btn" class="btn ghost small">+ Agregar</button>
-              </div>
-              <ul id="staff-list" class="staff-list"></ul>
-            </section>
+                <label class="appointments-ai-toggle">
+                  <input type="checkbox" id="schedule-ai-booking" />
+                  <span>
+                    <strong>La IA agenda citas sola</strong>
+                    <span class="muted small">Mira los horarios libres, ofrece opciones y agenda.</span>
+                  </span>
+                </label>
+                <label class="appointments-ai-toggle">
+                  <input type="checkbox" id="schedule-reminders" checked />
+                  <span>
+                    <strong>Recordarle la cita al cliente</strong>
+                    <span class="muted small">Le llega un WhatsApp 2 horas antes.</span>
+                  </span>
+                </label>
+                <details class="ai-more ai-pane-more">
+                  <summary><span>Más opciones</span></summary>
+                  <label class="appointments-staff-label">
+                    ¿Cómo llamas a quien atiende?
+                    <input type="text" id="schedule-staff-label" maxlength="40" placeholder="barbero, estilista, médico…" />
+                  </label>
+                </details>
+                <div class="ai-pane-actions"><button type="button" id="schedule-save-btn" class="btn primary">Guardar</button></div>
+                <p id="schedule-save-status" class="appointments-status muted small"></p>
+              </section>
 
-            <section class="appointments-day-card">
-              <div class="appointments-day-head">
-                <div class="appointments-day-nav">
-                  <button type="button" id="appointments-prev-day" class="btn ghost small" title="Día anterior">‹</button>
-                  <button type="button" id="appointments-today-btn" class="btn ghost small">Hoy</button>
-                  <button type="button" id="appointments-next-day" class="btn ghost small" title="Día siguiente">›</button>
-                </div>
-                <div class="appointments-day-title">
-                  <h3 id="appointments-day-heading">Agenda</h3>
-                  <span class="appointments-day-date muted small" id="appointments-today-label">—</span>
-                </div>
-                <button type="button" id="appointments-add-btn" class="btn primary small">+ Nueva cita</button>
-              </div>
-              <div id="appointments-staff-chips" class="appointments-staff-chips hidden" role="tablist" aria-label="Agenda de"></div>
-              <ul class="appointments-slot-list" id="appointments-slot-list">
-                <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li><li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li><li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
-              </ul>
-              <p id="appointments-load-status" class="appointments-status muted small"></p>
-            </section>
+              <section class="ai-pane" data-ai-pane="equipo">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Equipo</h3><p>Si atienden varias personas, cada una tiene su agenda. La IA reparte las citas parejo.</p></div>
+                </header>
+                <ul id="staff-list" class="staff-list"></ul>
+                <div class="ai-pane-actions"><button type="button" id="staff-add-btn" class="btn primary">+ Agregar persona</button></div>
+              </section>
+            </div>
           </div>
 
         </main>
@@ -921,6 +1019,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=176"></script>
+  <script src="/static/panel/app.js?v=179"></script>
 </body>
 </html>

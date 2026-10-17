@@ -367,6 +367,7 @@
   const conversationList = $("conversation-list");
   const messagesEl = $("messages");
   let pinnedToBottom = true;
+  let ordersAutoPane = true;
   const emptyChat = $("empty-chat");
   const activeChat = $("active-chat");
 
@@ -1828,16 +1829,15 @@
     steps.push({
       key: "biz",
       mode: "ai",
-      target: () => document.querySelector(".ai-setup-form-card"),
-      focus: () => $("biz-name"),
+      target: () => document.querySelector(".ai-list"),
       title: "Cuéntale de tu negocio",
-      text: "Lo que más preguntan los clientes: qué vendes, cómo te pagan (con el número de la cuenta), si haces envíos y dónde estás. Sin eso la IA tiene que decir «te confirmo». Luego toca «Guardar mi negocio».",
+      text: "Completa lo que tiene el punto naranja: qué vendes, cómo te pagan (con el número de la cuenta), si haces envíos y dónde estás. Sin eso la IA tiene que decir «te confirmo».",
       done: () => !!state.aiProfile?.readiness?.ready,
     });
     steps.push({
       key: "products",
       mode: "inventory",
-      target: () => $("products-card"),
+      target: () => $("inventory-panel"),
       title: "Sube lo que vendes, con foto",
       text: "Un producto por cada cosa que vendes (no «Ropa» en general), con su precio y al menos una foto. Cuando un cliente pida verlo, la IA se la manda sola. Si solo das servicios, sigue.",
       done: () => (state.products || []).some((x) => (x.photos || []).length),
@@ -1848,7 +1848,7 @@
       target: () => $("alerts-card"),
       focus: () => $("alert-recipients")?.querySelector("input[type=tel], input[type=text], input"),
       title: "Tu WhatsApp personal",
-      text: "Pon el número donde quieres que te avisen — no el del negocio — y toca «Guardar alertas». Así no se te enfría un cliente.",
+      text: "Pon el número donde quieres que te avisen — no el del negocio — y toca «Guardar». Así no se te enfría un cliente.",
       done: () => state.onboarding.alertCount > 0,
     });
     if (state.onboarding.bookingAllowed !== false) {
@@ -1866,7 +1866,7 @@
       steps.push({
         key: "citas",
         mode: "appointments",
-        target: () => document.querySelector(".appointments-schedule-card"),
+        target: () => document.querySelector('#appointments-panel [data-ai-pane="horario"]'),
         title: "Horario y agenda",
         text: "Pon a qué hora abres y cierras. Activa «La IA agenda citas sola» y guarda. Listo.",
         done: () => !!state.onboarding.bookingEnabled,
@@ -3382,10 +3382,21 @@
     } else {
       emptyChat.classList.add("hidden");
       activeChat.classList.add("hidden");
-      if (isAi) loadAiSetupPanel();
+      if (isAi) {
+        if (changed && isPhoneLayout()) closeAiPane();
+        loadAiSetupPanel();
+      }
       if (isInventory) loadInventoryPanel();
-      if (isOrders) loadOrders();
+      if (isOrders) {
+        if (changed) {
+          ordersAutoPane = true;
+          if (!state.orders) openSplitPane($("orders-panel"), "ready", { animate: false });
+          else pickOrdersPane();
+        }
+        loadOrders();
+      }
       if (isAppointments) {
+        if (changed) openSplitPane($("appointments-panel"), "agenda", { animate: false });
         loadAppointmentsPanel();
         loadResults();
       }
@@ -3491,6 +3502,31 @@
     const box = $("schedule-ai-booking");
     const off = !!box && !box.disabled && !box.checked && (state.staff || []).length > 0;
     $("schedule-ai-off")?.classList.toggle("hidden", !off);
+    renderAppointmentsRows();
+  }
+
+  function renderAppointmentsRows() {
+    const panel = $("appointments-panel");
+    const open = $("schedule-open")?.value;
+    const close = $("schedule-close")?.value;
+    const minutes = $("schedule-slot-minutes")?.value;
+    const booking = $("schedule-ai-booking");
+    const aiBooks = !!booking?.checked;
+    setSplitRow(
+      panel,
+      "horario",
+      `${open}–${close} · citas de ${minutes} min${aiBooks ? " · la IA agenda" : ""}`,
+      aiBooks ? "ok" : "",
+    );
+    const team = state.staff || [];
+    setSplitRow(panel, "equipo", team.length ? `${team.length} ${team.length === 1 ? "persona" : "personas"}` : "Una sola agenda");
+    const day = state.appointmentsDay;
+    if (day && state.appointmentsDate) {
+      const busy = (day.slots || []).filter((s) => s.status === "busy" && s.appointment).length;
+      const isToday = state.appointmentsDate === formatDateISO(new Date());
+      const when = isToday ? "Hoy" : formatDayLabel(state.appointmentsDate);
+      setSplitRow(panel, "agenda", `${when} · ${busy ? `${busy} ${busy === 1 ? "cita" : "citas"}` : "sin citas"}`, busy ? "count" : "", busy);
+    }
   }
 
   const WEEKDAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -3677,6 +3713,7 @@
       state.appointmentsStaffId = day.staff_id || null;
       renderStaffChips(day);
       renderAppointmentsSlots(day);
+      renderAppointmentsRows();
     } catch (err) {
       stopSkel();
       if (list) {
@@ -4095,6 +4132,7 @@
     }
     renderSalesTips();
     renderReadyBanner();
+    renderAiList();
   }
 
   const TIP_ACTIONS = {
@@ -4214,7 +4252,11 @@
       return;
     }
     if (state.panelMode !== "ai") switchPanelMode("ai");
-    const target = (fieldId && $(fieldId)) || $("ai-ready-card");
+    const target = fieldId && $(fieldId);
+    if (!target?.closest(".ai-pane")) {
+      openAiPane(defaultAiPane());
+      return;
+    }
     const folded = target.closest("details");
     if (folded) folded.open = true;
     revealAiGroup(target);
@@ -4246,28 +4288,132 @@
     badge.classList.toggle("hidden", !open || !state.canManageGlobal);
     $("ai-respuestas-badge").textContent = String(open);
     $("ai-respuestas-badge").classList.toggle("hidden", !open);
+    renderAiList();
   }
 
   function renderAvisosDot() {
     const ownNumber = (state.aiProfile?.tips || []).some((t) => t.key === "alerts-own");
     $("ai-avisos-dot").classList.toggle("hidden", !(ownNumber || state.onboarding.alertCount === 0));
+    renderAiList();
   }
 
-  function showAiSection(name, { animate = true } = {}) {
-    const panel = $("ai-setup-panel");
-    if (!name || panel.dataset.section === name) return;
-    panel.dataset.section = name;
-    panel.querySelectorAll(".ai-section-tab").forEach((b) => b.classList.toggle("active", b.dataset.aiSection === name));
-    panel.scrollTop = 0;
-    if (animate) {
-      panel.querySelectorAll(`[data-ai-group="${name}"]`).forEach((el, i) =>
-        animateIn(el, { y: 8, duration: 240, delay: i * 40 })
-      );
+  function openSplitPane(panel, name, { animate = true } = {}) {
+    const pane = panel?.querySelector(`.ai-pane[data-ai-pane="${name}"]`);
+    if (!pane) return null;
+    const changed = panel.dataset.pane !== name || !panel.classList.contains("is-open");
+    panel.dataset.pane = name;
+    panel.classList.add("is-open");
+    panel.querySelectorAll(".ai-row").forEach((r) => r.classList.toggle("active", r.dataset.aiOpen === name));
+    panel.querySelectorAll(".ai-pane").forEach((p) => p.classList.toggle("active", p === pane));
+    if (changed) {
+      pane.closest(".ai-detail").scrollTop = 0;
+      if (animate) animateIn(pane, { x: isPhoneLayout() ? 24 : 0, y: isPhoneLayout() ? 0 : 6, duration: 220 });
+    }
+    return pane;
+  }
+
+  function openAiPane(name, opts) {
+    const pane = openSplitPane($("ai-setup-panel"), name, opts);
+    if (!pane) return;
+    const status = $("biz-save-status");
+    const actions = pane.querySelector(".ai-pane-save")?.closest(".ai-pane-actions");
+    if (actions) {
+      if (status.previousElementSibling !== actions) setBizSaveStatus("");
+      actions.after(status);
+    }
+    status.classList.toggle("hidden", !actions);
+  }
+
+  function closeAiPane() {
+    $("ai-setup-panel").classList.remove("is-open");
+  }
+
+  function setSplitRow(panel, name, sub, mark = "", count = 0) {
+    const subEl = panel.querySelector(`[data-ai-sub="${name}"]`);
+    const markEl = panel.querySelector(`[data-ai-mark="${name}"]`);
+    if (subEl && sub != null) {
+      subEl.textContent = sub;
+      subEl.classList.toggle("is-missing", mark === "todo");
+    }
+    if (markEl) {
+      markEl.dataset.state = mark;
+      markEl.textContent = mark === "count" ? String(count) : "";
     }
   }
 
+  function defaultAiPane() {
+    const missing = missingReadiness()[0];
+    const field = missing && missing.key !== "prices" ? $(missing.field) : null;
+    return field?.closest(".ai-pane")?.dataset.aiPane || (missing ? "productos" : "probar");
+  }
+
+  function showAiSection(name, opts) {
+    openAiPane(name, opts);
+  }
+
   function revealAiGroup(el) {
-    showAiSection(el?.closest?.("[data-ai-group]")?.dataset.aiGroup, { animate: false });
+    const pane = el?.closest?.(".ai-pane");
+    if (!pane) return;
+    if (pane.closest("#ai-setup-panel")) openAiPane(pane.dataset.aiPane, { animate: false });
+    else openSplitPane(pane.closest(".split-view"), pane.dataset.aiPane, { animate: false });
+  }
+
+  function aiRowText(value, max = 64) {
+    const line = (value || "").trim().split("\n")[0];
+    return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  }
+
+  function renderAiList() {
+    const panel = $("ai-setup-panel");
+    if (!panel) return;
+    const r = state.aiProfile?.readiness;
+    const item = (key) => r?.items?.find((i) => i.key === key);
+    const val = (id) => $(id)?.value.trim() || "";
+    const tips = state.aiProfile?.tips || [];
+    const openQ = (state.aiQuestions || []).filter((q) => q.status === "open").length;
+    const shortcuts = (state.quickShortcuts || []).length;
+    const hours = Number($("followup-hours")?.value || 0);
+    const alertCount = state.onboarding?.alertCount;
+    const required = (key, id) => {
+      const it = item(key);
+      if (!it) return { sub: aiRowText(val(id)) || "Opcional", mark: val(id) ? "ok" : "" };
+      if (it.done) return { sub: aiRowText(val(id)) || "Listo", mark: "ok" };
+      return { sub: val(id) && it.hint ? aiRowText(it.hint) : "Falta", mark: "todo" };
+    };
+    const products = required("products", "biz-products");
+    const prices = item("prices");
+    const invTip = tips.find((t) => t.action === "inventory");
+    if (prices && !prices.done && products.mark === "ok") Object.assign(products, { sub: "Faltan los precios en Inventario", mark: "todo" });
+    else if (invTip && products.mark === "ok") Object.assign(products, { sub: invTip.label, mark: "tip" });
+    const rows = {
+      negocio: {
+        sub: [val("biz-name"), val("biz-industry")].filter(Boolean).join(" · ") || "Ponle nombre",
+        mark: val("biz-name") ? "ok" : "todo",
+      },
+      productos: products,
+      pagos: required("payments", "biz-payments"),
+      envios: required("delivery", "biz-delivery"),
+      horario: required("location", "biz-hours"),
+      estilo: { sub: aiRowText(val("biz-tone")) || "Opcional", mark: val("biz-tone") || val("biz-restrictions") ? "ok" : "" },
+      probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
+      respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
+      atajos: { sub: shortcuts ? `${shortcuts} ${shortcuts === 1 ? "atajo" : "atajos"}` : "Menú, precios, fotos…", mark: "" },
+      avisos: {
+        sub: alertCount ? `${alertCount} ${alertCount === 1 ? "número recibe" : "números reciben"} los avisos` : "Nadie recibe los avisos",
+        mark: tips.some((t) => t.action === "alerts") || alertCount === 0 ? "tip" : alertCount ? "ok" : "",
+      },
+      seguimiento: { sub: hours ? `Después de ${hours} ${hours === 1 ? "hora" : "horas"} sin respuesta` : "Apagado", mark: hours ? "ok" : "" },
+    };
+    for (const [name, row] of Object.entries(rows)) setSplitRow(panel, name, row.sub, row.mark, row.count);
+    const ready = !r || r.ready;
+    const status = $("ai-list-status");
+    if (r) {
+      status.textContent = ready
+        ? "Lista para vender"
+        : `${r.done} de ${r.total} listos · ${state.tenant?.ai_autostart_pending ? "se enciende sola al terminar" : "complétala para encenderla"}`;
+      $("ai-list-bar").style.width = `${Math.round((r.done / Math.max(1, r.total)) * 100)}%`;
+    }
+    panel.classList.toggle("is-ready", ready);
   }
 
   const PHOTO_WORDS = /fot|imag|pic|se ve|luce/i;
@@ -4430,7 +4576,7 @@
       const el = $(id);
       if (el) el.disabled = ro;
     });
-    if ($("biz-save-btn")) $("biz-save-btn").disabled = ro;
+    document.querySelectorAll(".ai-pane-save").forEach((b) => { b.disabled = ro; });
     ["alert-threshold", "alert-save-btn", "alert-test-btn", "followup-hours"].forEach((id) => {
       const el = $(id);
       if (el) el.disabled = ro;
@@ -4604,6 +4750,7 @@
     } catch (err) {
       setFollowupStatus(err.message);
     }
+    renderAiList();
   }
 
   async function saveFollowup() {
@@ -4626,6 +4773,7 @@
       await loadFollowup();
     } finally {
       updateAiSetupControls();
+      renderAiList();
     }
   }
 
@@ -4656,6 +4804,9 @@
     } catch (err) {
       setBizSaveStatus(err.message);
       fillBizForm(null);
+    }
+    if (!isPhoneLayout() && !$("ai-setup-panel").classList.contains("is-open")) {
+      openAiPane(defaultAiPane(), { animate: false });
     }
     await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions()]);
     renderAiShortcutsSummary();
@@ -4756,18 +4907,28 @@
       $(`orders-${key}-empty`).classList.toggle("hidden", list.length > 0);
     }
     renderOrdersEmpty(orders.length === 0);
-    $("orders-ready-count").textContent = groups.ready.length ? `(${groups.ready.length})` : "";
-    $("orders-pending-count").textContent = groups.pending.length ? `(${groups.pending.length})` : "";
+    const panel = $("orders-panel");
+    setSplitRow(panel, "ready", null, groups.ready.length ? "count" : "", groups.ready.length);
+    setSplitRow(panel, "pending", null, groups.pending.length ? "count" : "", groups.pending.length);
+    setSplitRow(panel, "done", groups.done.length ? `${groups.done.length} en el último mes` : "Los del último mes");
+    pickOrdersPane();
     const badge = $("orders-badge");
     badge.textContent = String(groups.ready.length);
     badge.classList.toggle("hidden", !groups.ready.length);
     syncOrdersTab();
   }
 
+  function pickOrdersPane() {
+    if (!ordersAutoPane || !state.orders) return;
+    const orders = state.orders;
+    const has = (s) => orders.some((o) => o.status === s);
+    const name = !orders.length ? "empty" : has("ready") ? "ready" : has("pending") ? "pending" : "done";
+    openSplitPane($("orders-panel"), name, { animate: false });
+  }
+
   let ordersEmptyAction = null;
   function renderOrdersEmpty(empty) {
     $("orders-empty").classList.toggle("hidden", !empty);
-    document.querySelectorAll("#orders-panel .orders-section").forEach((el) => el.classList.toggle("hidden", empty));
     if (!empty) return;
     const off = aiOffReason();
     const aiOn = !off && !!state.tenant?.ai_global_enabled;
@@ -4856,17 +5017,41 @@
     return stock != null && stock <= 3 ? " is-low" : "";
   }
 
-  function productRow(p) {
+  const openProducts = new Set();
+
+  function productThumbHtml(p) {
+    const first = (p.photos || [])[0];
+    return first
+      ? `<img src="${productPhotoUrl(first)}" alt="" loading="lazy" />`
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h3l1.5-2h7l1.5 2h3V19H4zM12 16a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>';
+  }
+
+  function productRow(p, { open = false } = {}) {
     const ro = state.canManageGlobal ? "" : " disabled";
+    const isOpen = open || (p.id && openProducts.has(p.id));
     return `
-      <div class="product-row${stockClass(p.stock)}" data-id="${escapeHtml(p.id || "")}">
-        <input type="text" class="product-name" maxlength="120" placeholder="Ej: Tenis blancos" aria-label="Producto" value="${escapeHtml(p.name || "")}"${ro} />
-        <input type="text" class="product-price" inputmode="numeric" placeholder="Precio" aria-label="Precio" value="${p.price_cop != null ? "$" + formatThousands(p.price_cop) : ""}"${ro} />
-        <input type="number" class="product-stock" min="0" step="1" placeholder="Sin contar" aria-label="Cuántos quedan" value="${p.stock ?? ""}"${ro} />
-        <input type="text" class="product-details" maxlength="500" placeholder="Tallas, colores, sabores…" aria-label="Detalles" value="${escapeHtml(p.details || "")}"${ro} />
-        <button type="button" class="alert-remove product-remove" aria-label="Quitar producto" title="Quitar"${ro}>×</button>
-        <div class="product-photos">${productPhotosHtml(p)}</div>
+      <div class="product-row${stockClass(p.stock)}${isOpen ? " is-open" : ""}" data-id="${escapeHtml(p.id || "")}">
+        <button type="button" class="product-thumb" aria-label="Fotos y detalles">${productThumbHtml(p)}</button>
+        <div class="product-main">
+          <input type="text" class="product-name" maxlength="120" placeholder="Nombre, ej: Tenis blancos" aria-label="Producto" value="${escapeHtml(p.name || "")}"${ro} />
+          <div class="product-meta">
+            <input type="text" class="product-price" inputmode="numeric" placeholder="Precio" aria-label="Precio" value="${p.price_cop != null ? "$" + formatThousands(p.price_cop) : ""}"${ro} />
+            <label class="product-stock-field"><span>Quedan</span><input type="number" class="product-stock" min="0" step="1" placeholder="sin contar" aria-label="Cuántos quedan" value="${p.stock ?? ""}"${ro} /></label>
+          </div>
+        </div>
+        <button type="button" class="product-toggle" aria-label="Fotos y detalles" aria-expanded="${isOpen ? "true" : "false"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <div class="product-more">
+          <label class="product-field"><span>Detalles</span><input type="text" class="product-details" maxlength="500" placeholder="Tallas, colores, sabores…" aria-label="Detalles" value="${escapeHtml(p.details || "")}"${ro} /></label>
+          <div class="product-field"><span>Fotos <small>La IA las manda cuando piden verlo</small></span><div class="product-photos">${productPhotosHtml(p)}</div></div>
+          <button type="button" class="link-btn product-remove"${ro}>Quitar producto</button>
+        </div>
       </div>`;
+  }
+
+  function toggleProductRow(row, force) {
+    const open = row.classList.toggle("is-open", force);
+    row.querySelector(".product-toggle").setAttribute("aria-expanded", String(open));
+    if (row.dataset.id) openProducts[open ? "add" : "delete"](row.dataset.id);
   }
 
   const MAX_PRODUCT_PHOTOS = 4;
@@ -4897,6 +5082,7 @@
 
   function renderProductPhotos(row, product, newName = "") {
     row.querySelector(".product-photos").innerHTML = productPhotosHtml(product, newName);
+    row.querySelector(".product-thumb").innerHTML = productThumbHtml(product);
   }
 
   function openPhotoViewer(src, caption) {
@@ -4986,10 +5172,7 @@
 
   function syncProductsChrome() {
     const rows = document.querySelectorAll("#products-list .product-row").length;
-    $("products-head").classList.toggle("hidden", !rows);
     $("products-empty").classList.toggle("hidden", rows > 0);
-    $("products-add-btn").classList.toggle("primary", rows === 0);
-    $("products-add-btn").classList.toggle("ghost", rows > 0);
     renderProductsSummary();
   }
 
@@ -5002,7 +5185,7 @@
     const unpriced = items.filter((p) => !p.price_cop).length;
     const parts = [`${items.length} producto${items.length === 1 ? "" : "s"}`];
     if (unpriced) {
-      parts.push(`<span class="products-out">${unpriced} sin precio: la IA no puede cotizar${unpriced === 1 ? "lo" : "los"}</span>`);
+      parts.push(`<span class="products-out" title="La IA no puede cotizar${unpriced === 1 ? "lo" : "los"}">${unpriced} sin precio</span>`);
     }
     if (out) parts.push(`<span class="products-out">${out} agotado${out === 1 ? "" : "s"}</span>`);
     if (low) parts.push(`<span class="products-low">${low} con pocas unidades</span>`);
@@ -5023,8 +5206,9 @@
 
   function addProductRow() {
     const list = $("products-list");
-    list.insertAdjacentHTML("beforeend", productRow({}));
+    list.insertAdjacentHTML("beforeend", productRow({}, { open: true }));
     syncProductsChrome();
+    list.lastElementChild.scrollIntoView({ block: "nearest" });
     list.lastElementChild.querySelector(".product-name").focus();
   }
 
@@ -5054,6 +5238,7 @@
         body: JSON.stringify(body),
       });
       row.dataset.id = saved.id;
+      if (row.classList.contains("is-open")) openProducts.add(saved.id);
       upsertProduct(saved);
       row.classList.toggle("is-out", saved.stock === 0);
       row.classList.toggle("is-low", stockClass(saved.stock) === " is-low");
@@ -5118,13 +5303,12 @@
   async function saveAiSetup() {
     if (!state.canManageGlobal) return;
     const payload = readBizForm();
-    if (!payload.business_name && state.aiProfile?.business_name_is_placeholder) {
-      setBizSaveStatus("Escribe el nombre de tu negocio (paso 1)");
+    if (!payload.business_name && state.aiProfile?.business_name_is_placeholder && $("ai-setup-panel").dataset.pane === "negocio") {
+      setBizSaveStatus("Escribe el nombre de tu negocio");
       $("biz-name").focus();
       return;
     }
-    const btn = $("biz-save-btn");
-    btn.disabled = true;
+    document.querySelectorAll(".ai-pane-save").forEach((b) => { b.disabled = true; });
     setBizSaveStatus("Guardando…");
     try {
       const profile = await api("/outbound/business-profile", {
@@ -5193,6 +5377,7 @@
     }
     if (btn) btn.classList.toggle("hidden", !state.canManageGlobal);
     renderProductsImport();
+    renderAiList();
   }
 
   function renderQuickShortcuts() {
@@ -6757,6 +6942,23 @@
   });
   $("staff-modal-backdrop")?.addEventListener("click", hideStaffModal);
   $("biz-save-btn").addEventListener("click", () => saveAiSetup());
+  ["appointments-panel", "orders-panel"].forEach((id) => {
+    $(id).addEventListener("click", (e) => {
+      const open = e.target.closest("[data-ai-open]");
+      if (open) {
+        if (id === "orders-panel") ordersAutoPane = false;
+        return openSplitPane($(id), open.dataset.aiOpen);
+      }
+      if (e.target.closest(".ai-pane-back")) $(id).classList.remove("is-open");
+    });
+  });
+  $("ai-setup-panel").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-ai-open]");
+    if (row) return openAiPane(row.dataset.aiOpen);
+    if (e.target.closest(".ai-pane-back")) return closeAiPane();
+    if (e.target.closest(".ai-pane-save")) return saveAiSetup();
+    if (e.target.closest("[data-go-inventory]")) switchPanelMode("inventory");
+  });
   $("ai-ready-list").addEventListener("click", (e) => {
     if (e.target.closest(".ai-ready-import")) {
       if (state.canManageGlobal) importCatalogFromReadiness();
@@ -6821,6 +7023,11 @@
     queueProductSave(row);
   });
   $("products-list")?.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".product-toggle, .product-thumb");
+    if (toggle) {
+      toggleProductRow(toggle.closest(".product-row"));
+      return;
+    }
     const view = e.target.closest(".product-photo-view");
     if (view) {
       const row = view.closest(".product-row");
