@@ -3169,11 +3169,15 @@
     $("reply-bar")?.classList.add("hidden");
   }
 
+  let bubbleCache = { convId: null, map: new Map() };
+
   function renderMessages({ toBottom = false } = {}) {
     const sameChat = renderedMsgs.convId === state.activeId && renderedMsgs.ids.size > 0;
     const stick = toBottom || !sameChat || pinnedToBottom;
     const prevTop = messagesEl.scrollTop;
-    messagesEl.innerHTML = "";
+    const oldCache = bubbleCache.convId === state.activeId ? bubbleCache.map : new Map();
+    const newCache = new Map();
+    const nodes = [];
     const ids = new Set();
     const bodies = new Set();
     const arrived = [];
@@ -3191,10 +3195,16 @@
     for (const m of list) {
       const day = m.created_at ? new Date(m.created_at).toDateString() : prevDay;
       if (day && day !== prevDay) {
-        const sep = document.createElement("div");
-        sep.className = "day-sep";
-        sep.innerHTML = `<span>${escapeHtml(dayLabel(m.created_at))}</span>`;
-        messagesEl.appendChild(sep);
+        const label = dayLabel(m.created_at);
+        const sepKey = `sep|${day}`;
+        let sep = oldCache.get(sepKey)?.sig === label ? oldCache.get(sepKey).el : null;
+        if (!sep) {
+          sep = document.createElement("div");
+          sep.className = "day-sep";
+          sep.innerHTML = `<span>${escapeHtml(label)}</span>`;
+        }
+        newCache.set(sepKey, { sig: label, el: sep });
+        nodes.push(sep);
         prevDir = "";
       }
       prevDay = day;
@@ -3203,6 +3213,20 @@
       const isNew = sameChat && !renderedMsgs.ids.has(idKey) && !renderedMsgs.bodies.has(bodyKey);
       ids.add(idKey);
       bodies.add(bodyKey);
+      const dir = m.direction === "in" ? "in" : "out";
+      const orig = m.quoted_evolution_id ? byWid.get(waStem(m.quoted_evolution_id)) : null;
+      const sig = JSON.stringify([
+        m.direction, m.source, m.body, m.transcript, m.status, m.created_at, !!m.pending,
+        m.evolution_message_id, m.quoted_evolution_id, m.quoted_body, orig?.direction, orig?.body, canReplyTo(m),
+      ]);
+      const cached = oldCache.get(idKey);
+      if (cached && cached.sig === sig) {
+        cached.el.classList.toggle("tail", dir !== prevDir);
+        prevDir = dir;
+        newCache.set(idKey, cached);
+        nodes.push(cached.el);
+        continue;
+      }
       const ticks = m.direction === "out" ? outboundTicks(m.status) : "";
       const byAi = m.direction === "out" && (m.source === "ai" || m.source === "bot");
       const timeHtml = `<span class="time" title="${escapeHtml(formatTime(m.created_at))}">${byAi ? '<span class="msg-ai">IA</span>' : ""}${formatClock(m.created_at)}${ticks}</span>`;
@@ -3233,12 +3257,17 @@
         div.dataset.pending = m.id;
         if (m.status === "failed") div.title = "No se envió. Toca para reintentar.";
       }
-      const dir = m.direction === "in" ? "in" : "out";
       if (dir !== prevDir) div.classList.add("tail");
       prevDir = dir;
-      messagesEl.appendChild(div);
+      newCache.set(idKey, { sig, el: div });
+      nodes.push(div);
       if (isNew) arrived.push({ div, inbound: m.direction === "in" });
     }
+    nodes.forEach((node, i) => {
+      if (messagesEl.children[i] !== node) messagesEl.insertBefore(node, messagesEl.children[i] || null);
+    });
+    while (messagesEl.children.length > nodes.length) messagesEl.lastElementChild.remove();
+    bubbleCache = { convId: state.activeId, map: newCache };
     renderedMsgs = { convId: state.activeId, ids, bodies };
     if (playingVoice && !messagesEl.contains(playingVoice.playerEl)) playingVoice.pause();
     pinnedToBottom = stick;

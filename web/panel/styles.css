@@ -6676,3 +6676,19 @@ body.lightbox-open { overflow: hidden; }
   .composer textarea#message-input,
   .composer-field textarea#message-input { font-size: 16px; }
 }
+
+/* Fondo del chat en su propia capa fija: no se repinta al escribir, enviar ni desplazar */
+#active-chat { position: relative; isolation: isolate; background-color: var(--chat-bg); }
+#active-chat::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--chat-doodle) 0 0 / 320px 320px repeat;
+  transform: translateZ(0);
+  pointer-events: none;
+}
+.messages { background: none; }
+@media (max-width: 768px) {
+  #active-chat::before { background-size: 230px 230px; }
+}
