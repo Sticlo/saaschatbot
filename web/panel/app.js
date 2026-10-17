@@ -366,6 +366,7 @@
   let loginEmail = "";
   const conversationList = $("conversation-list");
   const messagesEl = $("messages");
+  let pinnedToBottom = true;
   const emptyChat = $("empty-chat");
   const activeChat = $("active-chat");
 
@@ -2992,6 +2993,7 @@
         const el = _renderMediaElement(media_type || type, base64, mimetype);
         if (el.classList.contains("voice-player")) voicePlayers.set(m.id, el);
         placeholder.replaceWith(el);
+        keepPinned();
       })
       .catch(() => {
         mediaCache.set(m.id, { ok: false });
@@ -3090,9 +3092,15 @@
     });
   }
 
-  function renderMessages() {
-    messagesEl.innerHTML = "";
+  function keepPinned() {
+    if (pinnedToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function renderMessages({ toBottom = false } = {}) {
     const sameChat = renderedMsgs.convId === state.activeId && renderedMsgs.ids.size > 0;
+    const stick = toBottom || !sameChat || pinnedToBottom;
+    const prevTop = messagesEl.scrollTop;
+    messagesEl.innerHTML = "";
     const ids = new Set();
     const bodies = new Set();
     const arrived = [];
@@ -3149,7 +3157,8 @@
     }
     renderedMsgs = { convId: state.activeId, ids, bodies };
     if (playingVoice && !messagesEl.contains(playingVoice.playerEl)) playingVoice.pause();
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    pinnedToBottom = stick;
+    messagesEl.scrollTop = stick ? messagesEl.scrollHeight : prevTop;
     if (arrived.length <= 4) {
       arrived.forEach(({ div, inbound }, i) =>
         animateIn(div, {
@@ -7094,7 +7103,7 @@
     };
     if (media) mediaCache.set(tmp.id, media);
     pendingOut.push(tmp);
-    if (conversationId === state.activeId) renderMessages();
+    if (conversationId === state.activeId) renderMessages({ toBottom: true });
     return tmp;
   }
 
@@ -7133,6 +7142,13 @@
       toast(`${err.message || "No se pudo enviar."} Toca el mensaje para reintentar.`, { tone: "error" });
     }
   }
+
+  messagesEl.addEventListener("scroll", () => {
+    pinnedToBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80;
+  }, { passive: true });
+  messagesEl.addEventListener("load", keepPinned, true);
+  messagesEl.addEventListener("loadedmetadata", keepPinned, true);
+  if ("ResizeObserver" in window) new ResizeObserver(keepPinned).observe(messagesEl);
 
   messagesEl.addEventListener("click", (e) => {
     const bubble = e.target.closest(".msg.is-failed");
