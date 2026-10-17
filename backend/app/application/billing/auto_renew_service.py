@@ -648,6 +648,40 @@ def _end_cancelled_periods(db: Session, now: datetime) -> int:
     return len(ending)
 
 
+def _release_whatsapp(db: Session, tenant: Tenant) -> bool:
+    from app.application.whatsapp.whatsapp_service import release_whatsapp_for_lapsed_trial
+
+    try:
+        released = release_whatsapp_for_lapsed_trial(db, tenant)
+        db.commit()
+        return released
+    except Exception:
+        db.rollback()
+        log.exception("No se pudo liberar el WhatsApp de la prueba vencida tenant=%s", tenant.id)
+        return False
+
+
+def _release_lapsed_trial_whatsapp(db: Session, now: datetime) -> int:
+    """Pruebas vencidas antes (o reconectadas por otra vía) que aún ocupan una conexión en el servidor."""
+    from app.domain.entities import WhatsAppSession
+    from app.domain.entities.enums import WhatsAppStatus
+
+    rows = (
+        db.query(Tenant)
+        .join(Subscription, Subscription.tenant_id == Tenant.id)
+        .join(WhatsAppSession, WhatsAppSession.tenant_id == Tenant.id)
+        .filter(
+            Subscription.status == SubscriptionStatus.PAST_DUE.value,
+            Subscription.current_period_end.is_(None),
+            Subscription.trial_ends_at.isnot(None),
+            Subscription.trial_ends_at <= now,
+            WhatsAppSession.status != WhatsAppStatus.DISCONNECTED.value,
+        )
+        .all()
+    )
+    return sum(1 for tenant in rows if _release_whatsapp(db, tenant))
+
+
 def _end_expired_trials(db: Session, now: datetime) -> int:
     expired_ids = [
         row.id
@@ -683,6 +717,7 @@ def _end_expired_trials(db: Session, now: datetime) -> int:
             message="Terminó la prueba gratis: la IA dejó de responder hasta que active el plan",
         )
         db.commit()
+        whatsapp_released = tenant is not None and _release_whatsapp(db, tenant)
         plan = subscription.plan
         _notify(
             db,
@@ -692,6 +727,11 @@ def _end_expired_trials(db: Session, now: datetime) -> int:
             paragraphs=[
                 "Tu asistente dejó de responder los chats de WhatsApp porque terminaron tus días de prueba.",
                 *_value_lines(db, subscription.tenant_id, now, period="Durante tu prueba"),
+                *(
+                    ["Desconectamos tu WhatsApp de Omitel. Cuando actives tu plan, lo vuelves a vincular en un minuto."]
+                    if whatsapp_released
+                    else []
+                ),
                 f"Activa el {plan.name} por {format_cop(plan.price_cop)} al mes y sigue vendiendo donde lo dejaste: "
                 "tus chats, atajos y configuración siguen guardados.",
             ],
@@ -705,6 +745,7 @@ def process_auto_renewals(db: Session, now: Optional[datetime] = None) -> dict[s
     now = now or datetime.now(timezone.utc)
     steps: list[tuple[str, Callable[[Session, datetime], int]]] = [
         ("trials_ended", _end_expired_trials),
+        ("trial_whatsapp_released", _release_lapsed_trial_whatsapp),
         ("ended", _end_cancelled_periods),
         ("reconciled", _reconcile_pending),
         ("reminded", _send_reminders),

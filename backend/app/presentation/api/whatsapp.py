@@ -23,6 +23,7 @@ from app.application.sync.sync_scheduler import (
     ensure_whatsapp_sync_after_connect,
     schedule_whatsapp_sync,
 )
+from app.application.billing.subscription_service import get_tenant_subscription, trial_has_expired
 from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_service import (
     EvolutionAPIError,
@@ -136,12 +137,21 @@ def connect_whatsapp(
         return _connect_whatsapp(request, current, db, pairing_phone=pairing_phone)
 
 
+def _require_active_trial_or_plan(db: Session, tenant: Tenant) -> None:
+    if trial_has_expired(get_tenant_subscription(db, tenant.id)):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Tu prueba gratis terminó. Activa tu plan para volver a conectar tu WhatsApp.",
+        )
+
+
 def _connect_whatsapp(
     request: Request, current, db: Session, *, pairing_phone: Optional[str] = None
 ) -> WhatsAppConnectResponse:
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    _require_active_trial_or_plan(db, tenant)
 
     try:
         session = start_connection(db, tenant, pairing_phone=pairing_phone)
@@ -189,6 +199,7 @@ def _reconnect_whatsapp(
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    _require_active_trial_or_plan(db, tenant)
 
     try:
         session = reconnect_session(db, tenant, pairing_phone=pairing_phone)

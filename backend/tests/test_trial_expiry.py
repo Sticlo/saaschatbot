@@ -136,6 +136,61 @@ def test_expired_trial_stops_ai_and_is_announced_once(client: TestClient, monkey
 
 
 @requires_db
+def test_expired_trial_frees_whatsapp_but_keeps_chats(client: TestClient, monkeypatch):
+    from app.application.billing import auto_renew_service
+    from app.application.whatsapp import whatsapp_service
+    from app.domain.entities import Conversation, Tenant, WhatsAppSession
+    from app.domain.entities.enums import WhatsAppStatus
+    from app.infrastructure.persistence.database import SessionLocal
+
+    sent: list[dict] = []
+    gateway: list[tuple[str, str]] = []
+    monkeypatch.setattr(auto_renew_service, "send_billing_email", lambda **kw: sent.append(kw))
+    monkeypatch.setattr(whatsapp_service, "gateway_logout_instance", lambda name: gateway.append(("logout", name)))
+    monkeypatch.setattr(whatsapp_service, "gateway_delete_instance", lambda name: gateway.append(("delete", name)))
+
+    account = _register(client)
+    tenant_id = uuid.UUID(account["tenant_id"])
+    instance = f"inst_{uuid.uuid4().hex[:8]}"
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, tenant_id)
+        tenant.whatsapp_status = WhatsAppStatus.CONNECTED.value
+        db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).delete()
+        db.add(WhatsAppSession(tenant_id=tenant_id, instance_name=instance, status="connected", phone_number="573000000000"))
+        db.add(Conversation(tenant_id=tenant_id, contact_phone="+573009998877", contact_name="Cliente"))
+        db.commit()
+
+    _expire_trial(account["tenant_id"])
+    with SessionLocal() as db:
+        auto_renew_service.process_auto_renewals(db)
+        auto_renew_service.process_auto_renewals(db)
+        session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).one()
+        assert session.status == WhatsAppStatus.DISCONNECTED.value and session.phone_number is None
+        assert db.get(Tenant, tenant_id).whatsapp_status == WhatsAppStatus.DISCONNECTED.value
+        assert db.query(Conversation).filter(Conversation.tenant_id == tenant_id).count() == 1, "los chats se conservan"
+
+    assert gateway == [("logout", instance), ("delete", instance)], "se libera una sola vez"
+    mine = [mail for mail in sent if mail["to_email"] == account["email"]]
+    assert len(mine) == 1 and any("Desconectamos tu WhatsApp" in p for p in mine[0]["paragraphs"])
+
+    for path in ("/api/v1/whatsapp/connect", "/api/v1/whatsapp/reconnect"):
+        res = client.post(path, headers=account["headers"])
+        assert res.status_code == 402, res.text
+        assert "Activa tu plan" in res.json()["detail"]
+
+    # Una prueba que venció antes de este cambio y sigue conectada también se libera, sin otro correo.
+    with SessionLocal() as db:
+        db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).update({WhatsAppSession.status: "connected"})
+        db.commit()
+        result = auto_renew_service.process_auto_renewals(db)
+        assert result["trial_whatsapp_released"] >= 1
+        session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant_id).one()
+        assert session.status == WhatsAppStatus.DISCONNECTED.value
+    assert gateway[-2:] == [("logout", instance), ("delete", instance)]
+    assert len([mail for mail in sent if mail["to_email"] == account["email"]]) == 1
+
+
+@requires_db
 def test_admin_can_extend_an_expired_trial(client: TestClient, monkeypatch):
     from app.application.billing import auto_renew_service
     from app.infrastructure.persistence.database import SessionLocal

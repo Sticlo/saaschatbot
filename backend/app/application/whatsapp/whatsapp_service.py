@@ -760,6 +760,17 @@ def _teardown_gateway_instance(session: WhatsAppSession) -> None:
             log.warning("WhatsApp delete instance failed for %s: %s", session.instance_name, exc)
 
 
+def release_whatsapp_for_lapsed_trial(db: Session, tenant: Tenant) -> bool:
+    """Prueba vencida sin pago: libera la conexión del servidor; chats, pedidos y configuración se conservan."""
+    session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant.id).first()
+    if session is None:
+        return False
+    release_whatsapp_link(tenant, session)
+    db.flush()
+    _teardown_gateway_instance(session)
+    return True
+
+
 def disconnect_session(db: Session, tenant: Tenant, session: WhatsAppSession) -> None:
     from app.application.conversations.whatsapp_conversation_service import (
         purge_ephemeral_whatsapp_data,
