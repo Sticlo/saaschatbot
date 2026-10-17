@@ -1765,11 +1765,12 @@
       };
     }
     const guideOnScreen = $("setup-guide").getClientRects().length > 0;
+    const steps = setupSteps();
+    const setupPending = !!steps && !steps.every((s) => s.done);
     const off = aiOffReason();
     // La guía ya explica que la IA se enciende al completar el negocio: repetirlo arriba es ruido.
-    if (off && !(guideOnScreen && off.readinessPause)) return off;
-    const steps = setupSteps();
-    if (!steps || steps.every((s) => s.done) || guideOnScreen) return null;
+    if (off && !(off.readinessPause && (guideOnScreen || setupPending))) return off;
+    if (!setupPending || guideOnScreen) return null;
     const done = steps.filter((s) => s.done).length;
     const next = steps.find((s) => !s.done);
     return {
@@ -1789,8 +1790,7 @@
     stripAction = info?.action?.run || null;
     renderPlanStatus();
     if (!info) return;
-    strip.dataset.tone = info.tone;
-    strip.querySelector(".status-strip-icon").innerHTML = info.icon;
+    strip.dataset.tone = info.tone;    strip.querySelector(".status-strip-icon").innerHTML = info.icon;
     strip.querySelector(".status-strip-title").textContent = info.title;
     strip.querySelector(".status-strip-text").textContent = info.text || "";
     const btn = strip.querySelector(".status-strip-btn");
@@ -4065,12 +4065,13 @@
       $("ai-ready-note").textContent = r.ready
         ? "Tiene lo que necesita para responder y cerrar sin dejar a nadie esperando. Si te preguntan algo nuevo, te lo anotamos abajo para que se lo enseñes."
         : state.tenant?.ai_autostart_pending
-          ? "Con estos datos tu IA responde y cierra la venta sin decir «te confirmo». Al completarlos, se enciende sola."
+          ? "Al completarlos, tu IA se enciende sola y empieza a vender."
           : "Con estos datos tu IA responde y cierra la venta sin decir «te confirmo». Complétalos para poder encenderla.";
+      const nextItem = r.items.find((i) => !i.done);
       $("ai-ready-list").innerHTML = r.items
         .map(
           (i) => `
-          <li class="ai-ready-item${i.done ? " is-done" : ""}">
+          <li class="ai-ready-item${i.done ? " is-done" : ""}${i === nextItem ? " is-next" : ""}">
             <span class="ai-ready-mark" aria-hidden="true">${i.done ? "✓" : ""}</span>
             <span class="ai-ready-text"><strong>${escapeHtml(i.label)}</strong>${i.done ? "" : `<span>${escapeHtml(i.hint)}</span>`}</span>
             ${i.done ? "" : i.action === "import-catalog"
@@ -4975,6 +4976,8 @@
     const rows = document.querySelectorAll("#products-list .product-row").length;
     $("products-head").classList.toggle("hidden", !rows);
     $("products-empty").classList.toggle("hidden", rows > 0);
+    $("products-add-btn").classList.toggle("primary", rows === 0);
+    $("products-add-btn").classList.toggle("ghost", rows > 0);
     renderProductsSummary();
   }
 
