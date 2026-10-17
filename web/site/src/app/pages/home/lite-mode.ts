@@ -29,6 +29,48 @@ export function isLiteGpu(): boolean {
   return false;
 }
 
+/**
+ * Corre `fn` cuando la página ya cargó y el navegador quedó libre: los efectos no compiten con
+ * el texto, los botones ni la hidratación. Devuelve una función para cancelarlo.
+ */
+export function whenPageIdle(fn: () => void, maxWaitMs = 2500): () => void {
+  let cancelled = false;
+  let idleId = 0;
+  let timer = 0;
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  const run = () => {
+    if (!cancelled) {
+      fn();
+    }
+  };
+  const schedule = () => {
+    if (cancelled) {
+      return;
+    }
+    if (w.requestIdleCallback) {
+      idleId = w.requestIdleCallback(run, { timeout: maxWaitMs });
+    } else {
+      timer = window.setTimeout(run, 300);
+    }
+  };
+  if (document.readyState === 'complete') {
+    schedule();
+  } else {
+    window.addEventListener('load', schedule, { once: true });
+  }
+  return () => {
+    cancelled = true;
+    window.removeEventListener('load', schedule);
+    if (idleId) {
+      w.cancelIdleCallback?.(idleId);
+    }
+    clearTimeout(timer);
+  };
+}
+
 export function markLiteGpu(): void {
   document.documentElement.classList.add(LITE_GPU_CLASS);
   try {

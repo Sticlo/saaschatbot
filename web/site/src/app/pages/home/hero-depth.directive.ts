@@ -258,6 +258,9 @@ export class HeroDepthDirective implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (!this.isBrowser) {
+      return;
+    }
     this.observer?.disconnect();
     this.resizeObserver?.disconnect();
     this.cleanups.forEach((fn) => fn());

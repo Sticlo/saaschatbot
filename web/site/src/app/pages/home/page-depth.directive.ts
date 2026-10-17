@@ -192,6 +192,9 @@ export class PageDepthDirective implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (!this.isBrowser) {
+      return;
+    }
     this.revealObserver?.disconnect();
     this.resizeObserver?.disconnect();
     this.cleanups.forEach((fn) => fn());

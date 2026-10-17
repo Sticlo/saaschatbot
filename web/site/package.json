@@ -4,7 +4,7 @@
   "scripts": {
     "ng": "ng",
     "start": "rm -rf .angular/cache && ng serve",
-    "build": "ng build",
+    "build": "ng build && node scripts/flatten-prerender.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

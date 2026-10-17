@@ -1,4 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
 import { ShellComponent } from '../../layout/shell/shell.component';
@@ -13,11 +14,15 @@ import { AuthService } from '../../core/services/auth.service';
 export class MagicVerifyComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthService);
+  private readonly platformId = inject(PLATFORM_ID);
 
   status: 'loading' | 'error' = 'loading';
   error = '';
 
   ngOnInit(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
     const token = this.route.snapshot.queryParamMap.get('token')?.trim();
     if (!token) {
       this.status = 'error';

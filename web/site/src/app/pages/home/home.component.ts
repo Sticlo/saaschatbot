@@ -98,6 +98,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly chatStorageKey = 'omitel.heroChatStatic';
   private readonly scenarioDurationMs = 9000;
+  private readonly firstHoldMs = 4500;
 
   private chatTimers: ReturnType<typeof setTimeout>[] = [];
   private scriptIndex = 0;
@@ -391,8 +392,10 @@ export class HomeComponent implements OnInit, OnDestroy {
   private chatPaused = false;
 
   ngOnInit(): void {
+    /* El HTML prerenderizado y el primer frame del navegador muestran la misma conversación completa:
+       al hidratar no se borra nada; la demo empieza a rotar después. */
+    this.showScenarioComplete(0);
     if (!isPlatformBrowser(this.platformId)) {
-      this.applyStaticMode(true);
       return;
     }
 
@@ -421,7 +424,7 @@ export class HomeComponent implements OnInit, OnDestroy {
     }
     if (this.liveChatPending) {
       this.liveChatPending = false;
-      this.startLiveChat();
+      this.startLiveChat(true);
       return;
     }
     if (this.chatPaused && !this.chatStatic) {
@@ -473,14 +476,29 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.scenarioIndex = 0;
   }
 
-  private startLiveChat(): void {
+  private startLiveChat(holdFirst = false): void {
     if (!isPlatformBrowser(this.platformId) || this.chatStatic) {
       return;
     }
 
     this.clearChatTimers();
     this.scenarioIndex = 0;
+    if (holdFirst) {
+      this.schedule(() => this.playScenario(1), this.firstHoldMs);
+      return;
+    }
     this.playScenario(this.scenarioIndex);
+  }
+
+  private showScenarioComplete(index: number): void {
+    this.scenarioIndex = index;
+    this.currentScenario = this.scenarios[index];
+    this.visibleMessages = [...this.currentScenario.messages];
+    this.showTyping = false;
+    this.scenarioTransition = false;
+    this.showAlert = true;
+    this.resetInsights();
+    this.showAllInsights();
   }
 
   private playScenario(index: number): void {

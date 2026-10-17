@@ -15,7 +15,7 @@ import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectCom
 import type { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 import { AtmosphereService } from './atmosphere.service';
-import { isLiteDevice, markLiteGpu } from './lite-mode';
+import { isLiteDevice, markLiteGpu, whenPageIdle } from './lite-mode';
 
 const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 const BLOOM_QUERY = '(min-width: 901px)';
@@ -255,8 +255,14 @@ interface Scene3D {
         display: block;
         width: 100%;
         height: 100%;
+        opacity: 0;
+        transition: opacity 900ms cubic-bezier(0.23, 1, 0.32, 1);
       }
-      :host(.is-lite) {
+      :host(.is-ready) .data-fabric-canvas {
+        opacity: 1;
+      }
+      /* Mientras el lienzo arranca (o si nunca lo hace) se ve el mismo fondo del modo liviano. */
+      :host {
         background:
           radial-gradient(ellipse 90% 55% at 85% 8%, rgba(255, 150, 90, 0.16) 0%, transparent 60%),
           radial-gradient(ellipse 80% 50% at 0% 70%, rgba(255, 196, 150, 0.12) 0%, transparent 60%),
@@ -293,6 +299,7 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
   private lastTick = 0;
   private frameIntervals: number[] = [];
   private qualityReduced = false;
+  private ready = false;
 
   ngAfterViewInit(): void {
     if (!this.isBrowser) {
@@ -308,17 +315,20 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
       return;
     }
     this.zone.runOutsideAngular(() => {
-      void this.boot(canvas);
+      this.cleanups.push(whenPageIdle(() => void this.boot(canvas)));
     });
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    if (!this.isBrowser) {
+      return;
+    }
     if (this.raf) {
       cancelAnimationFrame(this.raf);
       this.raf = 0;
     }
-    window.clearTimeout(this.resizeTimer);
+    clearTimeout(this.resizeTimer);
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
     this.disposeScene();
@@ -633,6 +643,10 @@ export class DataFabricComponent implements AfterViewInit, OnDestroy {
     s.camera.lookAt(0, 0, -6);
 
     s.composer.render();
+    if (!this.ready) {
+      this.ready = true;
+      this.host.nativeElement.classList.add('is-ready');
+    }
     this.raf = requestAnimationFrame(this.frame);
   };
 }

@@ -3,7 +3,7 @@ import { AfterViewInit, Directive, ElementRef, NgZone, OnDestroy, PLATFORM_ID, i
 import type Lenis from 'lenis';
 
 import { ATMOSPHERES, AtmosphereService, AtmosphereState, presetToState } from './atmosphere.service';
-import { isLiteDevice } from './lite-mode';
+import { isLiteDevice, whenPageIdle } from './lite-mode';
 
 type Gsap = typeof import('gsap').gsap;
 type ScrollTriggerStatic = typeof import('gsap/ScrollTrigger').ScrollTrigger;
@@ -49,13 +49,16 @@ export class ScrollExperienceDirective implements AfterViewInit, OnDestroy {
       return;
     }
     this.zone.runOutsideAngular(() => {
-      void this.boot();
+      this.cleanups.push(whenPageIdle(() => void this.boot()));
     });
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
-    window.clearTimeout(this.refreshTimer);
+    if (!this.isBrowser) {
+      return;
+    }
+    clearTimeout(this.refreshTimer);
     this.resizeObserver?.disconnect();
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
