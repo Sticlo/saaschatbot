@@ -123,6 +123,45 @@
 
 .admin-kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
 .admin-kpi span { color: var(--muted); font-size: 12px; }
+.admin-kpi small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.admin-kpi em { font-style: normal; color: var(--warning); font-weight: 600; }
+.admin-kpi-wide { grid-column: span 2; }
+.admin-kpi-attention { border-color: var(--accent); }
+
+.admin-attention-cell .badge { margin: 0 2px 4px 0; }
+
+.admin-attention {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(249, 171, 0, 0.45);
+  background: rgba(249, 171, 0, 0.06);
+  border-radius: 12px;
+}
+.admin-attention.is-ok { border-color: var(--panel-card-border); background: var(--panel-card-bg); }
+.admin-attention-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.admin-attention-head .admin-badges { margin: 0; }
+.admin-attention textarea { min-height: 84px; margin-bottom: 8px; }
+.admin-contact-line { margin: 0; font-size: 12px; }
+
+.admin-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.admin-steps li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; color: var(--muted); }
+.admin-steps li.done { color: var(--text); }
+.admin-steps .dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+.admin-steps li.done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.admin-steps time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.admin-missing { margin: 8px 0 0; font-size: 12px; }
+
+.admin-subhead { margin: 14px 0 4px; font-size: 13px; font-weight: 600; }
+.admin-history-compact li { padding: 5px 0; }
 
 .admin-table-wrap { flex: 1; overflow: auto; padding: 0 16px 16px; }
 

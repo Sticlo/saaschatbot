@@ -89,16 +89,25 @@ def try_reconnect(db: Session, tenant: Tenant, session: WhatsAppSession) -> bool
 
 
 def _sweep_once() -> None:
+    from app.application.whatsapp.whatsapp_health_service import (
+        DOWN_STATUSES,
+        detect_silent_drops,
+        notify_owner_if_still_down,
+    )
+
     db = SessionLocal()
     try:
+        try:
+            detect_silent_drops(db)
+        except Exception:
+            db.rollback()
+            log.exception("Error revisando caídas silenciosas de WhatsApp")
         rows = (
             db.query(Tenant, WhatsAppSession)
             .join(WhatsAppSession, WhatsAppSession.tenant_id == Tenant.id)
             .filter(
                 Tenant.is_active.is_(True),
-                Tenant.whatsapp_status.in_(
-                    [WhatsAppStatus.DISCONNECTED.value, WhatsAppStatus.CONNECTING.value]
-                ),
+                Tenant.whatsapp_status.in_(DOWN_STATUSES),
                 WhatsAppSession.active_connection_id.isnot(None),
                 WhatsAppSession.bound_owner_jid.isnot(None),
             )
@@ -106,7 +115,12 @@ def _sweep_once() -> None:
         )
         for tenant, session in rows:
             try:
-                try_reconnect(db, tenant, session)
+                if tenant.whatsapp_status in (
+                    WhatsAppStatus.DISCONNECTED.value,
+                    WhatsAppStatus.CONNECTING.value,
+                ) and try_reconnect(db, tenant, session):
+                    continue
+                notify_owner_if_still_down(db, tenant)
             except Exception:
                 db.rollback()
                 log.exception("Error reconectando WhatsApp tenant=%s", tenant.id)

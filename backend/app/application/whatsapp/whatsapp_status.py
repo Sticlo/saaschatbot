@@ -8,9 +8,55 @@ from app.domain.entities.enums import WhatsAppStatus
 
 log = logging.getLogger(__name__)
 
-# Códigos/statusReason comunes en Baileys/Evolution que indican restricción
-_BANNED_HINTS = ("ban", "blocked", "forbidden", "logout")
+# Códigos/statusReason comunes en Baileys/Evolution que indican restricción.
+# «logout» no va aquí: desvincular desde el celular es una desconexión normal, no un bloqueo.
+_BANNED_HINTS = ("ban", "blocked", "forbidden")
 _RESTRICTED_HINTS = ("restrict", "limit", "429", "503")
+
+
+# Códigos de desconexión de Baileys: separan un bloqueo real de una caída o una desvinculación.
+DISCONNECT_REASONS = {
+    "banned": "WhatsApp bloqueó o restringió el número",
+    "device_removed": "WhatsApp quitó el dispositivo vinculado (o lo desvincularon desde el celular)",
+    "replaced": "La sesión se abrió en otro lado",
+    "network": "Caída de conexión (suele recuperarse sola)",
+    "silent": "Se cayó sin avisar (lo detectó la revisión periódica)",
+    "unknown": "Motivo desconocido",
+}
+_CODE_REASONS = {403: "banned", 402: "banned", 401: "device_removed", 411: "device_removed", 440: "replaced"}
+_TRANSIENT_CODES = {408, 428, 500, 503, 515}
+
+
+def _disconnect_code(data: dict) -> Optional[int]:
+    candidates = [data.get("statusReason"), data.get("statusCode")]
+    last = data.get("lastDisconnect")
+    if isinstance(last, dict):
+        error = last.get("error")
+        if isinstance(error, dict):
+            output = error.get("output")
+            candidates.append(output.get("statusCode") if isinstance(output, dict) else None)
+    for value in candidates:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def classify_disconnect(data: Optional[dict]) -> Tuple[str, Optional[int]]:
+    """(motivo, código) de un `connection.update` que cerró la sesión."""
+    data = data or {}
+    code = _disconnect_code(data)
+    if code in _CODE_REASONS:
+        return _CODE_REASONS[code], code
+    if code in _TRANSIENT_CODES:
+        return "network", code
+    raw = str(data).lower()
+    if "device_removed" in raw:
+        return "device_removed", code
+    if "forbidden" in raw or "banned" in raw:
+        return "banned", code
+    return "unknown", code
 
 
 def resolve_whatsapp_status(state: str, data: Optional[dict] = None) -> str:
@@ -25,6 +71,8 @@ def resolve_whatsapp_status(state: str, data: Optional[dict] = None) -> str:
     ).lower()
 
     combined = f"{normalized} {reason_raw}"
+    if normalized not in {"open", "connected"} and _disconnect_code(data) == 403:
+        return WhatsAppStatus.BANNED.value
     if any(h in combined for h in _BANNED_HINTS):
         return WhatsAppStatus.BANNED.value
     if any(h in combined for h in _RESTRICTED_HINTS):
@@ -52,6 +100,9 @@ def apply_session_status(
     now = datetime.now(timezone.utc)
 
     if mapped_status == WhatsAppStatus.CONNECTED.value:
+        from app.application.whatsapp.whatsapp_health_service import clear_down_mark
+
+        clear_down_mark(tenant.id)
         session.last_connected_at = now
         session.qr_base64 = None
         if owner_jid:

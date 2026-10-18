@@ -9,7 +9,8 @@
     tenants: [],
     accounts: [],
     plans: [],
-    filter: "all",
+    overview: null,
+    filter: "attention",
     selectedId: null,
     detail: null,
     historyKind: "all",
@@ -88,8 +89,36 @@
     magic_link: "Enlace al correo",
   };
 
+  const PRIORITY_TONES = { 1: "bad", 2: "warn", 3: "" };
+
+  const DISCONNECT_LABELS = {
+    banned: "bloqueos",
+    device_removed: "rechazos del vínculo",
+    replaced: "sesión abierta en otro lado",
+    network: "caídas de red",
+    silent: "caídas sin aviso",
+    unknown: "sin motivo",
+  };
+
+  // Mensaje sugerido para escribirle al dueño según lo más urgente; tú lo envías a mano.
+  const OUTREACH = {
+    wa_banned: "vi que WhatsApp restringió el número de {biz}. Te escribo para ayudarte a revisarlo y cuidar el número. ¿Tienes 5 minutos?",
+    wa_rejected: "vi que WhatsApp no dejó completar la vinculación de {biz}. Ya lo estamos revisando. ¿Te queda bien que lo intentemos juntos?",
+    wa_down: "vi que el WhatsApp de {biz} se desconectó de Omitel y la IA no está respondiendo. Para volver a conectarlo entra a app.omitel.net, toca Conectar y escanea el código. ¿Te ayudo?",
+    payment_due: "tu plan de Omitel para {biz} quedó con un pago pendiente. Si quieres lo revisamos juntos.",
+    trial_ending: "tu prueba de Omitel termina pronto. ¿Cómo te ha ido con {biz}? Si quieres seguir, activas el plan desde el panel en «Plan». Cualquier duda me dices.",
+    not_connected: "vi que creaste la cuenta de {biz} pero aún no conectas tu WhatsApp. Es un minuto: entra a app.omitel.net y escanea el código. ¿Te acompaño?",
+    ai_not_ready: "a la IA de {biz} le faltan algunos datos (precios, horarios, envíos) para responder mejor. ¿Lo completamos juntos en 10 minutos?",
+    ai_failures: "vimos algunas fallas en las respuestas de la IA de {biz} y ya las estamos revisando. ¿Notaste algo raro con tus clientes?",
+    ai_off: "vi que apagaste la IA en {biz}. ¿Pasó algo que podamos mejorar?",
+    quiet: "¿cómo va todo con Omitel en {biz}? Vi pocos chats estos días. ¿Te ayudo a sacarle más provecho?",
+    trial_lapsed: "tu prueba de Omitel terminó. Tus chats y tu configuración siguen guardados: si quieres continuar, activas el plan y vuelves a conectar en un minuto. ¿Qué te faltó para decidirte?",
+    default: "¿cómo te ha ido con Omitel en {biz}? Cualquier cosa que necesites me dices.",
+  };
+
   const FILTERS = {
     tenants: [
+      ["attention", "Para atender"],
       ["all", "Todas"],
       ["pending", "Sin activar"],
       ["problems", "Con problemas"],
@@ -109,7 +138,7 @@
   };
 
   const HEADS = {
-    tenants: ["Empresa", "Estado", "WhatsApp", "Plan", "IA hoy", "Chats", "Problemas", "Última actividad"],
+    tenants: ["Empresa", "Atención", "Estado", "WhatsApp", "Plan", "IA hoy", "Chats", "Última actividad"],
     accounts: ["Correo", "Empresa", "Cómo entra", "Rol", "Estado de la empresa", "Registro", "Último ingreso"],
   };
 
@@ -141,6 +170,40 @@
     if (hours < 24) return `hace ${hours} h`;
     const days = Math.round(hours / 24);
     return days < 60 ? `hace ${days} d` : fmtDate(iso);
+  }
+
+  function until(iso) {
+    if (!iso) return "";
+    const hours = Math.round((new Date(iso).getTime() - Date.now()) / 3600000);
+    if (hours <= 0) return "hoy";
+    return hours < 24 ? `en ${hours} h` : `en ${Math.round(hours / 24)} d`;
+  }
+
+  function money(n) {
+    return `$${Number(n || 0).toLocaleString("es-CO")}`;
+  }
+
+  function pct(part, total) {
+    return total ? `${Math.round((part / total) * 100)}%` : "—";
+  }
+
+  function reasonText(r) {
+    if (r.key === "trial_ending") return `Prueba termina ${until(r.at)}`;
+    if (r.key === "ai_not_ready" && r.detail) return `IA sin configurar (${r.detail})`;
+    if (r.key === "ai_failures" && r.detail) return `${r.detail} fallas de IA (7 d)`;
+    if ((r.key === "wa_down" || r.key === "quiet" || r.key === "trial_lapsed") && r.at) return `${r.label} · ${ago(r.at)}`;
+    return r.label;
+  }
+
+  function reasonBadges(reasons, max) {
+    const list = reasons || [];
+    const shown = list.slice(0, max ?? list.length).map((r) => badge(reasonText(r), PRIORITY_TONES[r.priority]));
+    if (max && list.length > max) shown.push(`<span class="admin-muted">+${list.length - max}</span>`);
+    return shown.join(" ");
+  }
+
+  function topPriority(t) {
+    return (t.attention && t.attention[0]?.priority) || 9;
   }
 
   function limitText(value) {
@@ -181,6 +244,7 @@
   function matchesTenantFilter(t) {
     const sub = t.subscription || {};
     switch (state.filter) {
+      case "attention": return (t.attention || []).length > 0;
       case "pending": return t.activation === "pending";
       case "problems": return t.problems_7d > 0 || (t.whatsapp_status !== "connected" && t.conversations > 0);
       case "whatsapp": return t.whatsapp_status !== "connected";
@@ -213,16 +277,42 @@
       : "Buscar correo, nombre o empresa…";
   }
 
+  function renderOverview() {
+    const o = state.overview;
+    if (!o) return "";
+    const f = o.funnel;
+    const f30 = o.funnel_30d;
+    const wa = o.whatsapp;
+    const lost = wa.disconnects_30d || {};
+    const lostText = Object.entries(lost)
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, n]) => `${n} ${DISCONNECT_LABELS[reason] || reason}`)
+      .join(" · ") || "sin desconexiones";
+    const trend = o.signups_7d - o.signups_prev_7d;
+    return `
+      <div class="admin-kpi admin-kpi-wide"><b>${f.registered} → ${f.connected} → ${f.paying}</b>
+        <span>Registradas → conectaron (${pct(f.connected, f.registered)}) → pagan (${pct(f.paying, f.registered)})</span>
+        <small>Últimos 30 días: ${f30.registered} → ${f30.connected} → ${f30.paying}</small></div>
+      <div class="admin-kpi"><b>${money(o.mrr_cop)}</b><span>Ingreso mensual</span>
+        <small>${o.courtesy_accounts} cortesías sin cobro</small></div>
+      <div class="admin-kpi"><b>${o.trials_active}</b><span>En prueba</span>
+        <small>${o.trials_ending_48h ? `<em>${o.trials_ending_48h} terminan en 48 h</em>` : "ninguna termina en 48 h"}</small></div>
+      <div class="admin-kpi"><b>${o.signups_7d}</b><span>Registros esta semana</span>
+        <small>${trend === 0 ? "igual que la anterior" : `${trend > 0 ? "+" : ""}${trend} vs la anterior`}</small></div>
+      <div class="admin-kpi admin-kpi-wide"><b>${wa.connected_now} / ${wa.ever_connected}</b>
+        <span>WhatsApp conectados ahora · tasa de bloqueo ${(wa.ban_rate * 100).toFixed(1)}%${wa.banned_now ? ` · <em>${wa.banned_now} bloqueados</em>` : ""}</span>
+        <small>30 días: ${esc(lostText)}</small></div>`;
+  }
+
   function renderKpis() {
     let cards;
     if (state.tab === "tenants") {
       const all = state.tenants;
-      cards = [
-        [all.length, "Empresas"],
-        [all.filter((t) => t.activation === "pending").length, "Sin activar (nunca conectaron WhatsApp)"],
-        [all.filter((t) => t.activation === "paying").length, "Pagando"],
-        [all.filter((t) => t.problems_7d > 0).length, "Con problemas (7 días)"],
-      ];
+      const urgent = all.filter((t) => topPriority(t) === 1).length;
+      const toAttend = all.filter((t) => (t.attention || []).length).length;
+      $("admin-kpis").innerHTML = renderOverview()
+        + `<div class="admin-kpi admin-kpi-attention"><b>${toAttend}</b><span>Para atender hoy${urgent ? ` · <em>${urgent} urgentes</em>` : ""}</span></div>`;
+      return;
     } else {
       const all = state.accounts;
       cards = [
@@ -239,6 +329,7 @@
   function renderRows() {
     if (state.tab === "accounts") return renderAccountRows();
     const rows = state.tenants.filter(matchesTenantFilter);
+    if (state.filter === "attention") rows.sort((a, b) => topPriority(a) - topPriority(b));
     $("admin-empty").classList.toggle("hidden", rows.length > 0);
     $("admin-rows").innerHTML = rows.map((t) => {
       const [actText, actTone] = ACTIVATION_LABELS[t.activation] || [t.activation, ""];
@@ -252,13 +343,12 @@
         <tr data-id="${esc(t.id)}" class="${t.id === state.selectedId ? "selected" : ""}">
           <td><b>${esc(t.business_name)}</b> ${extra.join(" ")}
             <span class="sub">${esc(t.owner_email || t.slug)}</span></td>
+          <td class="admin-attention-cell">${(t.attention || []).length ? reasonBadges(t.attention, 2) : '<span class="admin-muted">Todo bien</span>'}</td>
           <td>${badge(actText, actTone)}</td>
           <td>${badge(waText, waTone)}</td>
           <td>${badge(subText, subTone)}<span class="sub">${esc(sub.plan_name || "")}</span></td>
           <td>${t.ai_replies_today}</td>
           <td>${t.conversations}<span class="sub">${t.interested} interesados</span></td>
-          <td>${t.problems_7d ? badge(String(t.problems_7d), "bad") : '<span class="admin-muted">0</span>'}
-            ${t.last_problem_at ? `<span class="sub">${esc(ago(t.last_problem_at))}</span>` : ""}</td>
           <td>${esc(ago(t.last_activity_at))}</td>
         </tr>`;
     }).join("");
@@ -287,8 +377,14 @@
     const q = $("admin-search").value.trim();
     const qs = q ? `?q=${encodeURIComponent(q)}` : "";
     try {
-      if (state.tab === "tenants") state.tenants = await api(`/tenants${qs}`);
-      else state.accounts = await api(`/accounts${qs}`);
+      if (state.tab === "tenants") {
+        const [tenants, overview] = await Promise.all([
+          api(`/tenants${qs}`),
+          api("/overview").catch(() => state.overview),
+        ]);
+        state.tenants = tenants;
+        state.overview = overview;
+      } else state.accounts = await api(`/accounts${qs}`);
       renderKpis();
       renderRows();
     } catch (err) {
@@ -299,7 +395,7 @@
   function switchTab(tab) {
     if (tab === state.tab) return;
     state.tab = tab;
-    state.filter = "all";
+    state.filter = tab === "tenants" ? "attention" : "all";
     renderListChrome();
     renderKpis();
     renderRows();
@@ -369,6 +465,15 @@
         ${d.alert_phone_set ? "" : badge("Sin teléfono de alertas", "warn")}
       </div>
 
+      ${renderAttentionBox(d)}
+
+      <h3>Camino a pagar</h3>
+      <ol class="admin-steps">${(d.activation_steps || []).map((s) => `
+        <li class="${s.done ? "done" : ""}"><span class="dot" aria-hidden="true">${s.done ? "✓" : ""}</span>
+          <span>${esc(s.label)}</span>${s.at ? `<time>${esc(fmtDate(s.at))}</time>` : ""}</li>`).join("")}
+      </ol>
+      ${renderReadiness(d.readiness)}
+
       <h3>Cómo va</h3>
       <div class="admin-grid">
         <div class="admin-card"><span>WhatsApp</span><b>${esc(d.whatsapp.phone_number || waText)}</b>
@@ -382,6 +487,7 @@
         <div class="admin-card"><span>Chats</span><b>${d.stats.conversations} · ${d.stats.interested} interesados</b>
           <small>${d.stats.new_conversations_7d} nuevos en 7 días · último ${esc(ago(d.stats.last_activity_at))}</small></div>
       </div>
+      ${renderDisconnects(d.whatsapp_disconnects_30d)}
 
       <h3>Plan y cortesías</h3>
       <div class="admin-row">
@@ -442,6 +548,68 @@
       </div>
     `;
     renderHistory();
+  }
+
+  function outreachMessage(d) {
+    const top = (d.attention || [])[0];
+    const first = (d.contact?.name || "").trim().split(/\s+/)[0];
+    const body = (OUTREACH[top?.key] || OUTREACH.default).replace("{biz}", d.business_name);
+    return `Hola${first ? ` ${first}` : ""}, soy Juan de Omitel. ${body.charAt(0).toUpperCase()}${body.slice(1)}`;
+  }
+
+  function renderAttentionBox(d) {
+    const c = d.contact || {};
+    const digits = String(c.phone || "").replace(/\D/g, "");
+    const phoneNote = c.phone_source === "whatsapp" ? "número del negocio conectado" : "teléfono de alertas";
+    return `
+      <div class="admin-attention ${(d.attention || []).length ? "" : "is-ok"}">
+        <div class="admin-attention-head">
+          <b>${(d.attention || []).length ? "Para atender" : "Todo en orden"}</b>
+          <div class="admin-badges">${reasonBadges(d.attention)}</div>
+        </div>
+        <label class="admin-muted" for="admin-outreach">Mensaje sugerido (edítalo; lo envías tú, uno a uno)</label>
+        <textarea id="admin-outreach" maxlength="1000">${esc(outreachMessage(d))}</textarea>
+        <div class="admin-row">
+          ${digits ? `<button type="button" class="admin-btn" data-action="contact-wa">Escribir por WhatsApp</button>` : ""}
+          ${c.email ? `<button type="button" class="admin-btn admin-btn-ghost" data-action="contact-mail">Enviar correo</button>` : ""}
+          <button type="button" class="admin-btn admin-btn-ghost" data-action="contact-copy">Copiar</button>
+        </div>
+        <p class="admin-muted admin-contact-line">${esc(c.name || "Dueño")}${c.email ? ` · ${esc(c.email)}` : ""}${digits ? ` · +${esc(digits)} (${esc(phoneNote)})` : " · sin teléfono"}</p>
+      </div>`;
+  }
+
+  function renderReadiness(r) {
+    if (!r || r.ready || !(r.items || []).length) return "";
+    const missing = r.items.filter((i) => !i.done).map((i) => esc(i.label));
+    return `<p class="admin-muted admin-missing">A la IA le falta: ${missing.join(" · ")}</p>`;
+  }
+
+  function renderDisconnects(list) {
+    if (!(list || []).length) return "";
+    const tone = (reason) => (["banned", "device_removed", "silent"].includes(reason) ? "problem" : "");
+    return `
+      <h4 class="admin-subhead">Desconexiones de WhatsApp (30 días)</h4>
+      <ul class="admin-history admin-history-compact">${list.slice(0, 8).map((e) => `
+        <li class="${tone(e.reason)}"><time>${esc(fmtDate(e.at, true))}</time><div class="what">${esc(e.label)}</div></li>`).join("")}
+      </ul>`;
+  }
+
+  async function contact(kind) {
+    const d = state.detail;
+    const text = $("admin-outreach")?.value.trim() || outreachMessage(d);
+    if (kind === "copy") {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Mensaje copiado");
+      } catch {
+        toast("No se pudo copiar", true);
+      }
+      return;
+    }
+    const url = kind === "wa"
+      ? `https://wa.me/${String(d.contact.phone).replace(/\D/g, "")}?text=${encodeURIComponent(text)}`
+      : `mailto:${encodeURIComponent(d.contact.email)}?subject=${encodeURIComponent(`Omitel · ${d.business_name}`)}&body=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener");
   }
 
   function historyText(item) {
@@ -558,6 +726,12 @@
         return patch({ is_active: false }, "Empresa suspendida");
       case "reactivate":
         return patch({ is_active: true }, "Empresa reactivada");
+      case "contact-wa":
+        return contact("wa");
+      case "contact-mail":
+        return contact("mail");
+      case "contact-copy":
+        return contact("copy");
     }
   }
 

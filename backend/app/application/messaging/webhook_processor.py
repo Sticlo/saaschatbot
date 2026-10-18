@@ -487,12 +487,17 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
             db.commit()
             if was_connected and tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
                 from app.application.platform.incidents import record_incident
+                from app.application.whatsapp.whatsapp_status import DISCONNECT_REASONS, classify_disconnect
 
+                reason, code = classify_disconnect(data)
                 record_incident(
                     tenant_id,
                     "system.whatsapp_disconnected",
-                    f"WhatsApp se desconectó (estado: {tenant.whatsapp_status})",
+                    f"WhatsApp se desconectó: {DISCONNECT_REASONS[reason].lower()}"
+                    + (f" (código {code})" if code else ""),
+                    details={"reason": reason, "code": code, "status": tenant.whatsapp_status},
                     throttle_seconds=1800,
+                    throttle_scope=reason,
                 )
             elif not was_connected and tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
                 from app.application.platform.incidents import record_incident

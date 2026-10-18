@@ -87,6 +87,26 @@ def _check_queues_and_workers() -> None:
         )
 
 
+def _check_whatsapp_gateway() -> None:
+    from app.application.whatsapp.whatsapp_health_service import gateway_is_reachable
+
+    key = "watchdog:gateway_failures"
+    client = get_redis()
+    if gateway_is_reachable():
+        client.delete(key)
+        return
+    failures = client.incr(key)
+    client.expire(key, WATCHDOG_INTERVAL_SECONDS * 5)
+    if failures >= 2:
+        alert_dev(
+            "watchdog:whatsapp_gateway",
+            "Evolution (WhatsApp) no responde",
+            "Ningún negocio está recibiendo ni enviando mensajes. Revisa `docker compose ps` y los logs de evolution.",
+            severity="critical",
+            throttle_seconds=INFRA_ALERT_THROTTLE_SECONDS,
+        )
+
+
 def run_checks() -> None:
     _check_postgres()
     if not redis_ping():
@@ -102,6 +122,10 @@ def run_checks() -> None:
         _check_queues_and_workers()
     except Exception:
         log.warning("Watchdog no pudo revisar colas", exc_info=True)
+    try:
+        _check_whatsapp_gateway()
+    except Exception:
+        log.warning("Watchdog no pudo revisar Evolution", exc_info=True)
 
 
 def _loop() -> None:

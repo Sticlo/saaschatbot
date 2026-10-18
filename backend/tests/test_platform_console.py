@@ -316,3 +316,68 @@ def test_admin_page_is_served_with_csp(client: TestClient):
     assert "Consola de plataforma" in res.text
     assert "script-src 'self'" in res.headers["content-security-policy"]
     assert "noindex" in res.headers.get("x-robots-tag", "")
+
+
+def test_disconnect_reasons_separate_bans_from_unlinks():
+    from app.application.whatsapp.whatsapp_status import classify_disconnect
+
+    assert classify_disconnect({"state": "close", "statusReason": 403}) == ("banned", 403)
+    assert classify_disconnect({"state": "close", "statusReason": "401"}) == ("device_removed", 401)
+    assert classify_disconnect(
+        {"lastDisconnect": {"error": {"output": {"statusCode": 440}}}}
+    ) == ("replaced", 440)
+    assert classify_disconnect({"statusReason": 515}) == ("network", 515)
+    assert classify_disconnect({"error": "stream errored (conflict) device_removed"}) == ("device_removed", None)
+    assert classify_disconnect({}) == ("unknown", None)
+
+
+@requires_db
+def test_console_flags_who_needs_attention_and_why(client: TestClient, admin_and_client):
+    from app.application.platform.incidents import record_incident
+    from app.domain.entities import Tenant, WhatsAppSession
+    from app.infrastructure.persistence.database import SessionLocal
+
+    admin, customer = admin_and_client
+    tenant_id = uuid.UUID(customer["tenant_id"])
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        db.add(
+            WhatsAppSession(
+                tenant_id=tenant_id,
+                instance_name=f"t_{uuid.uuid4().hex[:12]}",
+                status="disconnected",
+                last_connected_at=now - timedelta(minutes=5),
+                last_disconnected_at=now - timedelta(minutes=4),
+            )
+        )
+        db.get(Tenant, tenant_id).whatsapp_status = "disconnected"
+        db.commit()
+    assert record_incident(
+        tenant_id,
+        "system.whatsapp_disconnected",
+        "WhatsApp se desconectó",
+        details={"reason": "device_removed", "code": 401},
+        throttle_seconds=0,
+    )
+
+    [row] = client.get(
+        "/api/v1/platform/tenants", headers=admin["headers"], params={"q": customer["email"]}
+    ).json()
+    keys = [r["key"] for r in row["attention"]]
+    assert keys[0] == "wa_rejected"
+    assert "ai_not_ready" in keys
+    assert row["attention"][0]["priority"] == 1
+
+    detail = client.get(f"/api/v1/platform/tenants/{customer['tenant_id']}", headers=admin["headers"]).json()
+    assert detail["attention"][0]["key"] == "wa_rejected"
+    assert detail["contact"]["email"] == customer["email"]
+    assert [d["reason"] for d in detail["whatsapp_disconnects_30d"]] == ["device_removed"]
+    steps = {s["key"]: s["done"] for s in detail["activation_steps"]}
+    assert steps["registered"] and steps["connected"]
+    assert not steps["paid"] and not steps["first_ai_reply"]
+
+    overview = client.get("/api/v1/platform/overview", headers=admin["headers"]).json()
+    assert overview["funnel"]["registered"] >= 2
+    assert overview["funnel"]["connected"] >= 1
+    assert overview["whatsapp"]["disconnects_30d"]["device_removed"] >= 1
+    assert client.get("/api/v1/platform/overview", headers=customer["headers"]).status_code == 404

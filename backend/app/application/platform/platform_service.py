@@ -135,6 +135,101 @@ def list_accounts(db: Session, *, query: str = "") -> list[dict[str, Any]]:
     ]
 
 
+def _aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _wa_disconnects(db: Session, ids: list[uuid.UUID], since: datetime) -> dict[uuid.UUID, list[tuple[str, datetime]]]:
+    """(motivo, cuándo) de cada desconexión registrada; las viejas sin motivo quedan como «unknown»."""
+    out: dict[uuid.UUID, list[tuple[str, datetime]]] = {}
+    rows = db.query(AuditLog.tenant_id, AuditLog.details, AuditLog.created_at).filter(
+        AuditLog.action == "system.whatsapp_disconnected",
+        AuditLog.created_at >= since,
+    )
+    if ids:
+        rows = rows.filter(AuditLog.tenant_id.in_(ids))
+    for tenant_id, details, created_at in rows:
+        reason = (details or {}).get("reason") if isinstance(details, dict) else None
+        out.setdefault(tenant_id, []).append((reason or "unknown", _aware(created_at)))
+    return out
+
+
+ATTENTION_LABELS = {
+    "wa_banned": "WhatsApp bloqueado o restringido",
+    "wa_rejected": "WhatsApp rechazó el vínculo",
+    "wa_down": "WhatsApp caído",
+    "payment_due": "Pago pendiente",
+    "trial_ending": "La prueba termina pronto",
+    "not_connected": "No ha conectado WhatsApp",
+    "ai_not_ready": "Le falta configurar la IA",
+    "ai_failures": "Fallas de la IA",
+    "ai_off": "Apagó la IA",
+    "quiet": "Sin chats hace días",
+    "trial_lapsed": "Prueba vencida sin pagar",
+}
+TRIAL_ENDING_HOURS = 48
+QUIET_DAYS = 3
+TRIAL_LAPSED_FOLLOWUP_DAYS = 10
+
+
+def attention_reasons(
+    tenant: Tenant,
+    sub: Optional[Subscription],
+    *,
+    session: Optional[WhatsAppSession],
+    ever_connected: bool,
+    last_activity_at: Optional[datetime],
+    disconnects_7d: list[tuple[str, datetime]],
+    ai_problems_7d: int,
+    readiness: Optional[dict],
+    now: datetime,
+) -> list[dict[str, Any]]:
+    """Por qué hay que mirar (o llamar) a esta empresa hoy, de lo más urgente a lo menos."""
+    if not tenant.is_active:
+        return []
+    paid = sub is not None and subscription_is_paid(sub, now)
+    trial = trial_is_running(sub, now)
+    live = paid or trial
+    status = tenant.whatsapp_status
+    connected = status == "connected"
+    reasons: list[tuple[int, str, Optional[datetime], Optional[str]]] = []
+
+    if status in ("banned", "restricted"):
+        reasons.append((1, "wa_banned", None, None))
+    elif not connected and any(r == "device_removed" for r, _ in disconnects_7d):
+        reasons.append((1, "wa_rejected", max(at for r, at in disconnects_7d if r == "device_removed"), None))
+    elif live and ever_connected and not connected:
+        reasons.append((1, "wa_down", _aware(session.last_disconnected_at) if session else None, None))
+    if sub is not None and sub.current_period_end is not None and sub.status == SubscriptionStatus.PAST_DUE.value:
+        reasons.append((1, "payment_due", _aware(sub.current_period_end), None))
+    if trial and not paid and sub.trial_ends_at is not None:
+        ends = _aware(sub.trial_ends_at)
+        if ends - now <= timedelta(hours=TRIAL_ENDING_HOURS):
+            reasons.append((2, "trial_ending", ends, None))
+    if live and not ever_connected and now - _aware(tenant.created_at) >= timedelta(hours=12):
+        reasons.append((2, "not_connected", _aware(tenant.created_at), None))
+    if live and readiness is not None and not readiness.get("ready"):
+        reasons.append((2, "ai_not_ready", None, f"{readiness.get('done', 0)}/{readiness.get('total', 0)}"))
+    if ai_problems_7d:
+        reasons.append((2, "ai_failures", None, str(ai_problems_7d)))
+    if connected and not tenant.ai_global_enabled:
+        reasons.append((3, "ai_off", None, None))
+    if connected:
+        reference = _aware(last_activity_at) or (_aware(session.last_connected_at) if session else None)
+        if reference is not None and now - reference >= timedelta(days=QUIET_DAYS):
+            reasons.append((3, "quiet", reference, None))
+    if trial_has_expired(sub, now) and now - _aware(sub.trial_ends_at) <= timedelta(days=TRIAL_LAPSED_FOLLOWUP_DAYS):
+        reasons.append((3, "trial_lapsed", _aware(sub.trial_ends_at), None))
+
+    reasons.sort(key=lambda r: r[0])
+    return [
+        {"key": key, "label": ATTENTION_LABELS[key], "priority": priority, "at": _iso(at), "detail": detail}
+        for priority, key, at, detail in reasons
+    ]
+
+
 def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
     tenants_q = db.query(Tenant)
     q = query.strip()
@@ -186,12 +281,40 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
         )
         .group_by(AuditLog.tenant_id)
     }
+    ai_problems = dict(
+        db.query(AuditLog.tenant_id, func.count(AuditLog.id))
+        .filter(
+            AuditLog.tenant_id.in_(ids),
+            AuditLog.action.in_(PROBLEM_ACTIONS - {"system.whatsapp_disconnected"}),
+            AuditLog.created_at >= since,
+        )
+        .group_by(AuditLog.tenant_id)
+        .all()
+    )
     connected = _ever_connected(db, ids)
+    sessions = {s.tenant_id: s for s in db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id.in_(ids))}
+    disconnects = _wa_disconnects(db, ids, since)
+    now = datetime.now(timezone.utc)
+
+    from app.application.ai.ai_readiness_service import tenant_readiness
 
     out = []
     for t in tenants:
         conv = conv_stats.get(t.id)
         prob = problems.get(t.id)
+        sub = subs.get(t.id)
+        live = t.is_active and (subscription_is_paid(sub, now) or trial_is_running(sub, now))
+        attention = attention_reasons(
+            t,
+            sub,
+            session=sessions.get(t.id),
+            ever_connected=t.id in connected,
+            last_activity_at=conv[3] if conv else None,
+            disconnects_7d=disconnects.get(t.id, []),
+            ai_problems_7d=ai_problems.get(t.id, 0),
+            readiness=tenant_readiness(db, t.id) if live else None,
+            now=now,
+        )
         out.append(
             {
                 "id": str(t.id),
@@ -210,10 +333,128 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
                 "last_activity_at": _iso(conv[3]) if conv else None,
                 "problems_7d": prob[1] if prob else 0,
                 "last_problem_at": _iso(prob[2]) if prob else None,
+                "attention": attention,
                 "created_at": _iso(t.created_at),
             }
         )
     return out
+
+
+def platform_overview(db: Session) -> dict[str, Any]:
+    """Números del negocio completo: embudo, ingresos del mes y salud de WhatsApp."""
+    now = datetime.now(timezone.utc)
+    month_ago = now - timedelta(days=30)
+    tenants = db.query(Tenant).all()
+    ids = [t.id for t in tenants]
+    subs = {
+        s.tenant_id: s
+        for s in db.query(Subscription).options(joinedload(Subscription.plan))
+    }
+    connected = _ever_connected(db, ids) if ids else set()
+
+    def funnel(group: list[Tenant]) -> dict[str, int]:
+        return {
+            "registered": len(group),
+            "connected": sum(1 for t in group if t.id in connected),
+            "paying": sum(1 for t in group if subscription_is_paid(subs.get(t.id), now)),
+        }
+
+    mrr = courtesy = 0
+    for t in tenants:
+        sub = subs.get(t.id)
+        if not t.is_active or not subscription_is_paid(sub, now):
+            continue
+        if sub.current_period_end is None:
+            courtesy += 1
+        else:
+            mrr += sub.plan.price_cop if sub.plan else 0
+
+    trials = [subs.get(t.id) for t in tenants if t.is_active and trial_is_running(subs.get(t.id), now)]
+    ending = [
+        s for s in trials
+        if s.trial_ends_at is not None and _aware(s.trial_ends_at) - now <= timedelta(hours=TRIAL_ENDING_HOURS)
+    ]
+
+    by_reason: dict[str, int] = {}
+    tenants_by_reason: dict[str, set[uuid.UUID]] = {}
+    for tenant_id, events in _wa_disconnects(db, [], month_ago).items():
+        for reason, _ in events:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+            tenants_by_reason.setdefault(reason, set()).add(tenant_id)
+    banned_now = sum(1 for t in tenants if t.whatsapp_status in ("banned", "restricted"))
+    banned_tenants = len(tenants_by_reason.get("banned", set()) | {
+        t.id for t in tenants if t.whatsapp_status in ("banned", "restricted")
+    })
+
+    return {
+        "funnel": funnel(tenants),
+        "funnel_30d": funnel([t for t in tenants if _aware(t.created_at) >= month_ago]),
+        "signups_7d": sum(1 for t in tenants if _aware(t.created_at) >= now - timedelta(days=7)),
+        "signups_prev_7d": sum(
+            1 for t in tenants if now - timedelta(days=14) <= _aware(t.created_at) < now - timedelta(days=7)
+        ),
+        "mrr_cop": mrr,
+        "courtesy_accounts": courtesy,
+        "trials_active": len(trials),
+        "trials_ending_48h": len(ending),
+        "whatsapp": {
+            "connected_now": sum(1 for t in tenants if t.whatsapp_status == "connected"),
+            "ever_connected": len(connected),
+            "banned_now": banned_now,
+            "disconnects_30d": by_reason,
+            "tenants_affected_30d": {reason: len(v) for reason, v in tenants_by_reason.items()},
+            "ban_rate": round(banned_tenants / len(connected), 4) if connected else 0.0,
+        },
+    }
+
+
+def _first_at(db: Session, *criteria) -> Optional[datetime]:
+    return db.query(func.min(AuditLog.created_at)).filter(*criteria).scalar()
+
+
+def activation_steps(db: Session, tenant: Tenant, sub: Optional[Subscription], readiness: dict) -> list[dict[str, Any]]:
+    """El camino de una empresa nueva hasta pagar, con la fecha en que cumplió cada paso."""
+    from app.domain.entities import Message
+
+    first_connect = _first_at(
+        db, AuditLog.tenant_id == tenant.id, AuditLog.action == "system.whatsapp_connected"
+    )
+    session = db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id == tenant.id).first()
+    ever_connected = bool(_ever_connected(db, [tenant.id]))
+    first_ai = (
+        db.query(func.min(Message.created_at))
+        .filter(Message.tenant_id == tenant.id, Message.source == "bot")
+        .scalar()
+    )
+    has_interested = (
+        db.query(Conversation.id)
+        .filter(
+            Conversation.tenant_id == tenant.id,
+            Conversation.interest_status == ConversationInterest.INTERESTED.value,
+        )
+        .first()
+        is not None
+    )
+    first_paid = _first_at(db, AuditLog.tenant_id == tenant.id, AuditLog.action == "subscription.activated")
+    paid = sub is not None and subscription_is_paid(sub)
+    return [
+        {"key": "registered", "label": "Se registró", "done": True, "at": _iso(tenant.created_at)},
+        {
+            "key": "ai_ready",
+            "label": f"Configuró la IA ({readiness.get('done', 0)}/{readiness.get('total', 0)})",
+            "done": bool(readiness.get("ready")),
+            "at": None,
+        },
+        {
+            "key": "connected",
+            "label": "Conectó WhatsApp",
+            "done": ever_connected,
+            "at": _iso(first_connect or (session.last_connected_at if session else None)),
+        },
+        {"key": "first_ai_reply", "label": "La IA respondió su primer chat", "done": first_ai is not None, "at": _iso(first_ai)},
+        {"key": "first_interested", "label": "Tuvo su primer interesado", "done": has_interested, "at": None},
+        {"key": "paid", "label": "Pagó", "done": paid or first_paid is not None, "at": _iso(first_paid)},
+    ]
 
 
 def _effective_limits(db: Session, tenant: Tenant, sub: Optional[Subscription]) -> dict[str, Any]:
@@ -254,7 +495,48 @@ def tenant_detail(db: Session, tenant: Tenant) -> dict[str, Any]:
         .scalar()
     )
     overrides = tenant_overrides(tenant)
+    from app.application.ai.ai_readiness_service import tenant_readiness
+    from app.application.whatsapp.whatsapp_status import DISCONNECT_REASONS
+
+    now = datetime.now(timezone.utc)
+    readiness = tenant_readiness(db, tenant.id)
+    disconnects = _wa_disconnects(db, [tenant.id], now - timedelta(days=30)).get(tenant.id, [])
+    ai_problems_7d = (
+        db.query(func.count(AuditLog.id))
+        .filter(
+            AuditLog.tenant_id == tenant.id,
+            AuditLog.action.in_(PROBLEM_ACTIONS - {"system.whatsapp_disconnected"}),
+            AuditLog.created_at >= week_ago,
+        )
+        .scalar()
+    )
+    ever_connected = bool(_ever_connected(db, [tenant.id]))
+    owner = next((u for u in users if u.role == UserRole.OWNER.value), users[0] if users else None)
+    alert_phones = [r["phone"] for r in alert_recipients(profile) if r.get("phone")]
     return {
+        "attention": attention_reasons(
+            tenant,
+            sub,
+            session=session,
+            ever_connected=ever_connected,
+            last_activity_at=last_at,
+            disconnects_7d=[(r, at) for r, at in disconnects if at >= week_ago],
+            ai_problems_7d=ai_problems_7d,
+            readiness=readiness,
+            now=now,
+        ),
+        "activation_steps": activation_steps(db, tenant, sub, readiness),
+        "readiness": readiness,
+        "contact": {
+            "name": owner.full_name if owner else None,
+            "email": owner.email if owner else None,
+            "phone": alert_phones[0] if alert_phones else (session.phone_number if session else None),
+            "phone_source": "alert" if alert_phones else ("whatsapp" if session and session.phone_number else None),
+        },
+        "whatsapp_disconnects_30d": [
+            {"reason": reason, "label": DISCONNECT_REASONS.get(reason, reason), "at": _iso(at)}
+            for reason, at in sorted(disconnects, key=lambda e: e[1], reverse=True)
+        ],
         "id": str(tenant.id),
         "business_name": tenant.business_name,
         "slug": tenant.slug,

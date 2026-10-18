@@ -13,6 +13,7 @@ from app.application.platform.platform_service import (
     PlatformError,
     list_accounts,
     list_tenants,
+    platform_overview,
     tenant_detail,
     tenant_history,
     update_tenant,
@@ -60,6 +61,11 @@ def platform_plans(current: RequirePlatformAdmin, db: Session = Depends(get_db))
         }
         for p in plans
     ]
+
+
+@router.get("/overview")
+def platform_overview_route(current: RequirePlatformAdmin, db: Session = Depends(get_db)):
+    return platform_overview(db)
 
 
 @router.get("/tenants")
