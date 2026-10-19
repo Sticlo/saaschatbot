@@ -178,9 +178,9 @@ def update_interest_alert(
     try:
         recipients = normalize_alert_recipients([r.model_dump() for r in body.recipients])
     except InterestAlertError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     if own_number_recipients(recipients, _whatsapp_session(db, current.tenant_id)):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=OWN_NUMBER_WARNING)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=OWN_NUMBER_WARNING)
 
     profile = get_or_create_tenant_profile(db, current.tenant_id)
     profile.alert_recipients = recipients
@@ -215,7 +215,7 @@ def update_followup(
     from app.application.ai.ai_followup_service import FOLLOWUP_HOURS_CHOICES
 
     if body.followup_hours not in FOLLOWUP_HOURS_CHOICES:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Elige una de las opciones")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Elige una de las opciones")
     profile = get_or_create_tenant_profile(db, current.tenant_id)
     profile.followup_hours = body.followup_hours
     log_audit(

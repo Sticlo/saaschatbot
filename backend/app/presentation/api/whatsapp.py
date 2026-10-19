@@ -110,7 +110,7 @@ def _pairing_phone(body: Optional[WhatsAppConnectRequest]) -> Optional[str]:
         return None
     if pairing_number(phone) is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Ese número no parece de WhatsApp. Escríbelo con indicativo, ej. +57 300 123 4567",
         )
     return phone
