@@ -8,6 +8,7 @@ from app.application.billing.auto_renew_service import process_auto_renewals
 from app.application.billing.subscription_service import expire_lapsed_subscriptions
 from app.application.platform.daily_radar import send_daily_radar
 from app.application.results.monthly_report import send_monthly_reports
+from app.application.results.weekly_report import send_weekly_reports
 from app.infrastructure.persistence.database import SessionLocal
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,13 @@ def _loop() -> None:
                 log.info("Resúmenes mensuales de resultados enviados: %s", reports)
         except Exception:
             log.exception("Error enviando los resúmenes mensuales de resultados")
+        try:
+            with SessionLocal() as db:
+                weekly = send_weekly_reports(db)
+            if weekly:
+                log.info("Resúmenes semanales enviados: %s", weekly)
+        except Exception:
+            log.exception("Error enviando los resúmenes semanales")
         try:
             with SessionLocal() as db:
                 if send_daily_radar(db):

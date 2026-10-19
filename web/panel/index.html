@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=114" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=115" />
 </head>
 <body>
   <div id="app">
@@ -692,13 +692,20 @@
                 <h2>Inventario</h2>
                 <p id="products-summary" class="products-summary hidden"></p>
               </div>
-              <button type="button" id="products-add-btn" class="btn primary">+ Agregar</button>
+              <div class="products-head-actions">
+                <button type="button" id="products-upload-btn" class="btn ghost">Subir Excel, Word o PDF</button>
+                <button type="button" id="products-add-btn" class="btn primary">+ Agregar</button>
+              </div>
+              <input type="file" id="products-upload-input" class="hidden"
+                accept=".xlsx,.xlsm,.csv,.tsv,.docx,.txt,.pdf,.jpg,.jpeg,.png,.webp,.heic" />
             </header>
+            <section id="products-import-preview" class="products-import-preview hidden" aria-live="polite"></section>
+            <input type="search" id="products-search" class="products-search hidden" placeholder="Buscar producto…" autocomplete="off" />
             <div id="products-list" class="products-list"></div>
             <section id="products-empty" class="list-empty products-empty hidden">
               <span class="list-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9zM3 7.5 12 12l9-4.5M12 12v9"/></svg></span>
               <strong>Agrega lo que vendes</strong>
-              <span>Con precio y foto: la IA cotiza y manda la foto sola. Si solo das citas o servicios, puedes dejarlo vacío.</span>
+              <span>Sube tu Excel, Word, PDF o foto de la lista de precios y los cargamos todos de una vez. La IA solo sabe lo que está aquí: entre más completo, más vende.</span>
             </section>
             <div class="alert-actions products-actions">
               <button type="button" id="products-import-btn" class="btn ghost small hidden">Crear desde mi catálogo</button>
@@ -1033,6 +1040,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=181"></script>
+  <script src="/static/panel/app.js?v=182"></script>
 </body>
 </html>

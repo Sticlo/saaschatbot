@@ -6328,6 +6328,45 @@ body.lightbox-open { overflow: hidden; }
 .tab-head > div { flex: 1; min-width: 0; }
 .tab-head .btn { flex: none; width: auto; }
 .products-list { gap: 0; margin: 0; }
+.tab-head > .products-head-actions { flex: none; display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+.product-row[hidden] { display: none; }
+.products-search {
+  width: 100%;
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+.products-import-preview {
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.import-head h3 { margin: 0; font-size: 1rem; }
+.import-head p, .import-more, .import-reading { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--muted); }
+.import-error { margin: 0; color: var(--danger); font-size: 0.9rem; }
+.import-warning { margin: 0.6rem 0 0; color: var(--warning); font-size: 0.85rem; }
+.import-table-wrap { max-height: 320px; overflow: auto; margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 10px; }
+.import-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.import-table th, .import-table td { padding: 0.45rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.import-table th { position: sticky; top: 0; background: var(--surface); font-weight: 600; color: var(--muted); }
+.import-table td:nth-child(2), .import-table td:nth-child(3) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.import-table tr.is-existing td { color: var(--muted); }
+.import-detail { max-width: 220px; color: var(--muted); }
+.import-tag { margin-left: 0.3rem; padding: 0.05rem 0.4rem; border-radius: 6px; font-size: 0.72rem; background: var(--border); }
+.import-update { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.85rem; }
+.import-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.85rem; }
+.import-actions .btn { width: auto; }
+@media (max-width: 560px) {
+  .tab-head { flex-wrap: wrap; }
+  .tab-head > .products-head-actions { width: 100%; justify-content: stretch; }
+  .tab-head > .products-head-actions .btn { flex: 1; }
+}
 .product-row {
   grid-template-columns: 52px minmax(0, 1fr) 36px;
   gap: 0 0.85rem;

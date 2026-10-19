@@ -33,6 +33,7 @@ from app.application.platform.tenant_overrides import (
     tenant_overrides,
 )
 from app.domain.entities import (
+    AiQuestion,
     AuditLog,
     Conversation,
     Plan,
@@ -165,6 +166,7 @@ ATTENTION_LABELS = {
     "not_connected": "No ha conectado WhatsApp",
     "ai_not_ready": "Le falta configurar la IA",
     "ai_failures": "Fallas de la IA",
+    "ai_unanswered": "La IA no supo responder",
     "ai_off": "Apagó la IA",
     "quiet": "Sin chats hace días",
     "trial_lapsed": "Prueba vencida sin pagar",
@@ -172,6 +174,19 @@ ATTENTION_LABELS = {
 TRIAL_ENDING_HOURS = 48
 QUIET_DAYS = 3
 TRIAL_LAPSED_FOLLOWUP_DAYS = 10
+# Preguntas que la IA no supo y el dueño lleva un día sin enseñarle: el cliente final se queda sin respuesta.
+UNANSWERED_MIN = 3
+UNANSWERED_AGE_HOURS = 24
+
+
+def _unanswered_questions(db: Session, ids: list[uuid.UUID], now: datetime) -> dict[uuid.UUID, int]:
+    rows = db.query(AiQuestion.tenant_id, func.count(AiQuestion.id)).filter(
+        AiQuestion.status == "open",
+        AiQuestion.created_at <= now - timedelta(hours=UNANSWERED_AGE_HOURS),
+    )
+    if ids:
+        rows = rows.filter(AiQuestion.tenant_id.in_(ids))
+    return dict(rows.group_by(AiQuestion.tenant_id).all())
 
 
 def attention_reasons(
@@ -185,6 +200,7 @@ def attention_reasons(
     ai_problems_7d: int,
     readiness: Optional[dict],
     now: datetime,
+    unanswered: int = 0,
 ) -> list[dict[str, Any]]:
     """Por qué hay que mirar (o llamar) a esta empresa hoy, de lo más urgente a lo menos."""
     if not tenant.is_active:
@@ -214,6 +230,8 @@ def attention_reasons(
         reasons.append((2, "ai_not_ready", None, f"{readiness.get('done', 0)}/{readiness.get('total', 0)}"))
     if ai_problems_7d:
         reasons.append((2, "ai_failures", None, str(ai_problems_7d)))
+    if live and unanswered >= UNANSWERED_MIN:
+        reasons.append((2, "ai_unanswered", None, str(unanswered)))
     if connected and not tenant.ai_global_enabled:
         reasons.append((3, "ai_off", None, None))
     if connected:
@@ -295,6 +313,7 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
     sessions = {s.tenant_id: s for s in db.query(WhatsAppSession).filter(WhatsAppSession.tenant_id.in_(ids))}
     disconnects = _wa_disconnects(db, ids, since)
     now = datetime.now(timezone.utc)
+    unanswered = _unanswered_questions(db, ids, now)
 
     from app.application.ai.ai_readiness_service import tenant_readiness
 
@@ -314,6 +333,7 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
             ai_problems_7d=ai_problems.get(t.id, 0),
             readiness=tenant_readiness(db, t.id) if live else None,
             now=now,
+            unanswered=unanswered.get(t.id, 0),
         )
         out.append(
             {
@@ -524,6 +544,7 @@ def tenant_detail(db: Session, tenant: Tenant) -> dict[str, Any]:
             ai_problems_7d=ai_problems_7d,
             readiness=readiness,
             now=now,
+            unanswered=_unanswered_questions(db, [tenant.id], now).get(tenant.id, 0),
         ),
         "activation_steps": activation_steps(db, tenant, sub, readiness),
         "readiness": readiness,

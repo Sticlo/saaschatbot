@@ -14,9 +14,17 @@ from sqlalchemy.orm import Session
 from app.application.outbound.tenant_asset_service import save_product_photo
 from app.domain.entities import Product
 
-MAX_PRODUCTS = 300
+MAX_PRODUCTS = 2000
 MAX_PHOTOS = 4
 _PROMPT_MAX_CHARS = 7000
+# Con catálogos grandes van primero los productos que el cliente nombró en la conversación.
+_RELEVANT_MAX = 60
+_STOPWORDS = frozenset(
+    "de la el los las un una unos unas y o a en con para por que qué cual cuál cuanto cuánto cuesta vale "
+    "precio precios tiene tienen tienes hay me te se su sus mi mis es son del al lo le les quiero busco "
+    "necesito como cómo hola buenas buenos dias tardes noches gracias favor si no ya más mas muy esto "
+    "eso este esta estos estas".split()
+)
 _MAX_QTY = 999
 
 
@@ -226,22 +234,58 @@ def _availability(product: Product) -> str:
     return f"quedan {product.stock}"
 
 
-def products_prompt_block(products: list[Product], *, selling: bool) -> str:
+def _query_words(text: str) -> set[str]:
+    words = set(_name_key(text).split())
+    return {w for w in words if len(w) >= 3 and w not in _STOPWORDS}
+
+
+def _word_variants(word: str) -> set[str]:
+    variants = {word}
+    if word.endswith("es") and len(word) > 4:
+        variants.add(word[:-2])
+    if word.endswith("s") and len(word) > 3:
+        variants.add(word[:-1])
+    return variants
+
+
+def rank_products(products: list[Product], query: str) -> list[Product]:
+    """Los productos que coinciden con lo que escribió el cliente primero, el resto en su orden."""
+    wanted = set().union(*(_word_variants(w) for w in _query_words(query))) if query else set()
+    if not wanted:
+        return list(products)
+    scored = []
+    for index, product in enumerate(products):
+        name_words = set().union(*(_word_variants(w) for w in _name_key(product.name).split())) if product.name else set()
+        detail_words = set(_name_key(product.details or "").split())
+        score = 3 * len(wanted & name_words) + len(wanted & detail_words)
+        scored.append((score, index, product))
+    hits = [p for score, _, p in sorted(scored, key=lambda s: (-s[0], s[1])) if score > 0][:_RELEVANT_MAX]
+    hit_ids = {p.id for p in hits}
+    return hits + [p for p in products if p.id not in hit_ids]
+
+
+def _product_line(product: Product) -> str:
+    price = format_cop(product.price_cop) if product.price_cop is not None else "precio por confirmar"
+    line = f"- ref={product_ref(product)} | {product.name} | {price} | {_availability(product)}"
+    if product.details:
+        line += f" | {product.details}"
+    if product.photos:
+        line += f" | 📷 {len(product.photos)} foto{'' if len(product.photos) == 1 else 's'}"
+    return line
+
+
+def products_prompt_block(products: list[Product], *, selling: bool, query: str = "") -> str:
     if not products:
         return ""
     lines: list[str] = []
     used = 0
-    for product in products:
-        price = format_cop(product.price_cop) if product.price_cop is not None else "precio por confirmar"
-        line = f"- ref={product_ref(product)} | {product.name} | {price} | {_availability(product)}"
-        if product.details:
-            line += f" | {product.details}"
-        if product.photos:
-            line += f" | 📷 {len(product.photos)} foto{'' if len(product.photos) == 1 else 's'}"
+    for product in rank_products(products, query):
+        line = _product_line(product)
         used += len(line)
         if used > _PROMPT_MAX_CHARS:
             break
         lines.append(line)
+    partial = len(lines) < len(products)
     rules = [
         "- Precios: cotiza SIEMPRE con el precio de esta lista. Si el catálogo, la carta o los rangos de precios "
         "dicen otra cosa, manda esta lista (el catálogo puede estar desactualizado).",
@@ -251,6 +295,12 @@ def products_prompt_block(products: list[Product], *, selling: bool) -> str:
         "- El total es precio × cantidad (más el envío, si el negocio lo cobra y sabes cuánto es).",
         "- Si piden algo que no está en la lista, no lo inventes: di que lo confirmas por aquí.",
     ]
+    if partial:
+        rules.append(
+            f"- El catálogo tiene {len(products)} productos y aquí ves {len(lines)}: los relacionados con esta "
+            "conversación van primero. Si preguntan por algo que no aparece, NO digas que no lo hay: pregunta "
+            "un detalle (marca, tamaño, color) o di que lo confirmas por aquí."
+        )
     if any(p.photos for p in products):
         rules.append(
             "- Fotos: si piden fotos o ver un producto marcado con 📷, pon su ref en photo_ref y escribe algo breve "

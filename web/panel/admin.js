@@ -110,6 +110,7 @@
     not_connected: "vi que creaste la cuenta de {biz} pero aún no conectas tu WhatsApp. Es un minuto: entra a app.omitel.net y escanea el código. ¿Te acompaño?",
     ai_not_ready: "a la IA de {biz} le faltan algunos datos (precios, horarios, envíos) para responder mejor. ¿Lo completamos juntos en 10 minutos?",
     ai_failures: "vimos algunas fallas en las respuestas de la IA de {biz} y ya las estamos revisando. ¿Notaste algo raro con tus clientes?",
+    ai_unanswered: "tus clientes le están preguntando a la IA de {biz} cosas que todavía no sabe. Si me das 5 minutos te ayudo a enseñárselas (o a subir tu lista de precios en Excel/PDF) para que no se le escape ninguna venta.",
     ai_off: "vi que apagaste la IA en {biz}. ¿Pasó algo que podamos mejorar?",
     quiet: "¿cómo va todo con Omitel en {biz}? Vi pocos chats estos días. ¿Te ayudo a sacarle más provecho?",
     trial_lapsed: "tu prueba de Omitel terminó. Tus chats y tu configuración siguen guardados: si quieres continuar, activas el plan y vuelves a conectar en un minuto. ¿Qué te faltó para decidirte?",
@@ -191,6 +192,7 @@
     if (r.key === "trial_ending") return `Prueba termina ${until(r.at)}`;
     if (r.key === "ai_not_ready" && r.detail) return `IA sin configurar (${r.detail})`;
     if (r.key === "ai_failures" && r.detail) return `${r.detail} fallas de IA (7 d)`;
+    if (r.key === "ai_unanswered" && r.detail) return `IA no supo ${r.detail} preguntas`;
     if ((r.key === "wa_down" || r.key === "quiet" || r.key === "trial_lapsed") && r.at) return `${r.label} · ${ago(r.at)}`;
     return r.label;
   }

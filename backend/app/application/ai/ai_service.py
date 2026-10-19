@@ -1578,7 +1578,9 @@ def _record_missing_info(
             f"❓ *{tenant.business_name}*: {_contact_label(conversation)} preguntó «{snippet}» "
             f"y la IA no tenía este dato: *{row.topic}*.\n\n"
             "Respóndele tú en el chat y enséñaselo a la IA una sola vez en Personalizar IA → "
-            f"Preguntas pendientes, para que no vuelva a pasar.\n\n{_contact_line(conversation)}\n"
+            "Preguntas pendientes, para que no vuelva a pasar. Si es un producto, agrégalo en "
+            "Inventario (puedes subir tu Excel, Word o PDF con todos de una vez).\n\n"
+            f"{_contact_line(conversation)}\n"
             f"Abrir panel: {_panel_link()}"
         ),
     )

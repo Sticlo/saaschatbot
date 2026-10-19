@@ -5282,6 +5282,137 @@
     list.innerHTML = items.map(productRow).join("");
     syncProductsChrome();
     $("products-add-btn").disabled = !state.canManageGlobal;
+    $("products-upload-btn")?.classList.toggle("hidden", !state.canManageGlobal);
+    $("products-search")?.classList.toggle("hidden", items.length < 15);
+    filterProducts();
+  }
+
+  function filterProducts() {
+    const words = normalizeSearch($("products-search")?.value || "").split(" ").filter(Boolean);
+    document.querySelectorAll("#products-list .product-row").forEach((row) => {
+      if (!words.length) {
+        row.hidden = false;
+        return;
+      }
+      const text = normalizeSearch(
+        `${row.querySelector(".product-name")?.value || ""} ${row.querySelector(".product-details")?.value || ""}`,
+      );
+      row.hidden = !words.every((w) => text.includes(w));
+    });
+  }
+
+  function normalizeSearch(text) {
+    return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  }
+
+  async function previewProductsFile(file) {
+    if (!file) return;
+    const btn = $("products-upload-btn");
+    const box = $("products-import-preview");
+    btn.disabled = true;
+    const slow = /\.(pdf|jpe?g|png|webp|heic)$/i.test(file.name);
+    box.classList.remove("hidden");
+    box.innerHTML = `<p class="import-reading">Leyendo <strong>${escapeHtml(file.name)}</strong>…${
+      slow ? " Los PDF y fotos tardan hasta un minuto." : ""
+    }</p>`;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      state.importPreview = await api("/products/import-file", { method: "POST", body: fd }, slow ? 150000 : 30000);
+      renderImportPreview();
+    } catch (err) {
+      box.innerHTML = `<p class="import-error">${escapeHtml(err.message)}</p>
+        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button></div>`;
+    } finally {
+      btn.disabled = false;
+      $("products-upload-input").value = "";
+    }
+  }
+
+  function renderImportPreview() {
+    const p = state.importPreview;
+    const box = $("products-import-preview");
+    if (!p) {
+      box.classList.add("hidden");
+      box.innerHTML = "";
+      return;
+    }
+    const shown = p.items.slice(0, 30);
+    const noPrice = p.total - p.with_price;
+    const facts = [
+      `<strong>${p.total}</strong> producto${p.total === 1 ? "" : "s"} encontrado${p.total === 1 ? "" : "s"}`,
+      p.new ? `${p.new} nuevo${p.new === 1 ? "" : "s"}` : "",
+      p.existing ? `${p.existing} ya lo${p.existing === 1 ? "" : "s"} tienes` : "",
+      noPrice ? `<span class="products-out">${noPrice} sin precio</span>` : "",
+    ].filter(Boolean);
+    const overflow = p.new > p.room
+      ? `<p class="import-warning">Solo caben ${p.room} productos nuevos más; los demás no se agregan.</p>`
+      : "";
+    box.innerHTML = `
+      <header class="import-head">
+        <div>
+          <h3>Esto encontramos en tu archivo</h3>
+          <p>${facts.join(" · ")}</p>
+        </div>
+      </header>
+      ${overflow}
+      <div class="import-table-wrap">
+        <table class="import-table">
+          <thead><tr><th>Producto</th><th>Precio</th><th>Unidades</th><th>Detalle</th></tr></thead>
+          <tbody>${shown
+            .map(
+              (it) => `<tr${it.exists ? ' class="is-existing"' : ""}>
+                <td>${escapeHtml(it.name)}${it.exists ? ' <span class="import-tag">ya existe</span>' : ""}</td>
+                <td>${it.price_cop != null ? "$" + formatThousands(it.price_cop) : '<span class="products-out">sin precio</span>'}</td>
+                <td>${it.stock != null ? it.stock : "—"}</td>
+                <td class="import-detail">${escapeHtml(it.details || "")}</td>
+              </tr>`,
+            )
+            .join("")}</tbody>
+        </table>
+      </div>
+      ${p.total > shown.length ? `<p class="import-more">…y ${p.total - shown.length} más.</p>` : ""}
+      ${p.existing ? `<label class="import-update"><input type="checkbox" id="import-update-existing" checked /> Actualizar precio y detalle de los que ya tengo</label>` : ""}
+      <div class="import-actions">
+        <button type="button" class="btn ghost" data-import="cancel">Cancelar</button>
+        <button type="button" class="btn primary" data-import="confirm">Importar ${p.total} producto${p.total === 1 ? "" : "s"}</button>
+      </div>`;
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  async function confirmProductsImport(btn) {
+    const p = state.importPreview;
+    if (!p) return;
+    btn.disabled = true;
+    btn.textContent = "Importando…";
+    try {
+      const res = await api(
+        "/products/import-items",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            items: p.items,
+            update_existing: $("import-update-existing")?.checked ?? true,
+          }),
+        },
+        60000,
+      );
+      state.importPreview = null;
+      renderImportPreview();
+      state.products = res.products;
+      renderProducts();
+      const parts = [];
+      if (res.created) parts.push(`${res.created} nuevo${res.created === 1 ? "" : "s"}`);
+      if (res.updated) parts.push(`${res.updated} actualizado${res.updated === 1 ? "" : "s"}`);
+      let msg = parts.length ? `✓ Listo: ${parts.join(" y ")}. La IA ya los conoce.` : "No había cambios para guardar.";
+      if (res.limit_reached) msg += " Llegaste al máximo de productos; algunos no se agregaron.";
+      setProductsStatus(msg);
+      refreshReadinessSoon();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Reintentar";
+      setProductsStatus(err.message);
+    }
   }
 
   function syncProductsChrome() {
@@ -7159,6 +7290,18 @@
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("products-add-btn")?.addEventListener("click", addProductRow);
   $("products-import-btn")?.addEventListener("click", importProductsFromCatalog);
+  $("products-upload-btn")?.addEventListener("click", () => $("products-upload-input").click());
+  $("products-upload-input")?.addEventListener("change", (e) => previewProductsFile(e.target.files[0]));
+  $("products-search")?.addEventListener("input", filterProducts);
+  $("products-import-preview")?.addEventListener("click", (e) => {
+    const action = e.target.closest("[data-import]")?.dataset.import;
+    if (action === "cancel") {
+      state.importPreview = null;
+      renderImportPreview();
+    } else if (action === "confirm") {
+      confirmProductsImport(e.target.closest("button"));
+    }
+  });
   $("products-list")?.addEventListener("change", (e) => {
     const row = e.target.closest(".product-row");
     if (!row || !state.canManageGlobal) return;

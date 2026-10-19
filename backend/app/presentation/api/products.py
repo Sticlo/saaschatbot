@@ -19,9 +19,19 @@ from app.application.products.product_service import (
     update_product,
 )
 from app.infrastructure.persistence.database import get_db
+from app.application.products.product_import_service import (
+    MAX_IMPORT_BYTES,
+    ProductImportError,
+    import_items,
+    parse_upload,
+    preview,
+)
 from app.presentation.schemas.products import (
     ProductCreate,
+    ProductFilePreview,
     ProductImportResponse,
+    ProductItemsImport,
+    ProductItemsImportResponse,
     ProductResponse,
     ProductUpdate,
 )
@@ -118,6 +128,42 @@ def delete_product_photo(product_id: uuid.UUID, name: str, current: RequireOwner
     db.commit()
     delete_asset(path, tenant_id=current.tenant_id)
     return ProductResponse(**product_to_dict(product))
+
+
+@router.post("/import-file", response_model=ProductFilePreview)
+def import_file_preview(current: RequireOwner, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Lee el archivo y muestra qué productos se van a crear; no guarda nada todavía."""
+    enforce_rate_limit(
+        f"products:import:{current.tenant_id}",
+        limit=20,
+        window_seconds=3600,
+        message="Subiste muchos archivos seguidos. Intenta de nuevo en un rato.",
+    )
+    data = file.file.read(MAX_IMPORT_BYTES + 1)
+    try:
+        items, source = parse_upload(file.filename or "", data)
+    except ProductImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not items:
+        raise HTTPException(
+            status_code=422,
+            detail="No encontramos productos con nombre y precio. Revisa que el archivo tenga una columna "
+            "de producto y otra de precio.",
+        )
+    return ProductFilePreview(**preview(db, current.tenant_id, items), source=source)
+
+
+@router.post("/import-items", response_model=ProductItemsImportResponse)
+def import_items_route(body: ProductItemsImport, current: RequireOwner, db: Session = Depends(get_db)):
+    result = import_items(
+        db,
+        current.tenant_id,
+        [item.model_dump() for item in body.items],
+        update_existing=body.update_existing,
+    )
+    db.commit()
+    autostart_ai_for_tenant_id(db, current.tenant_id)
+    return ProductItemsImportResponse(**result, products=_all(db, current.tenant_id))
 
 
 @router.post("/import-catalog", response_model=ProductImportResponse)

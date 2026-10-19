@@ -171,6 +171,38 @@ def extract_catalog(file_b64: str, mimetype: str, *, timeout: float = 90.0) -> s
     return text.strip()[:4000]
 
 
+_PRODUCT_LIST_PROMPT = (
+    "Este archivo es el catálogo, carta, menú o lista de precios de un negocio. Saca TODOS los productos "
+    "o servicios que tengan precio, sin saltarte ninguno.\n"
+    "- Una línea por producto, exactamente así: «Nombre — precio — detalles».\n"
+    "- El precio en pesos tal cual se lee (ej: $25.000). Detalles: talla, color, presentación, sabor o "
+    "descripción corta; si no hay, deja solo «Nombre — precio».\n"
+    "- No inventes nada que no se lea. Nada de títulos, horarios, markdown ni comentarios.\n"
+    "- Si no hay productos con precio, responde exactamente: SIN_INFORMACION"
+)
+
+
+def extract_product_list(file_b64: str, mimetype: str, *, timeout: float = 120.0) -> str:
+    """Todos los productos con precio de un PDF o foto, una línea por producto (sin el tope del atajo)."""
+    if not is_configured():
+        raise GeminiError("GEMINI_API_KEY no configurada — agrégala en .env")
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": _PRODUCT_LIST_PROMPT},
+                    {"inline_data": {"mime_type": _base_mime(mimetype, "application/pdf"), "data": file_b64}},
+                ]
+            }
+        ],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 32768},
+    }
+    text = _post_generate(model=settings.gemini_image_model, payload=payload, timeout=timeout)
+    if text.strip().upper().startswith(NO_CATALOG_INFO):
+        return ""
+    return text.strip()
+
+
 def describe_image(image_b64: str, mimetype: str, *, timeout: float = 60.0) -> str:
     return _generate_from_media(
         model=settings.gemini_image_model,

@@ -189,7 +189,12 @@ def _complete_reply(
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
     photo_refs = frozenset(product_ref(p) for p in products or [] if p.photos)
-    system += products_prompt_block(products or [], selling=bool(payment_methods))
+    recent_customer_text = " ".join(
+        (getattr(m, "transcript", None) or getattr(m, "body", None) or "")
+        for m in history[-8:]
+        if getattr(m, "direction", None) == MessageDirection.IN.value
+    )
+    system += products_prompt_block(products or [], selling=bool(payment_methods), query=recent_customer_text)
     system += knowledge
     if payment_methods:
         system += payment_methods_block(payment_methods)
