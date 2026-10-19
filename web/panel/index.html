@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=115" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=116" />
 </head>
 <body>
   <div id="app">
@@ -208,8 +208,8 @@
               <h3 id="wa-setup-title">Conecta tu WhatsApp</h3>
               <p id="wa-setup-text" class="muted">Escanea el código QR con tu celular. En un minuto la IA empieza a atender a tus clientes.</p>
               <button type="button" id="wa-setup-btn" class="btn primary">Mostrar código QR</button>
+              <p id="wa-setup-error" class="error wa-setup-error hidden" role="alert"></p>
               <button type="button" id="wa-setup-alt-btn" class="link-btn wa-setup-alt">¿Solo tienes este celular? Conéctate con un código</button>
-              <p id="wa-setup-error" class="error hidden"></p>
             </div>
             <div id="empty-ready" class="empty-ready hidden">
               <h3>Elige un chat</h3>
@@ -1040,6 +1040,18 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=182"></script>
+  <div id="confirm-modal" class="modal hidden">
+    <div class="modal-backdrop" data-confirm="cancel"></div>
+    <div class="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <h3 id="confirm-title"></h3>
+      <p id="confirm-text"></p>
+      <div class="confirm-actions">
+        <button type="button" class="btn ghost" data-confirm="cancel" id="confirm-cancel">Cancelar</button>
+        <button type="button" class="btn primary" data-confirm="ok" id="confirm-ok">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/panel/app.js?v=183"></script>
 </body>
 </html>

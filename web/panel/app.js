@@ -240,6 +240,10 @@
     return isLocalDev() || new URLSearchParams(location.search).has("debug");
   }
 
+  function devWarn(...args) {
+    if (isDevToolsEnabled()) console.warn(...args);
+  }
+
   function humanizeWaError(msg) {
     const raw = (msg || "").trim();
     const lower = raw.toLowerCase();
@@ -261,7 +265,7 @@
     ) {
       return (
         "WhatsApp no deja vincular ahora. En el celular: Ajustes → Dispositivos vinculados " +
-        "y cerrá sesiones que no uses. Esperá 2–3 minutos, tocá Conectar otra vez y escaneá el QR nuevo."
+        "y cierra las sesiones que no uses. Espera 2 o 3 minutos, toca Conectar otra vez y escanea el QR nuevo."
       );
     }
     return raw;
@@ -907,7 +911,7 @@
       }
       state._lastPull = `ERR`;
       updateSyncStatus({ pull: `ERR` });
-      console.warn("sync-live:", err.message);
+      devWarn("sync-live:", err.message);
       try {
         const msgs = dedupeMessages(await api(`/conversations/${chatId}/messages`, {}, 8000));
         if (state.activeId !== chatId) return;
@@ -927,7 +931,7 @@
           }).catch(() => {});
           return;
         }
-        console.warn("messages fallback:", fallbackErr.message);
+        devWarn("messages fallback:", fallbackErr.message);
       }
     } finally {
       pullInFlight = false;
@@ -946,9 +950,9 @@
           : "nunca";
       if (report.webhook?.url_mismatch) state._lastWebhook = "URL mal";
       updateSyncStatus({ webhook: state._lastWebhook });
-      if (report.errors?.length) console.warn("sync debug:", report.errors);
+      if (report.errors?.length) devWarn("sync debug:", report.errors);
     } catch (err) {
-      console.warn("sync health:", err.message);
+      devWarn("sync health:", err.message);
     }
   }
 
@@ -1084,7 +1088,7 @@
       await api("/whatsapp/sync", { method: "POST" }, 15000);
     } catch (err) {
       if (!String(err.message).includes("409")) {
-        console.warn("Auto-sync:", err.message);
+        devWarn("Auto-sync:", err.message);
       }
     }
   }
@@ -1185,12 +1189,13 @@
     const connected = state.wa.status === "connected";
     const needsConnect = !connected;
 
-    $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect);
     $("wa-setup")?.classList.toggle("hidden", !needsConnect);
+    if (connected) $("wa-setup-error")?.classList.add("hidden");
     if (connected && currentTourStep()?.key === "wa") tourGo(tour.index + 1);
     const dropped = needsConnect && state.conversations.length > 0;
     waStatus.classList.toggle("wa-dropped", dropped);
-    $("wa-connect-btn")?.classList.toggle("is-secondary", dropped);
+    // Caído con chats: la franja de arriba y la tarjeta del centro ya llevan el botón para reconectar.
+    $("wa-connect-btn")?.classList.toggle("hidden", !needsConnect || dropped);
     $("wa-setup")?.classList.toggle("is-dropped", dropped);
     const setupTitle = $("wa-setup-title");
     if (setupTitle) {
@@ -1731,7 +1736,10 @@
         title: "WhatsApp desconectado",
         short: "WhatsApp desconectado.",
         text: "No llegan mensajes nuevos y la IA no puede responder. Tus chats están guardados.",
-        action: state.canConnectWa ? { label: "Reconectar", run: () => connectWhatsApp() } : null,
+        action:
+          state.canConnectWa && !$("wa-setup")?.getClientRects().length
+            ? { label: "Reconectar", run: () => connectWhatsApp() }
+            : null,
       };
     }
     if (state.tenant && !state.tenant.ai_global_enabled && state.canManageGlobal && state.aiProfile && !state.aiProfile.readiness?.ready) {
@@ -2589,6 +2597,46 @@
       .replace(/"/g, "&quot;");
   }
 
+  function askConfirm({ title, text = "", confirmLabel = "Aceptar", danger = false }) {
+    const modal = $("confirm-modal");
+    const ok = $("confirm-ok");
+    const cancel = $("confirm-cancel");
+    const opener = document.activeElement;
+    $("confirm-title").textContent = title;
+    $("confirm-text").textContent = text;
+    ok.textContent = confirmLabel;
+    ok.classList.toggle("danger", danger);
+    ok.classList.toggle("primary", !danger);
+    modal.classList.remove("hidden");
+    document.body.classList.add("confirm-modal-open");
+    (danger ? cancel : ok).focus();
+    return new Promise((resolve) => {
+      const close = (answer) => {
+        modal.classList.add("hidden");
+        document.body.classList.remove("confirm-modal-open");
+        modal.removeEventListener("click", onClick);
+        document.removeEventListener("keydown", onKey, true);
+        if (opener && typeof opener.focus === "function") opener.focus();
+        resolve(answer);
+      };
+      const onClick = (e) => {
+        const action = e.target.closest("[data-confirm]")?.dataset.confirm;
+        if (action) close(action === "ok");
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          close(false);
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          (document.activeElement === ok ? cancel : ok).focus();
+        }
+      };
+      modal.addEventListener("click", onClick);
+      document.addEventListener("keydown", onKey, true);
+    });
+  }
+
   function dedupeMessages(messages) {
     const seen = new Set();
     const out = [];
@@ -3410,7 +3458,7 @@
       state.results = await api("/results");
       resultsLoadedAt = Date.now();
     } catch (err) {
-      console.warn("No se pudieron cargar los resultados", err);
+      devWarn("No se pudieron cargar los resultados", err);
     }
     renderResults();
   }
@@ -4013,7 +4061,14 @@
   async function deleteCurrentStaff() {
     const id = $("staff-id")?.value?.trim();
     const member = state.staff.find((m) => m.id === id);
-    if (!id || !confirm(`¿Quitar a ${member?.name || "esta persona"} del equipo?`)) return;
+    if (!id) return;
+    const okToRemove = await askConfirm({
+      title: `¿Quitar a ${member?.name || "esta persona"} del equipo?`,
+      text: "La IA dejará de ofrecer citas con esta persona.",
+      confirmLabel: "Quitar",
+      danger: true,
+    });
+    if (!okToRemove) return;
     try {
       await api(`/appointments/staff/${id}`, { method: "DELETE" });
       hideStaffModal();
@@ -4127,7 +4182,14 @@
 
   async function deleteCurrentAppointment() {
     const id = $("appointment-id")?.value?.trim();
-    if (!id || !confirm("¿Eliminar esta cita?")) return;
+    if (!id) return;
+    const okToDelete = await askConfirm({
+      title: "¿Eliminar esta cita?",
+      text: "Se borra de tu agenda. Si quieres avisarle al cliente, escríbele desde el chat.",
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!okToDelete) return;
     try {
       await api(`/appointments/${id}`, { method: "DELETE" });
       hideAppointmentModal();
@@ -4275,7 +4337,12 @@
     if (action === "inventory") return switchPanelMode("inventory");
     if (action === "try-ai") return goToReadinessField("try-ai-input");
     if (action !== "booking-off") return;
-    if (!confirm("¿Apagar las citas? La IA dejará de ofrecer horarios. Puedes volver a prenderlas en Citas.")) return;
+    const okToStop = await askConfirm({
+      title: "¿Apagar las citas?",
+      text: "La IA dejará de ofrecer horarios. Puedes volver a prenderlas en Citas cuando quieras.",
+      confirmLabel: "Apagar citas",
+    });
+    if (!okToStop) return;
     btn.disabled = true;
     try {
       const s = await api("/appointments/schedule");
@@ -5117,8 +5184,13 @@
     } else if (btn.dataset.orderPaid) {
       updateOrder(btn.dataset.orderPaid, { status: "ready" });
     } else if (btn.dataset.orderCancel) {
-      if (!confirm("¿Cancelar este pedido? Las unidades no se devuelven solas al inventario.")) return;
-      updateOrder(btn.dataset.orderCancel, { status: "cancelled" });
+      const orderId = btn.dataset.orderCancel;
+      askConfirm({
+        title: "¿Cancelar este pedido?",
+        text: "Las unidades no vuelven solas al inventario: si quieres, súmalas en Inventario.",
+        confirmLabel: "Cancelar pedido",
+        danger: true,
+      }).then((yes) => yes && updateOrder(orderId, { status: "cancelled" }));
     }
   }
 
@@ -5934,7 +6006,7 @@
         } catch (triggerErr) {
           const msg = String(triggerErr.message || "");
           if (!/pendiente|manual|global|desactivada/i.test(msg)) {
-            console.warn("IA trigger:", msg);
+            devWarn("IA trigger:", msg);
           }
         }
       }
@@ -6286,7 +6358,7 @@
       try {
         handleEvent(JSON.parse(ev.data));
       } catch (e) {
-        console.warn("WS parse error", e);
+        devWarn("WS parse error", e);
       }
     };
   }
@@ -6817,7 +6889,13 @@
   syncInstallButton();
   setTimeout(maybeOfferInstall, 6000);
   async function unlinkWhatsApp() {
-    if (!confirm("¿Desvincular WhatsApp? Se borrarán todos los chats del panel y dejará de atender hasta que lo vuelvas a conectar.")) return;
+    const okToUnlink = await askConfirm({
+      title: "¿Desvincular WhatsApp?",
+      text: "Se borrarán todos los chats del panel y la IA dejará de atender hasta que lo vuelvas a conectar.",
+      confirmLabel: "Desvincular",
+      danger: true,
+    });
+    if (!okToUnlink) return;
     const buttons = ["wa-disconnect-btn", "wa-unlink-ready-btn"].map((id) => $(id)).filter(Boolean);
     buttons.forEach((btn) => {
       btn.disabled = true;
@@ -6845,7 +6923,13 @@
   $("wa-disconnect-btn").addEventListener("click", () => unlinkWhatsApp());
   $("wa-unlink-ready-btn")?.addEventListener("click", () => unlinkWhatsApp());
   $("wa-reset-chats-btn").addEventListener("click", async () => {
-    if (!confirm("¿Borrar chats importados de otro celular y empezar limpio?")) return;
+    const okToReset = await askConfirm({
+      title: "¿Empezar limpio?",
+      text: "Se borran del panel los chats que se importaron de otro celular.",
+      confirmLabel: "Borrar y empezar limpio",
+      danger: true,
+    });
+    if (!okToReset) return;
     try {
       await api("/whatsapp/reset-binding", { method: "POST" }, 30000);
       prepareForNewDevice();
@@ -7006,7 +7090,7 @@
         console.info("Sync hints:", report.hints);
       }
       if (report.errors?.length) {
-        console.warn("Sync errors:", report.errors);
+        devWarn("Sync errors:", report.errors);
       }
     } catch (err) {
       $("debug-json").value = JSON.stringify({ error: err.message }, null, 2);
@@ -7353,7 +7437,7 @@
         try {
           state.searchPool = await fetchAllConversationsForSearch();
         } catch (err) {
-          console.warn("search fetch failed", err);
+          devWarn("search fetch failed", err);
           state.searchPool = state.conversations;
         }
       } else {
