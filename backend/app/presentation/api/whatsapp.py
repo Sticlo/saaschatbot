@@ -51,11 +51,13 @@ def _gateway_unavailable_message(exc: EvolutionAPIError) -> str:
             "WAHA no responde. Inicia Docker y ejecuta: ./scripts/waha-docker.sh "
             "o cambia WHATSAPP_PROVIDER=evolution en el .env"
         )
-    if "Evolution API" in text or "Connection refused" in text or "ConnectError" in text:
+    if "No se pudo conectar con Evolution API" in text or "Connection refused" in text or "ConnectError" in text:
         return (
             "Evolution API no está corriendo. En otra terminal ejecuta: "
             "./scripts/evolution-mac.sh start"
         )
+    if text.startswith("Evolution API error"):
+        return "WhatsApp tardó en preparar la conexión. Intenta de nuevo en unos segundos."
     return text
 
 

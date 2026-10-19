@@ -20,6 +20,32 @@ def test_pairing_number_takes_colombian_numbers_as_typed():
     assert pairing_number("") is None
 
 
+def test_recreate_waits_until_evolution_frees_the_name(monkeypatch):
+    """Evolution responde 403 si se crea la instancia justo después de borrarla: el primer intento fallaba."""
+    from app.application.whatsapp import whatsapp_service as svc
+    from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError
+
+    monkeypatch.setattr(svc, "RECREATE_RETRY_WAITS", (0, 0, 0))
+    monkeypatch.setattr(svc.settings, "evolution_database_url", "")
+    monkeypatch.setattr(svc, "gateway_logout_instance", MagicMock())
+    monkeypatch.setattr(svc, "gateway_delete_instance", MagicMock())
+    monkeypatch.setattr(svc, "gateway_instance_exists", MagicMock(return_value=False))
+    create = MagicMock(
+        side_effect=[WhatsAppGatewayError("name in use", status_code=403), WhatsAppGatewayError("name in use", status_code=403), {}]
+    )
+    monkeypatch.setattr(svc, "gateway_create_instance", create)
+    session = MagicMock(instance_name="t_test")
+
+    svc._reset_gateway_instance_credentials(session, webhook_url="http://x", webhook_secret="s")
+    assert create.call_count == 3
+
+    create.reset_mock(side_effect=True)
+    create.side_effect = WhatsAppGatewayError("name in use", status_code=403)
+    with pytest.raises(WhatsAppGatewayError):
+        svc._reset_gateway_instance_credentials(session, webhook_url="http://x", webhook_secret="s")
+    assert create.call_count == 4
+
+
 def test_pairing_code_is_read_from_any_evolution_payload():
     from app.application.whatsapp.whatsapp_service import extract_pairing_code
 

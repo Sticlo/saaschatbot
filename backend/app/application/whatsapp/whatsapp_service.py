@@ -104,6 +104,7 @@ def whatsapp_connect_lock(tenant_id: uuid.UUID) -> Iterator[bool]:
 
 PAIRING_CODE_TTL_SECONDS = 10 * 60
 PAIRING_CODE_WAIT_SECONDS = 12
+RECREATE_RETRY_WAITS = (0.5, 1.0, 1.5, 2.0, 3.0)
 # Un clic más en «Conectar» dentro de esta ventana reusa el QR o el código vigente: recrear la
 # instancia invalida lo que el dueño ya tiene en pantalla o está escaneando.
 QR_REUSE_SECONDS = 60
@@ -407,18 +408,27 @@ def _reset_gateway_instance_credentials(
 
         purge_instance_stored_data(settings.evolution_database_url, name)
 
-    try:
-        gateway_create_instance(name, webhook_url, webhook_secret, number=number)
-        log.info("Instancia %s recreada para QR limpio", name)
-    except WhatsAppGatewayError as exc:
-        if exc.status_code in (400, 403, 409) and gateway_instance_exists(name):
-            try:
-                gateway_restart_instance(name)
-                log.info("Instancia %s reiniciada tras recreate fallido", name)
-            except WhatsAppGatewayError as restart_exc:
-                log.warning("restart %s: %s", name, restart_exc)
-        elif exc.status_code not in (400, 403, 409):
-            raise
+    # Evolution suelta el nombre un momento después de borrar: crear de inmediato da 403
+    # «name already in use» aunque la instancia ya no exista.
+    for wait in (*RECREATE_RETRY_WAITS, None):
+        try:
+            gateway_create_instance(name, webhook_url, webhook_secret, number=number)
+            log.info("Instancia %s recreada para QR limpio", name)
+            return
+        except WhatsAppGatewayError as exc:
+            if exc.status_code not in (400, 403, 409):
+                raise
+            if gateway_instance_exists(name):
+                try:
+                    gateway_restart_instance(name)
+                    log.info("Instancia %s reiniciada tras recreate fallido", name)
+                except WhatsAppGatewayError as restart_exc:
+                    log.warning("restart %s: %s", name, restart_exc)
+                return
+            if wait is None:
+                raise
+            log.info("Evolution aún no suelta %s (%s); reintento en %.1fs", name, exc.status_code, wait)
+            time.sleep(wait)
 
 
 def _prepare_instance_for_new_qr(
