@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     ops_alert_throttle_seconds: int = 900
     ops_ai_queue_alert_threshold: int = 150
     ops_webhook_queue_alert_threshold: int = 500
+    # Carpeta de respaldos montada en la API (solo lectura); vacío = no se vigila.
+    backup_status_dir: str = "/backups"
 
     trial_bait_limit: int = 10
     # Prueba gratis desde el registro; al vencer la IA deja de responder hasta que paguen.

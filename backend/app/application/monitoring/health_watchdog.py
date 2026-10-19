@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import text
@@ -107,8 +109,69 @@ def _check_whatsapp_gateway() -> None:
         )
 
 
+# El respaldo sale una vez al día: más de 26 h sin uno bueno ya es una falla.
+BACKUP_MAX_AGE_SECONDS = 26 * 3600
+BACKUP_ALERT_THROTTLE_SECONDS = 6 * 3600
+
+
+def _read_backup_status(directory: Path) -> dict[str, int]:
+    status: dict[str, int] = {}
+    try:
+        lines = (directory / "status.env").read_text().splitlines()
+    except OSError:
+        return status
+    for line in lines:
+        key, _, value = line.partition("=")
+        if value.strip().isdigit():
+            status[key.strip()] = int(value.strip())
+    return status
+
+
+def backup_problems(directory: Path, now: Optional[float] = None) -> list[str]:
+    """Qué parte del respaldo diario no está saliendo; vacío si todo va bien o no hay carpeta montada."""
+    if not directory.is_dir():
+        return []
+    now = now if now is not None else time.time()
+    status = _read_backup_status(directory)
+    newest_dump = max((p.stat().st_mtime for p in directory.glob("*.dump")), default=0)
+    last_dump = max(status.get("LAST_DUMP_OK", 0), newest_dump)
+    problems = []
+    if now - last_dump > BACKUP_MAX_AGE_SECONDS:
+        problems.append("No hay copia de las bases de datos en más de 26 horas.")
+    if not status:
+        return problems
+    checks = [
+        ("LAST_FILES_OK", "No se respaldaron las fotos, catálogos y archivos de chats."),
+        ("LAST_RESTORE_OK", "La prueba de restauración falló: la última copia podría no servir."),
+    ]
+    if status.get("OFFSITE_ENABLED") == 1:
+        checks.append(("LAST_OFFSITE_OK", "La copia cifrada fuera del servidor no se subió."))
+    for key, message in checks:
+        if now - status.get(key, 0) > BACKUP_MAX_AGE_SECONDS:
+            problems.append(message)
+    return problems
+
+
+def _check_backups() -> None:
+    if not settings.backup_status_dir:
+        return
+    problems = backup_problems(Path(settings.backup_status_dir))
+    if problems:
+        alert_dev(
+            "watchdog:backups",
+            "Los respaldos diarios están fallando",
+            "\n".join(problems) + "\nRevisa: docker compose logs backup",
+            severity="critical",
+            throttle_seconds=BACKUP_ALERT_THROTTLE_SECONDS,
+        )
+
+
 def run_checks() -> None:
     _check_postgres()
+    try:
+        _check_backups()
+    except Exception:
+        log.warning("Watchdog no pudo revisar los respaldos", exc_info=True)
     if not redis_ping():
         alert_dev(
             "watchdog:redis",
