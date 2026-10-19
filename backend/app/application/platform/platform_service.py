@@ -23,6 +23,7 @@ from app.application.billing.subscription_service import (
 )
 from app.application.billing.tenant_service import log_audit
 from app.application.conversations.interest_alert_service import alert_recipients
+from app.application.platform.content_review import content_findings, pending_terms
 from app.application.platform.incidents import PROBLEM_ACTIONS
 from app.application.platform.tenant_overrides import (
     FEATURES,
@@ -158,6 +159,7 @@ def _wa_disconnects(db: Session, ids: list[uuid.UUID], since: datetime) -> dict[
 
 
 ATTENTION_LABELS = {
+    "content_risk": "Posible venta de algo ilegal",
     "wa_banned": "WhatsApp bloqueado o restringido",
     "wa_rejected": "WhatsApp rechazó el vínculo",
     "wa_down": "WhatsApp caído",
@@ -201,6 +203,7 @@ def attention_reasons(
     readiness: Optional[dict],
     now: datetime,
     unanswered: int = 0,
+    risky_terms: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     """Por qué hay que mirar (o llamar) a esta empresa hoy, de lo más urgente a lo menos."""
     if not tenant.is_active:
@@ -212,6 +215,8 @@ def attention_reasons(
     connected = status == "connected"
     reasons: list[tuple[int, str, Optional[datetime], Optional[str]]] = []
 
+    if risky_terms:
+        reasons.append((1, "content_risk", None, ", ".join(risky_terms[:3])))
     if status in ("banned", "restricted"):
         reasons.append((1, "wa_banned", None, None))
     elif not connected and any(r == "device_removed" for r, _ in disconnects_7d):
@@ -314,6 +319,7 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
     disconnects = _wa_disconnects(db, ids, since)
     now = datetime.now(timezone.utc)
     unanswered = _unanswered_questions(db, ids, now)
+    findings = content_findings(db, ids)
 
     from app.application.ai.ai_readiness_service import tenant_readiness
 
@@ -334,6 +340,7 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
             readiness=tenant_readiness(db, t.id) if live else None,
             now=now,
             unanswered=unanswered.get(t.id, 0),
+            risky_terms=pending_terms(t, findings.get(t.id, [])),
         )
         out.append(
             {
@@ -345,7 +352,7 @@ def list_tenants(db: Session, *, query: str = "") -> list[dict[str, Any]]:
                 "activation": activation_status(t, subs.get(t.id), t.id in connected),
                 "whatsapp_status": t.whatsapp_status,
                 "ai_enabled": t.ai_global_enabled and feature_allowed(t, "ai_replies"),
-                "has_overrides": bool(tenant_overrides(t)),
+                "has_overrides": bool(set(tenant_overrides(t)) - {"content_reviewed"}),
                 "subscription": _subscription_view(t, subs.get(t.id)),
                 "ai_replies_today": get_daily_reply_count(t.id),
                 "conversations": conv[1] if conv else 0,
@@ -533,7 +540,10 @@ def tenant_detail(db: Session, tenant: Tenant) -> dict[str, Any]:
     ever_connected = bool(_ever_connected(db, [tenant.id]))
     owner = next((u for u in users if u.role == UserRole.OWNER.value), users[0] if users else None)
     alert_phones = [r["phone"] for r in alert_recipients(profile) if r.get("phone")]
+    findings = content_findings(db, [tenant.id]).get(tenant.id, [])
+    pending = pending_terms(tenant, findings)
     return {
+        "content_review": {"findings": findings, "pending": pending},
         "attention": attention_reasons(
             tenant,
             sub,
@@ -545,6 +555,7 @@ def tenant_detail(db: Session, tenant: Tenant) -> dict[str, Any]:
             readiness=readiness,
             now=now,
             unanswered=_unanswered_questions(db, [tenant.id], now).get(tenant.id, 0),
+            risky_terms=pending,
         ),
         "activation_steps": activation_steps(db, tenant, sub, readiness),
         "readiness": readiness,
@@ -691,6 +702,7 @@ def update_tenant(
     extend_trial_days: Optional[int] = None,
     overrides: Optional[dict[str, Any]] = None,
     reset_ai_today: bool = False,
+    content_reviewed: bool = False,
 ) -> list[str]:
     """Aplica los cambios y deja cada uno en el historial de la empresa con el correo de quien lo hizo."""
     changes: list[tuple[str, str, dict[str, Any]]] = []
@@ -761,6 +773,8 @@ def update_tenant(
         except ValueError as exc:
             raise PlatformError(str(exc)) from exc
         before = tenant_overrides(tenant)
+        if "content_reviewed" in before:
+            clean["content_reviewed"] = before["content_reviewed"]
         if clean != before:
             tenant.platform_overrides = clean or None
             changes.append(
@@ -778,6 +792,16 @@ def update_tenant(
                 {},
             )
         )
+
+    if content_reviewed:
+        terms = pending_terms(tenant, content_findings(db, [tenant.id]).get(tenant.id, []))
+        if terms:
+            current = dict(tenant_overrides(tenant))
+            current["content_reviewed"] = sorted(set(current.get("content_reviewed") or []) | set(terms))
+            tenant.platform_overrides = current
+            changes.append(
+                ("platform.content_reviewed", f"Contenido revisado y aprobado: {', '.join(terms)}", {"terms": terms})
+            )
 
     if reset_ai_today:
         from app.application.ai.ai_usage_service import _classify_day_key, _reply_day_key

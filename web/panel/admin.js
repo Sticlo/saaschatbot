@@ -102,6 +102,7 @@
 
   // Mensaje sugerido para escribirle al dueño según lo más urgente; tú lo envías a mano.
   const OUTREACH = {
+    content_risk: "revisando la cuenta de {biz} vimos productos o textos que podrían no estar permitidos en Omitel (sección 7 de los términos: uso aceptable). ¿Nos cuentas qué ofrecen exactamente para aclararlo?",
     wa_banned: "vi que WhatsApp restringió el número de {biz}. Te escribo para ayudarte a revisarlo y cuidar el número. ¿Tienes 5 minutos?",
     wa_rejected: "vi que WhatsApp no dejó completar la vinculación de {biz}. Ya lo estamos revisando. ¿Te queda bien que lo intentemos juntos?",
     wa_down: "vi que el WhatsApp de {biz} se desconectó de Omitel y la IA no está respondiendo. Para volver a conectarlo entra a app.omitel.net, toca Conectar y escanea el código. ¿Te ayudo?",
@@ -189,6 +190,7 @@
   }
 
   function reasonText(r) {
+    if (r.key === "content_risk" && r.detail) return `Revisar contenido: ${r.detail}`;
     if (r.key === "trial_ending") return `Prueba termina ${until(r.at)}`;
     if (r.key === "ai_not_ready" && r.detail) return `IA sin configurar (${r.detail})`;
     if (r.key === "ai_failures" && r.detail) return `${r.detail} fallas de IA (7 d)`;
@@ -467,6 +469,7 @@
         ${d.alert_phone_set ? "" : badge("Sin teléfono de alertas", "warn")}
       </div>
 
+      ${renderContentReview(d)}
       ${renderAttentionBox(d)}
 
       <h3>Camino a pagar</h3>
@@ -557,6 +560,24 @@
     const first = (d.contact?.name || "").trim().split(/\s+/)[0];
     const body = (OUTREACH[top?.key] || OUTREACH.default).replace("{biz}", d.business_name);
     return `Hola${first ? ` ${first}` : ""}, soy Juan de Omitel. ${body.charAt(0).toUpperCase()}${body.slice(1)}`;
+  }
+
+  function renderContentReview(d) {
+    const review = d.content_review || {};
+    if (!d.is_active || !(review.pending || []).length) return "";
+    const pending = new Set(review.pending);
+    const rows = (review.findings || []).filter((f) => pending.has(f.term)).map((f) => `
+      <li><b>${esc(f.term)}</b> <span class="admin-muted">en ${esc(f.where)}</span></li>`).join("");
+    return `
+      <div class="admin-attention admin-content-risk" role="alert">
+        <div class="admin-attention-head"><b>Posible venta de algo ilegal</b></div>
+        <ul class="admin-content-list">${rows}</ul>
+        <p class="admin-muted">Revisa su catálogo antes de decidir: una droguería o un restaurante pueden salir aquí por error.</p>
+        <div class="admin-row">
+          <button type="button" class="admin-btn admin-btn-danger" data-action="suspend">Suspender empresa</button>
+          <button type="button" class="admin-btn admin-btn-ghost" data-action="content-ok">Revisado: es legal</button>
+        </div>
+      </div>`;
   }
 
   function renderAttentionBox(d) {
@@ -728,6 +749,9 @@
         return patch({ is_active: false }, "Empresa suspendida");
       case "reactivate":
         return patch({ is_active: true }, "Empresa reactivada");
+      case "content-ok":
+        if (!confirm(`¿Confirmas que lo que vende ${name} es legal? La alerta vuelve si aparece un término nuevo.`)) return;
+        return patch({ content_reviewed: true }, "Marcado como revisado");
       case "contact-wa":
         return contact("wa");
       case "contact-mail":

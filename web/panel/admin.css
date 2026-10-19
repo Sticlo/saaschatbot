@@ -142,6 +142,9 @@
 .admin-attention-head .admin-badges { margin: 0; }
 .admin-attention textarea { min-height: 84px; margin-bottom: 8px; }
 .admin-contact-line { margin: 0; font-size: 12px; }
+.admin-content-risk { border-color: rgba(234, 67, 53, 0.55); background: rgba(234, 67, 53, 0.07); }
+.admin-content-list { margin: 0 0 8px; padding-left: 18px; display: grid; gap: 4px; }
+.admin-content-risk .admin-muted { margin: 0 0 8px; font-size: 12px; }
 
 .admin-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .admin-steps li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; color: var(--muted); }

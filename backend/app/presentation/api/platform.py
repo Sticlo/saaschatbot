@@ -34,6 +34,7 @@ class PlatformTenantUpdate(BaseModel):
     extend_trial_days: Optional[int] = Field(default=None, ge=1, le=60)
     overrides: Optional[dict[str, Any]] = None
     reset_ai_today: bool = False
+    content_reviewed: bool = False
 
 
 def _tenant_or_404(db: Session, tenant_id: uuid.UUID) -> Tenant:
@@ -130,6 +131,7 @@ def platform_update_tenant(
             extend_trial_days=body.extend_trial_days,
             overrides=body.overrides,
             reset_ai_today=body.reset_ai_today,
+            content_reviewed=body.content_reviewed,
         )
     except PlatformError as exc:
         db.rollback()
