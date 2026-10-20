@@ -81,6 +81,15 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+def _too_large_message(path: str) -> str:
+    if path.startswith(_UPLOAD_PREFIXES):
+        return (
+            "El archivo es muy pesado: los PDF pueden pesar hasta 10 MB y las imágenes hasta 5 MB. "
+            "Comprime el PDF gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez."
+        )
+    return "El contenido enviado es demasiado grande"
+
+
 class BodySizeLimitMiddleware:
     """Corta cuerpos gigantes antes de leerlos en memoria (DoS por payload)."""
 
@@ -104,7 +113,7 @@ class BodySizeLimitMiddleware:
         if declared is not None:
             try:
                 if int(declared) > limit:
-                    await _send_json(send, 413, "El contenido enviado es demasiado grande")
+                    await _send_json(send, 413, _too_large_message(scope.get("path", "")))
                     return
             except ValueError:
                 await _send_json(send, 400, "Content-Length inválido")
@@ -132,7 +141,7 @@ class BodySizeLimitMiddleware:
             await self.app(scope, limited_receive, tracking_send)
         except _BodyTooLarge:
             if not response_started:
-                await _send_json(send, 413, "El contenido enviado es demasiado grande")
+                await _send_json(send, 413, _too_large_message(scope.get("path", "")))
 
 
 class _BodyTooLarge(Exception):

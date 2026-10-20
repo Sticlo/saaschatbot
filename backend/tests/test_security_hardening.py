@@ -190,6 +190,20 @@ def test_oversized_body_is_rejected(client: TestClient, monkeypatch):
     assert res.status_code == 413
 
 
+def test_oversized_catalog_upload_says_the_limit_and_how_to_fix_it(client: TestClient, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "max_upload_body_bytes", 64)
+    res = client.post(
+        "/api/v1/quick-shortcuts/files",
+        content=b"x" * 200,
+        headers={"Content-Type": "multipart/form-data; boundary=x", "Content-Length": "200"},
+    )
+    assert res.status_code == 413
+    assert "10 MB" in res.json()["detail"]
+    assert "ilovepdf" in res.json()["detail"]
+
+
 def test_rate_limit_returns_429(client: TestClient, monkeypatch):
     from app.config import settings
     from app.infrastructure.cache.redis_client import get_redis

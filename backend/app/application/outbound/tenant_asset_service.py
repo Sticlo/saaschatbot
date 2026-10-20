@@ -160,7 +160,10 @@ def save_tenant_catalog_file(tenant_id: uuid.UUID, upload: UploadFile) -> tuple[
     mime = _detect_mime(upload)
     if mime == PDF_MIME:
         if len(raw) > MAX_PDF_BYTES:
-            raise HTTPException(status_code=413, detail="El PDF no puede superar 10 MB")
+            raise HTTPException(
+                status_code=413,
+                detail="El PDF no puede superar 10 MB. Comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez.",
+            )
         if not raw.startswith(b"%PDF-"):
             raise HTTPException(status_code=400, detail="El archivo no parece un PDF válido")
     elif mime in _ALLOWED_MIME:

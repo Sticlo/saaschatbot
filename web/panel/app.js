@@ -5773,6 +5773,21 @@
     $("shortcuts-modal").classList.add("hidden");
   }
 
+  const SHORTCUT_PDF_MAX_MB = 10;
+  const SHORTCUT_IMAGE_MAX_MB = 5;
+
+  function shortcutFileTooBig(file) {
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+    const maxMb = isPdf ? SHORTCUT_PDF_MAX_MB : SHORTCUT_IMAGE_MAX_MB;
+    const sizeMb = file.size / (1024 * 1024);
+    if (sizeMb <= maxMb) return "";
+    const what = isPdf ? "El PDF" : "La imagen";
+    const fix = isPdf
+      ? "Comprímelo gratis en ilovepdf.com/es/comprimir_pdf (compresión recomendada) y súbelo otra vez: se sigue viendo bien y a tus clientes les carga más rápido."
+      : "Reduce su tamaño (por ejemplo con una captura de pantalla) y súbela otra vez.";
+    return `${what} pesa ${sizeMb.toFixed(1)} MB y el máximo es ${maxMb} MB.\n\n${fix}`;
+  }
+
   function renderShortcutsEditor() {
     const list = $("shortcuts-editor-list");
     if (!list) return;
@@ -5841,6 +5856,12 @@
       row.querySelector(".shortcut-file-input")?.addEventListener("change", async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        const tooBig = shortcutFileTooBig(file);
+        if (tooBig) {
+          e.target.value = "";
+          alert(tooBig);
+          return;
+        }
         const draft = state.shortcutsDraft[idx];
         draft.uploading = true;
         renderShortcutsEditor();
