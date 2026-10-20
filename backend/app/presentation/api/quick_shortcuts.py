@@ -61,7 +61,8 @@ def list_shortcuts(current: RequireViewer, db: Session = Depends(get_db)):
 def upload_catalog_file(
     current: RequireOwner, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    """Sube una foto o PDF (menú, carta, catálogo) y deja que la IA lea qué contiene."""
+    """Sube una foto o PDF (menú, carta, catálogo). La IA lee las fotos; el PDF solo se guarda
+    para enviarlo: sus productos se cargan en Inventario."""
     if not feature_allowed(db.get(Tenant, current.tenant_id), "catalog_files"):
         raise HTTPException(status_code=403, detail="Tu plan no incluye subir catálogos. Escríbenos para activarlo.")
     enforce_rate_limit(
@@ -73,7 +74,7 @@ def upload_catalog_file(
     path, mime = save_tenant_catalog_file(current.tenant_id, file)
     is_pdf = mime == PDF_MIME
     content = ""
-    if gemini_client.is_configured():
+    if not is_pdf and gemini_client.is_configured():
         try:
             raw = resolve_asset_path(path, tenant_id=current.tenant_id).read_bytes()
             content = gemini_client.extract_catalog(base64.b64encode(raw).decode("ascii"), mime)

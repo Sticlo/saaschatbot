@@ -200,17 +200,15 @@ def assets_cleanup():
 
 
 @requires_db
-def test_upload_pdf_reads_catalog_and_saves_shortcut(client: TestClient, monkeypatch, assets_cleanup):
+def test_upload_pdf_is_saved_to_send_without_reading_it(client: TestClient, monkeypatch, assets_cleanup):
     from app.infrastructure.ai import gemini_client
 
-    seen = {}
     monkeypatch.setattr(gemini_client, "is_configured", lambda: True)
 
-    def fake_extract(b64, mime, timeout=90.0):
-        seen["mime"] = mime
-        return "Tenis blancos $120.000"
+    def fail_extract(*_args, **_kwargs):
+        raise AssertionError("el PDF de un atajo no se lee con la IA: eso es en Inventario")
 
-    monkeypatch.setattr(gemini_client, "extract_catalog", fake_extract)
+    monkeypatch.setattr(gemini_client, "extract_catalog", fail_extract)
     headers = _register(client)
 
     res = client.post(
@@ -223,9 +221,7 @@ def test_upload_pdf_reads_catalog_and_saves_shortcut(client: TestClient, monkeyp
     assets_cleanup.append(data["path"])
     assert data["type"] == "document"
     assert data["file_name"].endswith(".pdf")
-    assert data["content"] == "Tenis blancos $120.000"
-    assert data["content_ok"] is True
-    assert seen["mime"] == "application/pdf"
+    assert data["content"] == ""
 
     saved = client.put(
         "/api/v1/quick-shortcuts",
@@ -235,13 +231,11 @@ def test_upload_pdf_reads_catalog_and_saves_shortcut(client: TestClient, monkeyp
             "type": "document",
             "file_path": data["path"],
             "file_name": data["file_name"],
-            "content": data["content"],
         }]},
     )
     assert saved.status_code == 200, saved.text
     row = saved.json()[0]
     assert row["type"] == "document"
-    assert row["content"] == "Tenis blancos $120.000"
     assert row["file_url"].endswith(".pdf")
 
 

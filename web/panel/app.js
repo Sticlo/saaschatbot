@@ -5846,7 +5846,7 @@
           ? `<span class="small">${escapeHtml(s.file_name || "catalogo.pdf")}</span>`
           : "";
       const uploadLabel = s.uploading
-        ? "Leyendo archivo…"
+        ? (type === "image" ? "Leyendo foto…" : "Subiendo PDF…")
         : type === "image" ? "Subir foto" : "Subir PDF";
       const accept = type === "image"
         ? "image/jpeg,image/png,image/webp,image/gif"
@@ -5872,7 +5872,10 @@
             </label>
             ${preview}
           </div>
-          <div class="shortcut-content-wrap ${isFile && hasFile ? "" : "hidden"}">
+          ${type === "document" && hasFile
+            ? `<p class="small muted">Este PDF se envía tal cual. Para que la IA conozca tus productos y precios, cárgalos en Inventario.</p>`
+            : ""}
+          <div class="shortcut-content-wrap ${type === "image" && hasFile ? "" : "hidden"}">
             <label class="small muted">Lo que la IA sabe de este archivo</label>
             <textarea class="shortcut-content" rows="4" maxlength="4000" placeholder="Ej: Tenis blancos $120.000 (tallas 36-42)…">${escapeHtml(s.content || "")}</textarea>
             <p class="small muted">${contentHint}</p>
@@ -5927,7 +5930,7 @@
             draft.file_name = null;
           }
           draft.content = res.content || "";
-          draft.content_failed = !res.content_ok;
+          draft.content_failed = res.type === "image" && !res.content_ok;
         } catch (err) {
           alertWithCompress(err.message);
         } finally {
