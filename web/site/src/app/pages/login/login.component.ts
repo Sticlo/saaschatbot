@@ -4,6 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ShellComponent } from '../../layout/shell/shell.component';
+import { storedAttribution } from '../../core/attribution';
 import { appUrl, oauthStartUrl } from '../../core/oauth-url';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../../core/services/auth.service';
@@ -214,6 +215,7 @@ export class LoginComponent implements OnInit {
             owner_name: this.authForm.controls.owner_name.value.trim(),
             accept_legal: this.authForm.controls.accept_legal.value,
             accept_marketing: this.authForm.controls.accept_marketing.value,
+            attribution: storedAttribution() ?? undefined,
           }
         : {}),
     };

@@ -51,7 +51,10 @@ def register_tenant_with_owner(
     owner_name: str,
     email: str,
     hashed_password: Optional[str],
+    attribution: Optional[dict] = None,
 ) -> Tuple[Tenant, User]:
+    from app.application.integration.siochat import apply_attribution, record_event
+
     slug = _unique_slug(db, business_name)
     plan = get_default_plan(db)
     tenant = Tenant(
@@ -62,6 +65,7 @@ def register_tenant_with_owner(
         ai_global_enabled=False,
         ai_autostart_pending=True,
     )
+    apply_attribution(tenant, attribution)
     db.add(tenant)
     db.flush()
 
@@ -81,6 +85,7 @@ def register_tenant_with_owner(
     )
     db.add_all([profile, subscription, owner])
     db.flush()
+    record_event(db, tenant, "registro")
     return tenant, owner
 
 

@@ -5,6 +5,7 @@ import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 import { routes } from './app.routes';
+import { captureAttribution } from './core/attribution';
 import { API_BASE_URL } from './core/tokens';
 import { SessionService } from './core/services/session.service';
 import { environment } from '../environments/environment';
@@ -13,6 +14,7 @@ function initSession(session: SessionService, platformId: object): () => Promise
   return () => {
     /* En el prerender no hay visitante: la sesión solo se consulta en el navegador. */
     if (isPlatformBrowser(platformId)) {
+      captureAttribution();
       session.initialize().subscribe();
     }
     return Promise.resolve();

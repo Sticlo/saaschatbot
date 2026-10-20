@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -22,6 +23,7 @@ from app.infrastructure.cache.redis_client import cache_delete, cache_get, cache
 log = logging.getLogger(__name__)
 
 _OAUTH_STATE_PREFIX = "oauth_state:"
+_OAUTH_ATTRIBUTION_PREFIX = "oauth_attribution:"
 _OAUTH_STATE_TTL = 600
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -50,11 +52,28 @@ def oauth_provider_enabled(provider: str) -> bool:
     return False
 
 
-def create_oauth_state(provider: str, next_url: Optional[str] = None) -> str:
+def create_oauth_state(
+    provider: str, next_url: Optional[str] = None, attribution: Optional[dict[str, Any]] = None
+) -> str:
     state = secrets.token_urlsafe(24)
     payload = provider if not next_url else f"{provider}|{next_url}"
     cache_set(f"{_OAUTH_STATE_PREFIX}{state}", payload, _OAUTH_STATE_TTL)
+    if attribution:
+        cache_set(f"{_OAUTH_ATTRIBUTION_PREFIX}{state}", json.dumps(attribution), _OAUTH_STATE_TTL)
     return state
+
+
+def pop_oauth_attribution(state: str) -> Optional[dict[str, Any]]:
+    key = f"{_OAUTH_ATTRIBUTION_PREFIX}{state}"
+    raw = cache_get(key)
+    if not raw:
+        return None
+    cache_delete(key)
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def consume_oauth_state(state: str, provider: str) -> tuple[bool, Optional[str]]:
@@ -207,6 +226,7 @@ def resolve_oauth_user(
     profile: OAuthProfile,
     *,
     ip_address: Optional[str],
+    attribution: Optional[dict[str, Any]] = None,
 ) -> User:
     by_oauth = (
         db.query(User)
@@ -245,6 +265,7 @@ def resolve_oauth_user(
         owner_name=profile.full_name,
         email=profile.email,
         hashed_password=None,
+        attribution=attribution,
     )
     owner.oauth_provider = profile.provider
     owner.oauth_subject = profile.subject

@@ -1,4 +1,5 @@
 import { environment } from '../../environments/environment';
+import { attributionQuery } from './attribution';
 
 /** URL absoluta para navegar: las rutas del panel viven en el dominio de la app. */
 export function appUrl(path: string): string {
@@ -11,5 +12,6 @@ export function appUrl(path: string): string {
 /** El OAuth arranca en la API: allí queda la cookie de sesión. */
 export function oauthStartUrl(provider: 'google' | 'github', nextPath: string): string {
   const next = encodeURIComponent(nextPath);
-  return `${environment.apiUrl}/api/v1/auth/${provider}/start?next=${next}`;
+  const attribution = typeof window !== 'undefined' ? attributionQuery() : '';
+  return `${environment.apiUrl}/api/v1/auth/${provider}/start?next=${next}${attribution}`;
 }

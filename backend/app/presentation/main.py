@@ -30,6 +30,7 @@ from app.presentation.security_middleware import (
 from app.shared.core.rate_limit import client_ip
 
 from app.presentation.websockets.panel_ws import router as panel_ws_router
+from app.presentation.api.integration import router as integration_router
 from app.presentation.api.router import api_router
 from app.presentation.api.webhooks import router as webhooks_router
 from app.presentation.api.chatwoot_webhooks import router as chatwoot_webhooks_router
@@ -212,6 +213,7 @@ async def unhandled_error(request: Request, exc: Exception):
 
 
 app.include_router(api_router)
+app.include_router(integration_router)
 app.include_router(webhooks_router)
 app.include_router(chatwoot_webhooks_router)
 app.include_router(panel_ws_router)

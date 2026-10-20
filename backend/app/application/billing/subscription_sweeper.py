@@ -56,6 +56,9 @@ def _loop() -> None:
 
 def start_subscription_sweeper() -> None:
     global _thread
+    from app.application.integration.siochat import start_event_sender
+
+    start_event_sender()
     if _thread and _thread.is_alive():
         return
     _stop.clear()
@@ -64,4 +67,7 @@ def start_subscription_sweeper() -> None:
 
 
 def stop_subscription_sweeper() -> None:
+    from app.application.integration.siochat import stop_event_sender
+
+    stop_event_sender()
     _stop.set()

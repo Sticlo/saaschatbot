@@ -1,3 +1,5 @@
+import type { Attribution } from '../attribution';
+
 export interface AuthProviders {
   google: boolean;
   github: boolean;
@@ -18,6 +20,7 @@ export interface MagicLinkRequest {
   owner_name?: string;
   accept_legal?: boolean;
   accept_marketing?: boolean;
+  attribution?: Attribution;
 }
 
 export interface MagicLinkResponse {

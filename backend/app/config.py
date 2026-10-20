@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # Carpeta de respaldos montada en la API (solo lectura); vacío = no se vigila.
     backup_status_dir: str = "/backups"
 
+    # siochat (prospección): consulta el estado de cada lead y recibe eventos firmados.
+    integration_api_token: str = ""
+    integration_webhook_url: str = ""
+    omitel_webhook_secret: str = ""
+
     trial_bait_limit: int = 10
     # Prueba gratis desde el registro; al vencer la IA deja de responder hasta que paguen.
     trial_days: int = 3

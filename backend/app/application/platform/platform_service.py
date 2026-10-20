@@ -23,6 +23,7 @@ from app.application.billing.subscription_service import (
 )
 from app.application.billing.tenant_service import log_audit
 from app.application.conversations.interest_alert_service import alert_recipients
+from app.application.integration.siochat import record_event
 from app.application.platform.content_review import content_findings, pending_terms
 from app.application.platform.incidents import PROBLEM_ACTIONS
 from app.application.platform.tenant_overrides import (
@@ -735,6 +736,7 @@ def update_tenant(
         if sub is None or sub.plan is None:
             raise PlatformError("La empresa no tiene suscripción")
         new_end = _grant_paid_days(db, tenant, sub, grant_paid_days)
+        record_event(db, tenant, "pago")
         changes.append(
             (
                 "platform.paid_days_granted",
@@ -785,6 +787,8 @@ def update_tenant(
         if not is_active and tenant.id == admin_tenant_id:
             raise PlatformError("No puedes suspender tu propia empresa: perderías el acceso a la consola")
         tenant.is_active = is_active
+        if not is_active:
+            record_event(db, tenant, "cancelado")
         changes.append(
             (
                 "platform.reactivated" if is_active else "platform.suspended",

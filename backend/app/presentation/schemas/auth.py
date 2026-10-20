@@ -16,6 +16,18 @@ class TokenResponse(BaseModel):
     email: EmailStr
 
 
+class SignupAttribution(BaseModel):
+    """UTM, referido y lead (número del negocio) con los que llegó al sitio."""
+
+    utm_source: Optional[str] = Field(default=None, max_length=200)
+    utm_medium: Optional[str] = Field(default=None, max_length=200)
+    utm_campaign: Optional[str] = Field(default=None, max_length=200)
+    utm_content: Optional[str] = Field(default=None, max_length=200)
+    utm_term: Optional[str] = Field(default=None, max_length=200)
+    ref: Optional[str] = Field(default=None, max_length=200)
+    lead: Optional[str] = Field(default=None, max_length=30)
+
+
 class RegisterRequest(BaseModel):
     business_name: str = Field(min_length=2, max_length=255)
     owner_name: str = Field(min_length=2, max_length=255)
@@ -23,6 +35,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     accept_legal: bool = False
     accept_marketing: bool = False
+    attribution: Optional[SignupAttribution] = None
 
 
 class LoginRequest(BaseModel):
@@ -45,6 +58,7 @@ class MagicLinkRequest(BaseModel):
     owner_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
     accept_legal: bool = False
     accept_marketing: bool = False
+    attribution: Optional[SignupAttribution] = None
 
 
 class MagicLinkResponse(BaseModel):

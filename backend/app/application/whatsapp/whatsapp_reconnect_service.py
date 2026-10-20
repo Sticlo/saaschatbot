@@ -93,6 +93,7 @@ def _sweep_once() -> None:
         DOWN_STATUSES,
         detect_silent_drops,
         notify_owner_if_still_down,
+        report_outage_if_lasting,
     )
 
     db = SessionLocal()
@@ -115,6 +116,7 @@ def _sweep_once() -> None:
         )
         for tenant, session in rows:
             try:
+                report_outage_if_lasting(tenant.id)
                 if tenant.whatsapp_status in (
                     WhatsAppStatus.DISCONNECTED.value,
                     WhatsAppStatus.CONNECTING.value,

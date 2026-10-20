@@ -85,6 +85,9 @@ def expire_lapsed_subscriptions(db: Session, now: Optional[datetime] = None) -> 
             tenant.plan = TenantPlan.SUSPENDED.value
             tenant.daily_bait_limit = 0
             cache_set(tenant_cache_key(str(tenant.id), "plan"), tenant.plan, ttl_seconds=900)
+            from app.application.integration.siochat import record_event
+
+            record_event(db, tenant, "vencido")
         log.info("Suscripción vencida tenant=%s (venció %s)", subscription.tenant_id, subscription.current_period_end)
     if lapsed:
         db.commit()

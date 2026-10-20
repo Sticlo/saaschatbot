@@ -39,6 +39,10 @@ class Tenant(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Lo que el dueño de la plataforma ajusta a mano para esta empresa (límites, funciones, nota).
     platform_overrides: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Número del negocio que traía el link de prospección (?lead=57…): cruce exacto con siochat.
+    lead_phone: Mapped[Optional[str]] = mapped_column(String(15), nullable=True, index=True)
+    # UTM y referido con los que llegó al registrarse.
+    signup_attribution: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

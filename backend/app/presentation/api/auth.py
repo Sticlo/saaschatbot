@@ -51,8 +51,10 @@ from app.application.auth.oauth_service import (
     github_authorize_url,
     google_authorize_url,
     oauth_provider_enabled,
+    pop_oauth_attribution,
     resolve_oauth_user,
 )
+from app.application.integration.siochat import ATTRIBUTION_KEYS
 from app.presentation.schemas.plans import ChangePasswordRequest
 from app.application.billing.tenant_service import log_audit, register_tenant_with_owner
 from app.application.auth.legal_consent_service import LEGAL_REQUIRED_MESSAGE, record_legal_consent
@@ -114,6 +116,7 @@ def register(
             owner_name=body.owner_name.strip(),
             email=body.email.lower().strip(),
             hashed_password=pwd_hash,
+            attribution=body.attribution.model_dump() if body.attribution else None,
         )
         owner.last_login_at = datetime.now(timezone.utc)
         record_legal_consent(
@@ -346,6 +349,15 @@ def oauth_finish(
     return response
 
 
+def _attribution_from_query(request: Request) -> Optional[dict[str, str]]:
+    found = {
+        key: request.query_params[key][:200]
+        for key in (*ATTRIBUTION_KEYS, "lead")
+        if request.query_params.get(key)
+    }
+    return found or None
+
+
 @router.get("/google/start")
 def google_oauth_start(request: Request, next: Optional[str] = Query(default=None)):
     enforce_rate_limit(f"oauth:ip:{_client_ip(request)}", limit=30, window_seconds=600)
@@ -353,7 +365,7 @@ def google_oauth_start(request: Request, next: Optional[str] = Query(default=Non
         return _oauth_error_redirect(
             "Google no está configurado. Añade GOOGLE_CLIENT_ID al .env del backend."
         )
-    state = create_oauth_state("google", next)
+    state = create_oauth_state("google", next, _attribution_from_query(request))
     return RedirectResponse(google_authorize_url(state))
 
 
@@ -367,6 +379,7 @@ def google_oauth_callback(
 ):
     if error:
         return _oauth_error_redirect("Cancelaste el inicio con Google")
+    attribution = pop_oauth_attribution(state or "")
     state_ok, next_url = consume_oauth_state(state or "", "google")
     if not code or not state_ok:
         return _oauth_error_redirect("Enlace de Google inválido o expirado")
@@ -376,6 +389,7 @@ def google_oauth_callback(
             db,
             profile,
             ip_address=_client_ip(request),
+            attribution=attribution,
         )
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
@@ -397,7 +411,7 @@ def github_oauth_start(request: Request, next: Optional[str] = Query(default=Non
         return _oauth_error_redirect(
             "GitHub no está configurado. Añade GITHUB_CLIENT_ID al .env del backend."
         )
-    state = create_oauth_state("github", next)
+    state = create_oauth_state("github", next, _attribution_from_query(request))
     return RedirectResponse(github_authorize_url(state))
 
 
@@ -411,6 +425,7 @@ def github_oauth_callback(
 ):
     if error:
         return _oauth_error_redirect("Cancelaste el inicio con GitHub")
+    attribution = pop_oauth_attribution(state or "")
     state_ok, next_url = consume_oauth_state(state or "", "github")
     if not code or not state_ok:
         return _oauth_error_redirect("Enlace de GitHub inválido o expirado")
@@ -420,6 +435,7 @@ def github_oauth_callback(
             db,
             profile,
             ip_address=_client_ip(request),
+            attribution=attribution,
         )
         user.last_login_at = datetime.now(timezone.utc)
         db.commit()
@@ -467,6 +483,7 @@ def request_magic_link(body: MagicLinkRequest, request: Request, db: Session = D
                 "ip": _client_ip(request),
                 "user_agent": request.headers.get("user-agent") or "",
             },
+            attribution=body.attribution.model_dump() if body.attribution else None,
         )
         return MagicLinkResponse(
             sent=True,

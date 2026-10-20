@@ -1,6 +1,7 @@
 """Que ningún WhatsApp caído pase desapercibido: avisa al dueño y detecta caídas que no llegaron por webhook."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -17,6 +18,8 @@ log = logging.getLogger(__name__)
 
 # Las caídas de red se recuperan solas en uno o dos minutos: solo se avisa si sigue caído.
 OWNER_ALERT_AFTER_SECONDS = 10 * 60
+# Una caída cuenta (consola, siochat) solo si sigue caído pasado este tiempo.
+OUTAGE_CONFIRM_SECONDS = 60
 OWNER_REMINDER_AFTER_SECONDS = 24 * 3600
 DOWN_MARK_TTL_SECONDS = 14 * 24 * 3600
 SILENT_CHECK_INTERVAL_SECONDS = 5 * 60
@@ -35,11 +38,65 @@ def _down_key(tenant_id: Any) -> str:
     return tenant_cache_key(str(tenant_id), "wa_down_since")
 
 
+def _pending_outage_key(tenant_id: Any) -> str:
+    return tenant_cache_key(str(tenant_id), "wa_outage_pending")
+
+
 def clear_down_mark(tenant_id: Any) -> None:
     try:
-        get_redis().delete(_down_key(tenant_id), tenant_cache_key(str(tenant_id), "wa_close_strikes"))
+        get_redis().delete(
+            _down_key(tenant_id),
+            _pending_outage_key(tenant_id),
+            tenant_cache_key(str(tenant_id), "wa_close_strikes"),
+        )
     except Exception:
         log.debug("No se pudo limpiar la marca de caída tenant=%s", tenant_id, exc_info=True)
+
+
+def down_started_at(tenant_id: Any) -> Optional[float]:
+    """Desde cuándo está caído, sin marcarlo (None si no hay marca)."""
+    try:
+        raw = get_redis().get(_down_key(tenant_id))
+        return float(raw.decode() if isinstance(raw, bytes) else raw) if raw else None
+    except Exception:
+        return None
+
+
+def note_outage_start(tenant_id: Any, details: dict[str, Any]) -> None:
+    """WhatsApp corta y reconecta solo cada ~50 min en 1-2 s: se anota y solo cuenta si dura."""
+    down_since(tenant_id)
+    get_redis().set(_pending_outage_key(tenant_id), json.dumps(details), nx=True, ex=DOWN_MARK_TTL_SECONDS)
+
+
+def report_outage_if_lasting(tenant_id: Any, now: Optional[float] = None) -> bool:
+    from app.application.platform.incidents import record_incident
+    from app.application.whatsapp.whatsapp_status import DISCONNECT_REASONS
+
+    client = get_redis()
+    raw = client.get(_pending_outage_key(tenant_id))
+    if not raw:
+        return False
+    now = now if now is not None else time.time()
+    if now - down_since(tenant_id, now) < OUTAGE_CONFIRM_SECONDS:
+        return False
+    # Varios workers barren a la vez: solo el que borra la marca lo registra.
+    if not client.delete(_pending_outage_key(tenant_id)):
+        return False
+    try:
+        details = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    except (TypeError, ValueError):
+        details = {}
+    reason = details.get("reason") if details.get("reason") in DISCONNECT_REASONS else "unknown"
+    code = details.get("code")
+    record_incident(
+        tenant_id,
+        "system.whatsapp_disconnected",
+        f"WhatsApp se desconectó: {DISCONNECT_REASONS[reason].lower()}" + (f" (código {code})" if code else ""),
+        details={**details, "reason": reason},
+        throttle_seconds=1800,
+        throttle_scope=reason,
+    )
+    return True
 
 
 def down_since(tenant_id: Any, now: Optional[float] = None) -> float:

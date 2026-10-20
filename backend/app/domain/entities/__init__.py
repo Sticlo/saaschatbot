@@ -20,6 +20,7 @@ from app.domain.entities.enums import (
     WhatsAppStatus,
 )
 from app.domain.entities.bait_template import BaitTemplate
+from app.domain.entities.integration_event import IntegrationEvent
 from app.domain.entities.legal_consent import LegalConsent
 from app.domain.entities.order import Order
 from app.domain.entities.outbound import Campaign, Exclusion, Lead, SendQueueItem
@@ -47,6 +48,7 @@ __all__ = [
     "ConversationMode",
     "ConversationStatus",
     "DEFAULT_PLAN_ID",
+    "IntegrationEvent",
     "LeadStatus",
     "LegalConsent",
     "Message",

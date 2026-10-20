@@ -32,6 +32,7 @@ def create_magic_link(
     business_name: str = "",
     owner_name: str = "",
     consent: Optional[dict[str, Any]] = None,
+    attribution: Optional[dict[str, Any]] = None,
 ) -> Tuple[str, Optional[str]]:
     token = secrets.token_urlsafe(32)
     payload = {
@@ -41,6 +42,7 @@ def create_magic_link(
         "owner_name": owner_name.strip(),
         # Se acepta al pedir el enlace; la cuenta (y la evidencia) se crean al abrirlo.
         "consent": consent,
+        "attribution": attribution,
     }
     cache_set(_cache_key(token), json.dumps(payload), _ttl_seconds())
     url = f"{settings.site_public_url.rstrip('/')}/auth/entrar?token={token}"
@@ -86,6 +88,7 @@ def consume_magic_link(db: Session, token: str, *, ip_address: Optional[str]) ->
             owner_name=owner_name,
             email=email,
             hashed_password=hash_password(temp_password),
+            attribution=payload.get("attribution"),
         )
         record_legal_consent(
             db,

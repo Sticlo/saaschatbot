@@ -202,6 +202,9 @@ def fulfill_checkout(
         },
         ip_address=None,
     )
+    from app.application.integration.siochat import record_event
+
+    record_event(db, tenant, "pago", monto=checkout.amount_in_cents // 100)
     if checkout.kind in (PaymentCheckoutKind.AUTO, PaymentCheckoutKind.RENEWAL):
         from app.application.billing.auto_renew_service import on_auto_charge_approved
 

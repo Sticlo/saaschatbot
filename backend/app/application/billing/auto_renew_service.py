@@ -444,6 +444,9 @@ def _end_subscription(db: Session, subscription: Subscription) -> None:
         tenant.plan = TenantPlan.SUSPENDED.value
         tenant.daily_bait_limit = 0
         cache_set(tenant_cache_key(str(tenant.id), "plan"), tenant.plan, ttl_seconds=900)
+        from app.application.integration.siochat import record_event
+
+        record_event(db, tenant, "cancelado")
 
 
 # —— Barrido periódico ——
@@ -716,6 +719,10 @@ def _end_expired_trials(db: Session, now: datetime) -> int:
             details={"trial_ends_at": _aware(subscription.trial_ends_at).isoformat()},
             message="Terminó la prueba gratis: la IA dejó de responder hasta que active el plan",
         )
+        if tenant is not None:
+            from app.application.integration.siochat import record_event
+
+            record_event(db, tenant, "vencido")
         db.commit()
         whatsapp_released = tenant is not None and _release_whatsapp(db, tenant)
         plan = subscription.plan
