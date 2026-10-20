@@ -264,15 +264,17 @@
       : "";
   }
 
-  // Un alert no deja tocar enlaces: con confirm, «Aceptar» abre la página para comprimir.
   function alertWithCompress(message) {
     if (!String(message || "").includes("ilovepdf")) {
       alert(message);
       return;
     }
-    if (confirm(`${message}\n\nToca «Aceptar» para abrir la página y comprimirlo ahora.`)) {
-      window.open(COMPRESS_PDF_URL, "_blank", "noopener");
-    }
+    askConfirm({
+      title: "El archivo pesa demasiado",
+      text: `${message}\n\nToca «Comprimir PDF gratis» para abrir la página y comprimirlo ahora.`,
+      confirmLabel: "Comprimir PDF gratis",
+      href: COMPRESS_PDF_URL,
+    });
   }
 
   function humanizeWaError(msg) {
@@ -2633,7 +2635,7 @@
       .replace(/"/g, "&quot;");
   }
 
-  function askConfirm({ title, text = "", confirmLabel = "Aceptar", danger = false }) {
+  function askConfirm({ title, text = "", confirmLabel = "Aceptar", danger = false, href = "" }) {
     const modal = $("confirm-modal");
     const ok = $("confirm-ok");
     const cancel = $("confirm-cancel");
@@ -2657,6 +2659,8 @@
       };
       const onClick = (e) => {
         const action = e.target.closest("[data-confirm]")?.dataset.confirm;
+        // Abrir dentro del mismo clic: fuera de él el navegador bloquea la pestaña nueva.
+        if (action === "ok" && href) window.open(href, "_blank", "noopener");
         if (action) close(action === "ok");
       };
       const onKey = (e) => {
