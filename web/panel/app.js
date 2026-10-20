@@ -244,6 +244,11 @@
     if (isDevToolsEnabled()) console.warn(...args);
   }
 
+  const WA_LINK_REJECTED_MSG =
+    "WhatsApp no aceptó vincular este número. En el celular: actualiza WhatsApp, entra a " +
+    "Dispositivos vinculados y cierra los que no uses. Luego espera unas horas sin reintentar " +
+    "y conecta escaneando el código QR desde un computador.";
+
   function humanizeWaError(msg) {
     const raw = (msg || "").trim();
     const lower = raw.toLowerCase();
@@ -1109,10 +1114,15 @@
       status,
       qr_base64: wa.qr_base64 ?? null,
       pairing_code: wa.pairing_code ?? null,
+      link_error: wa.link_error ?? null,
       phone_number: nextPhone,
       chatwoot_inbox_url: wa.chatwoot_inbox_url ?? null,
     };
     updateWaBadge(state.wa.status);
+    if (status === "disconnected" && !waConnectInFlight && !$("qr-modal").classList.contains("hidden")) {
+      if (state.wa.link_error === "rejected") showQrError(WA_LINK_REJECTED_MSG);
+      else if (prevStatus === "connecting") showQrError("La vinculación se cerró antes de terminar. Intenta de nuevo.");
+    }
     sendForm.classList.toggle("disabled", !state.canWrite || state.wa.status !== "connected");
     messageInput.disabled = !state.canWrite || state.wa.status !== "connected";
     if (state.wa.status === "connecting") {
@@ -6456,6 +6466,7 @@
           status: event.status,
           qr_base64: event.qr_base64,
           pairing_code: event.pairing_code,
+          link_error: event.link_error,
           phone_number: event.phone_number,
         });
         break;

@@ -30,6 +30,7 @@ class WhatsAppStatusResponse(BaseModel):
     qr_base64: Optional[str] = None
     qr_updated_at: Optional[datetime] = None
     pairing_code: Optional[str] = None
+    link_error: Optional[str] = None
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None
     chatwoot_inbox_url: Optional[str] = None

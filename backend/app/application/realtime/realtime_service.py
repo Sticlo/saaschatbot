@@ -52,6 +52,7 @@ def publish_whatsapp_status(
     qr_base64: Optional[str] = None,
     phone_number: Optional[str] = None,
     pairing_code: Optional[str] = None,
+    link_error: Optional[str] = None,
 ) -> None:
     publish_panel_event(
         tenant_id,
@@ -61,6 +62,7 @@ def publish_whatsapp_status(
             "qr_base64": qr_base64,
             "phone_number": phone_number,
             "pairing_code": pairing_code,
+            "link_error": link_error,
         },
     )
 

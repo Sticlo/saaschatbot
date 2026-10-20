@@ -36,7 +36,11 @@ from app.domain.entities import (
 from app.infrastructure.cache.redis_client import publish_event, tenant_cache_key
 from app.application.sync.contact_identity_service import apply_identity_to_conversation
 from app.application.realtime.realtime_service import publish_message_event
-from app.application.whatsapp.whatsapp_status import apply_session_status, resolve_whatsapp_status
+from app.application.whatsapp.whatsapp_status import (
+    apply_session_status,
+    classify_disconnect,
+    resolve_whatsapp_status,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1258,6 +1262,24 @@ def handle_connection_update(
             owner_jid=str(owner) if owner else None,
         )
 
+    from app.application.whatsapp.whatsapp_service import (
+        LINK_REJECTED,
+        is_rejected_link,
+        set_link_error,
+        store_pairing_code,
+    )
+
+    link_error = None
+    if mapped == WhatsAppStatus.CONNECTED.value:
+        set_link_error(tenant.id, None)
+    elif mapped == WhatsAppStatus.DISCONNECTED.value and is_rejected_link(
+        session, classify_disconnect(data)[1]
+    ):
+        link_error = LINK_REJECTED
+        set_link_error(tenant.id, link_error)
+        store_pairing_code(tenant.id, None)
+        log.warning("WhatsApp rechazó la vinculación tenant=%s (401)", tenant.id)
+
     apply_session_status(
         session,
         tenant,
@@ -1272,6 +1294,7 @@ def handle_connection_update(
         status=mapped,
         qr_base64=session.qr_base64,
         phone_number=session.phone_number,
+        link_error=link_error,
     )
     if mapped == WhatsAppStatus.CONNECTED.value:
         try:

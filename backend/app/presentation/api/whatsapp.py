@@ -29,6 +29,7 @@ from app.application.whatsapp.whatsapp_service import (
     EvolutionAPIError,
     disconnect_session,
     get_or_create_session,
+    link_error_for,
     pairing_code_for,
     pairing_number,
     reconnect_session,
@@ -77,6 +78,12 @@ def _session_pairing_code(session: WhatsAppSession) -> Optional[str]:
     return pairing_code_for(session.tenant_id)
 
 
+def _session_link_error(session: WhatsAppSession) -> Optional[str]:
+    if session.status != WhatsAppStatus.DISCONNECTED.value:
+        return None
+    return link_error_for(session.tenant_id)
+
+
 def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
     from app.application.chatwoot.chatwoot_service import chatwoot_panel_url
 
@@ -87,6 +94,7 @@ def _session_response(session: WhatsAppSession) -> WhatsAppStatusResponse:
         qr_base64=session.qr_base64,
         qr_updated_at=session.qr_updated_at,
         pairing_code=_session_pairing_code(session),
+        link_error=_session_link_error(session),
         last_connected_at=session.last_connected_at,
         last_disconnected_at=session.last_disconnected_at,
         chatwoot_inbox_url=chatwoot_panel_url(session),

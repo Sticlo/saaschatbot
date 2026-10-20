@@ -174,6 +174,52 @@ def pairing_code_for(tenant_id) -> Optional[str]:
     return raw.decode() if isinstance(raw, bytes) else str(raw)
 
 
+LINK_REJECTED = "rejected"
+LINK_ERROR_TTL_SECONDS = 30 * 60
+# Un 401 tan cerca del QR/código es WhatsApp negando el enlace, no el dueño desvinculando.
+LINK_ATTEMPT_WINDOW_SECONDS = 10 * 60
+
+
+def _link_error_key(tenant_id) -> str:
+    return f"wa:link_error:{tenant_id}"
+
+
+def set_link_error(tenant_id, reason: Optional[str]) -> None:
+    try:
+        redis = get_redis()
+        if reason:
+            redis.set(_link_error_key(tenant_id), reason, ex=LINK_ERROR_TTL_SECONDS)
+        else:
+            redis.delete(_link_error_key(tenant_id))
+    except Exception:
+        log.warning("No se pudo guardar el error de vinculación tenant=%s", tenant_id)
+
+
+def link_error_for(tenant_id) -> Optional[str]:
+    try:
+        raw = get_redis().get(_link_error_key(tenant_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+
+def is_rejected_link(session: WhatsAppSession, disconnect_code: Optional[int]) -> bool:
+    """WhatsApp cortó con 401 un intento de vinculación que nunca llegó a conectar."""
+    if disconnect_code != 401 or not session.qr_updated_at:
+        return False
+    started = session.qr_updated_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if (datetime.now(timezone.utc) - started).total_seconds() > LINK_ATTEMPT_WINDOW_SECONDS:
+        return False
+    connected = session.last_connected_at
+    if connected is not None and connected.tzinfo is None:
+        connected = connected.replace(tzinfo=timezone.utc)
+    return connected is None or connected < started
+
+
 def extract_pairing_code(payload: Any) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
@@ -524,6 +570,7 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
     # negocio y la sesión, el webhook y el sondeo de estado se cruzan con esta transacción.
     db.commit()
     store_pairing_code(tenant.id, None)
+    set_link_error(tenant.id, None)
 
     created_with_number = False
     try:

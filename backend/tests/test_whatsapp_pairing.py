@@ -216,3 +216,70 @@ def test_new_code_from_whatsapp_reaches_the_panel():
 
     assert pairing_code_for(tenant.id) == "QWER5678"
     assert mock_publish.call_args.args[1]["pairing_code"] == "QWER5678"
+
+
+def test_only_a_401_right_after_the_code_counts_as_whatsapp_rejecting_the_link():
+    from datetime import datetime, timedelta, timezone
+
+    from app.application.whatsapp.whatsapp_service import is_rejected_link
+
+    _, session = _connecting(qr_age_seconds=20)
+    assert is_rejected_link(session, 401)
+    assert not is_rejected_link(session, 408)
+
+    session.last_connected_at = datetime.now(timezone.utc)
+    assert not is_rejected_link(session, 401)
+
+    _, session = _connecting(qr_age_seconds=3600)
+    assert not is_rejected_link(session, 401)
+
+    _, session = _connecting()
+    assert not is_rejected_link(session, 401)
+
+    _, session = _connecting(qr_age_seconds=20)
+    session.last_connected_at = datetime.now(timezone.utc) - timedelta(days=4)
+    assert is_rejected_link(session, 401)
+
+
+def _close_from_whatsapp(session, tenant, data):
+    from app.application.messaging.message_service import handle_connection_update
+
+    conv = "app.application.conversations.whatsapp_conversation_service"
+    with patch(f"{conv}.should_ignore_stale_open_session", return_value=False), patch(
+        f"{conv}.needs_new_whatsapp_binding", return_value=False
+    ), patch(f"{conv}.ensure_whatsapp_binding_ready"), patch(
+        "app.application.realtime.realtime_service.publish_panel_event"
+    ) as mock_publish:
+        handle_connection_update(MagicMock(), tenant=tenant, session=session, data=data)
+    return mock_publish.call_args.args[1]
+
+
+def test_panel_learns_that_whatsapp_rejected_the_code():
+    from app.application.whatsapp.whatsapp_service import (
+        link_error_for,
+        pairing_code_for,
+        set_link_error,
+        store_pairing_code,
+    )
+
+    tenant, session = _connecting(qr_age_seconds=20)
+    store_pairing_code(tenant.id, "WZYEH1YY", "573001234567")
+
+    event = _close_from_whatsapp(session, tenant, {"state": "close", "statusReason": 401})
+
+    assert event["status"] == "disconnected"
+    assert event["link_error"] == "rejected"
+    assert link_error_for(tenant.id) == "rejected"
+    assert pairing_code_for(tenant.id) is None
+    set_link_error(tenant.id, None)
+
+
+def test_a_network_drop_while_linking_is_not_reported_as_rejected():
+    from app.application.whatsapp.whatsapp_service import link_error_for
+
+    tenant, session = _connecting(qr_age_seconds=20)
+
+    event = _close_from_whatsapp(session, tenant, {"state": "close", "statusReason": 408})
+
+    assert event["link_error"] is None
+    assert link_error_for(tenant.id) is None
