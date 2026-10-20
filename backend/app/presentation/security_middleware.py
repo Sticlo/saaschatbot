@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Awaitable, Callable
+import re
+from typing import Awaitable, Callable, Optional
 
 import anyio
 from starlette.datastructures import Headers, MutableHeaders
@@ -81,7 +82,30 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+_MB = 1_048_576
+_COMPRESS_PDF = "Si es un PDF, comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez."
+# Cada endpoint valida su propio tope; aquí solo se corta antes de leer el cuerpo en memoria,
+# con 1 MB extra para el sobre multipart.
+_FILE_ROUTES = (
+    (re.compile(r"^/api/v1/products/import-file$"), 15, f"El archivo de productos puede pesar hasta 15 MB. {_COMPRESS_PDF}"),
+    (re.compile(r"^/api/v1/products/[^/]+/photos$"), 5, "La foto puede pesar hasta 5 MB. Toma una captura de pantalla de la foto y súbela."),
+    (re.compile(r"^/api/v1/conversations/[^/]+/messages/image$"), 5, "La foto puede pesar hasta 5 MB."),
+    (re.compile(r"^/api/v1/conversations/[^/]+/messages/file$"), 16, f"El archivo puede pesar hasta 16 MB. {_COMPRESS_PDF}"),
+    (re.compile(r"^/api/v1/conversations/[^/]+/messages/audio$"), 10, "La nota de voz es muy larga."),
+)
+
+
+def _file_route(path: str) -> Optional[tuple[int, str]]:
+    for pattern, max_mb, message in _FILE_ROUTES:
+        if pattern.match(path):
+            return (max_mb + 1) * _MB, message
+    return None
+
+
 def _too_large_message(path: str) -> str:
+    route = _file_route(path)
+    if route:
+        return route[1]
     if path.startswith(_UPLOAD_PREFIXES):
         return (
             "El archivo es muy pesado: los PDF pueden pesar hasta 10 MB y las imágenes hasta 5 MB. "
@@ -102,6 +126,9 @@ class BodySizeLimitMiddleware:
             return settings.max_webhook_body_bytes
         if path.startswith(_UPLOAD_PREFIXES):
             return settings.max_upload_body_bytes
+        route = _file_route(path)
+        if route:
+            return route[0]
         return settings.max_request_body_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

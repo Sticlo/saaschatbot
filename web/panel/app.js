@@ -5391,8 +5391,20 @@
     if (!file) return;
     const btn = $("products-upload-btn");
     const box = $("products-import-preview");
-    btn.disabled = true;
     const slow = /\.(pdf|jpe?g|png|webp|heic)$/i.test(file.name);
+    const maxMb = slow ? 14 : 15;
+    const sizeMb = file.size / (1024 * 1024);
+    if (sizeMb > maxMb) {
+      box.classList.remove("hidden");
+      box.innerHTML = `<p class="import-error">${escapeHtml(
+        `El archivo pesa ${sizeMb.toFixed(1)} MB y el máximo es ${maxMb} MB. ` +
+          (slow ? "Comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez." : "")
+      )}</p>
+        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button></div>`;
+      $("products-upload-input").value = "";
+      return;
+    }
+    btn.disabled = true;
     box.classList.remove("hidden");
     box.innerHTML = `<p class="import-reading">Leyendo <strong>${escapeHtml(file.name)}</strong>…${
       slow ? " Los PDF y fotos tardan hasta un minuto." : ""

@@ -204,6 +204,34 @@ def test_oversized_catalog_upload_says_the_limit_and_how_to_fix_it(client: TestC
     assert "ilovepdf" in res.json()["detail"]
 
 
+def test_each_file_route_gets_its_own_size_limit():
+    from app.presentation.security_middleware import BodySizeLimitMiddleware
+
+    mb = 1_048_576
+    limit = BodySizeLimitMiddleware._limit_for
+    assert limit("/api/v1/products/import-file") == 16 * mb
+    assert limit("/api/v1/products/abc/photos") == 6 * mb
+    assert limit("/api/v1/conversations/abc/messages/image") == 6 * mb
+    assert limit("/api/v1/conversations/abc/messages/file") == 17 * mb
+    assert limit("/api/v1/conversations/abc/messages/audio") == 11 * mb
+    assert limit("/api/v1/auth/login") == 1 * mb
+
+
+def test_a_3mb_product_pdf_is_not_cut_by_the_body_limit(client: TestClient):
+    res = client.post(
+        "/api/v1/products/import-file",
+        content=b"x" * (3 * 1_048_576),
+        headers={"Content-Type": "multipart/form-data; boundary=x"},
+    )
+    assert res.status_code != 413
+
+
+def test_an_oversized_product_file_says_the_limit():
+    from app.presentation.security_middleware import _too_large_message
+
+    assert "15 MB" in _too_large_message("/api/v1/products/import-file")
+
+
 def test_rate_limit_returns_429(client: TestClient, monkeypatch):
     from app.config import settings
     from app.infrastructure.cache.redis_client import get_redis

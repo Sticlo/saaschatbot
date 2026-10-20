@@ -78,6 +78,17 @@ def test_excel_columns_are_found_even_with_extra_columns():
     ]
 
 
+def test_a_pdf_too_big_for_the_ai_is_rejected_before_calling_gemini():
+    import pytest
+
+    from app.application.products.product_import_service import ProductImportError
+
+    with patch("app.application.products.product_import_service._ai_items") as mock_ai:
+        with pytest.raises(ProductImportError, match="14 MB"):
+            parse_upload("catalogo.pdf", b"%PDF" + b"x" * (14 * 1024 * 1024 + 1))
+    mock_ai.assert_not_called()
+
+
 def test_csv_word_and_text_lists():
     items, _ = parse_upload("lista.csv", "nombre;valor;descripcion\nPizza hawaiana;32.000;Grande\n".encode())
     assert items == [{"name": "Pizza hawaiana", "price_cop": 32000, "stock": None, "details": "descripcion: Grande"}]

@@ -22,6 +22,8 @@ from app.application.products.product_service import (
 )
 
 MAX_IMPORT_BYTES = 15 * 1024 * 1024
+# Gemini recibe el archivo en base64 dentro de la petición (tope ~20 MB): 14 MB crecen a ~19.
+MAX_AI_IMPORT_BYTES = 14 * 1024 * 1024
 MAX_IMPORT_ROWS = MAX_PRODUCTS
 
 SPREADSHEET_EXT = {"xlsx", "xlsm"}
@@ -340,6 +342,11 @@ def parse_upload(filename: str, data: bytes) -> tuple[list[dict], str]:
         return _dedupe(items), "word"
     if ext in PLAIN_EXT:
         return _dedupe(text_to_items(data.decode("utf-8", errors="ignore"))), "texto"
+    if len(data) > MAX_AI_IMPORT_BYTES:
+        raise ProductImportError(
+            "Los PDF y fotos pueden pesar hasta 14 MB para que la IA los lea. "
+            "Comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez."
+        )
     return _dedupe(_ai_items(data, ext)), "ia"
 
 
