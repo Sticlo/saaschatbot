@@ -1108,6 +1108,7 @@ textarea { resize: vertical; min-height: 44px; }
 .confirm-card p:empty { display: none; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.2rem; }
 .confirm-actions .btn { width: auto; min-width: 6.5rem; }
+a.btn#confirm-link { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 @media (max-width: 480px) {
   .confirm-actions { flex-direction: column-reverse; }
   .confirm-actions .btn { width: 100%; }

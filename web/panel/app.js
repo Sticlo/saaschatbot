@@ -2637,7 +2637,12 @@
 
   function askConfirm({ title, text = "", confirmLabel = "Aceptar", danger = false, href = "" }) {
     const modal = $("confirm-modal");
-    const ok = $("confirm-ok");
+    // Un enlace real abre la página en otra pestaña sin que el navegador lo bloquee.
+    const link = $("confirm-link");
+    link.classList.toggle("hidden", !href);
+    $("confirm-ok").classList.toggle("hidden", !!href);
+    if (href) link.href = href;
+    const ok = href ? link : $("confirm-ok");
     const cancel = $("confirm-cancel");
     const opener = document.activeElement;
     $("confirm-title").textContent = title;
@@ -2659,8 +2664,6 @@
       };
       const onClick = (e) => {
         const action = e.target.closest("[data-confirm]")?.dataset.confirm;
-        // Abrir dentro del mismo clic: fuera de él el navegador bloquea la pestaña nueva.
-        if (action === "ok" && href) window.open(href, "_blank", "noopener");
         if (action) close(action === "ok");
       };
       const onKey = (e) => {
