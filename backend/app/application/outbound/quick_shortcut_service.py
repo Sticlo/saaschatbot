@@ -9,6 +9,7 @@ from app.application.billing.tenant_profile_service import get_or_create_tenant_
 
 _MAX_SHORTCUTS = 12
 MAX_CONTENT_CHARS = 4000
+MAX_SEND_WHEN_CHARS = 200
 
 
 def _normalize(raw: list[dict]) -> list[dict]:
@@ -25,6 +26,8 @@ def _normalize(raw: list[dict]) -> list[dict]:
         sid = str(item.get("id") or uuid.uuid4())
         # Lo que la IA sabe del archivo (productos, precios) para responder sin reenviarlo.
         content = str(item.get("content") or "").strip()[:MAX_CONTENT_CHARS]
+        # Cuándo lo envía la IA (ej. «cuando pregunten por baby shower»).
+        send_when = " ".join(str(item.get("send_when") or "").split())[:MAX_SEND_WHEN_CHARS]
         if kind == "image":
             path = str(item.get("image_path") or "").strip() or None
             if not path:
@@ -32,7 +35,6 @@ def _normalize(raw: list[dict]) -> list[dict]:
             row = {"id": sid, "label": label[:20], "type": "image", "image_path": path}
             if content:
                 row["content"] = content
-            out.append(row)
         elif kind == "document":
             path = str(item.get("file_path") or "").strip() or None
             if not path:
@@ -46,12 +48,14 @@ def _normalize(raw: list[dict]) -> list[dict]:
             }
             if content:
                 row["content"] = content
-            out.append(row)
         else:
             text = str(item.get("text") or "").strip()
             if not text:
                 continue
-            out.append({"id": sid, "label": label[:20], "type": "text", "text": text[:2000]})
+            row = {"id": sid, "label": label[:20], "type": "text", "text": text[:2000]}
+        if send_when:
+            row["send_when"] = send_when
+        out.append(row)
     return out
 
 

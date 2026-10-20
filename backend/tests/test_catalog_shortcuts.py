@@ -44,6 +44,20 @@ def test_normalize_keeps_document_shortcut_with_content():
     assert "Tenis blancos" in rows[0]["content"]
 
 
+def test_owner_tells_the_ai_when_to_send_each_shortcut():
+    rows = _normalize([
+        {"label": "Baby shower", "type": "document", "file_path": "assets/t/baby.pdf",
+         "send_when": "  cuando pregunten por   baby shower "},
+        {"label": "Horario", "type": "text", "text": "Lunes a sábado", "send_when": ""},
+    ])
+    assert rows[0]["send_when"] == "cuando pregunten por baby shower"
+    assert "send_when" not in rows[1]
+
+    prompt = append_shortcuts_instructions("Eres un asistente.", rows)
+    assert "enviarlo cuando: cuando pregunten por baby shower" in prompt
+    assert 'Si un atajo tiene "enviarlo cuando"' in prompt
+
+
 def test_prompt_includes_catalog_knowledge_and_sent_marker():
     line = format_shortcut_line({**CATALOG_SHORTCUT, "already_sent": True})
     assert "archivo PDF (catalogo-katshoes.pdf)" in line
@@ -231,12 +245,14 @@ def test_upload_pdf_is_saved_to_send_without_reading_it(client: TestClient, monk
             "type": "document",
             "file_path": data["path"],
             "file_name": data["file_name"],
+            "send_when": "cuando pregunten por zapatos",
         }]},
     )
     assert saved.status_code == 200, saved.text
     row = saved.json()[0]
     assert row["type"] == "document"
     assert row["file_url"].endswith(".pdf")
+    assert row["send_when"] == "cuando pregunten por zapatos"
 
 
 @requires_db

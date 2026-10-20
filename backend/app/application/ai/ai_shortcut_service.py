@@ -38,6 +38,8 @@ Atajos rápidos que puedes enviar al cliente (botones con contenido listo):
 {catalog_block}
 Cuando el cliente pida menú, carta, fotos, precios, catálogo o algo que coincida con un atajo,
 responde con un mensaje breve y envía ese atajo (shortcut_id).
+Si un atajo tiene "enviarlo cuando", el dueño te dijo cuándo usarlo: si el cliente pregunta o habla de
+eso (aunque lo diga con otras palabras), envía ese atajo en esa respuesta.
 Si un atajo dice "ya enviado en este chat", NO lo vuelvas a enviar: responde con la
 información que conoces o recuérdale que se lo compartiste arriba. Solo reenvíalo si el
 cliente lo pide otra vez de forma explícita (por ejemplo "mándamelo de nuevo").
@@ -232,6 +234,9 @@ def format_shortcut_line(shortcut: dict[str, Any]) -> str:
     else:
         content = _preview_text(str(shortcut.get("text") or ""))
     line = f'- id="{sid}" | botón="{label}" | tipo={kind} | contenido: {content}'
+    send_when = " ".join(str(shortcut.get("send_when") or "").split())
+    if send_when:
+        line += f" | enviarlo cuando: {send_when}"
     if shortcut.get("already_sent"):
         line += " | ya enviado en este chat"
     return line

@@ -47,6 +47,7 @@ def _to_response(item: dict) -> QuickShortcutResponse:
         file_name=item.get("file_name"),
         file_url=_asset_url(item.get("file_path")),
         content=item.get("content"),
+        send_when=item.get("send_when"),
     )
 
 

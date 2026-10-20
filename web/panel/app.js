@@ -5744,7 +5744,10 @@
     } else {
       list.innerHTML = items.map((s) => {
         const kind = s.type === "image" ? "Foto" : s.type === "document" ? "PDF" : "Texto";
-        return `<li><strong>${escapeHtml(s.label)}</strong> <span class="muted small">· ${kind}</span></li>`;
+        const when = s.send_when
+          ? `<span class="muted small ai-shortcut-when">La IA lo envía: ${escapeHtml(s.send_when)}</span>`
+          : "";
+        return `<li><strong>${escapeHtml(s.label)}</strong> <span class="muted small">· ${kind}</span>${when}</li>`;
       }).join("");
     }
     if (btn) btn.classList.toggle("hidden", !state.canManageGlobal);
@@ -5875,6 +5878,10 @@
           ${type === "document" && hasFile
             ? `<p class="small muted">Este PDF se envía tal cual. Para que la IA conozca tus productos y precios, cárgalos en Inventario.</p>`
             : ""}
+          <div class="shortcut-when-wrap">
+            <label class="small muted">¿Cuándo lo envía la IA? (opcional)</label>
+            <input type="text" class="shortcut-when" maxlength="200" placeholder="Ej: cuando pregunten por baby shower o decoración para baby shower" value="${escapeHtml(s.send_when || "")}" />
+          </div>
           <div class="shortcut-content-wrap ${type === "image" && hasFile ? "" : "hidden"}">
             <label class="small muted">Lo que la IA sabe de este archivo</label>
             <textarea class="shortcut-content" rows="4" maxlength="4000" placeholder="Ej: Tenis blancos $120.000 (tallas 36-42)…">${escapeHtml(s.content || "")}</textarea>
@@ -5900,6 +5907,9 @@
       });
       row.querySelector(".shortcut-content")?.addEventListener("input", (e) => {
         state.shortcutsDraft[idx].content = e.target.value;
+      });
+      row.querySelector(".shortcut-when")?.addEventListener("input", (e) => {
+        state.shortcutsDraft[idx].send_when = e.target.value;
       });
       row.querySelector(".shortcut-file-input")?.addEventListener("change", async (e) => {
         const file = e.target.files?.[0];
@@ -5960,6 +5970,7 @@
           file_path: type === "document" ? s.file_path : null,
           file_name: type === "document" ? s.file_name : null,
           content: type !== "text" ? (s.content || "").trim() || null : null,
+          send_when: (s.send_when || "").trim() || null,
         };
       })
       .filter((s) => (s.type === "text" ? s.text : s.type === "image" ? s.image_path : s.file_path));

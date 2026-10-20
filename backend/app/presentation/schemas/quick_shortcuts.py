@@ -14,6 +14,7 @@ class QuickShortcutInput(BaseModel):
     file_path: Optional[str] = Field(default=None, max_length=512)
     file_name: Optional[str] = Field(default=None, max_length=80)
     content: Optional[str] = Field(default=None, max_length=4000)
+    send_when: Optional[str] = Field(default=None, max_length=200)
 
 
 class QuickShortcutResponse(BaseModel):
@@ -27,6 +28,7 @@ class QuickShortcutResponse(BaseModel):
     file_name: Optional[str] = None
     file_url: Optional[str] = None
     content: Optional[str] = None
+    send_when: Optional[str] = None
 
 
 class QuickShortcutsUpdate(BaseModel):

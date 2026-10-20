@@ -3297,6 +3297,9 @@ a.btn#confirm-link { display: inline-flex; align-items: center; justify-content:
 .shortcut-content-wrap.hidden { display: none; }
 .shortcut-content { width: 100%; resize: vertical; font-size: 0.85rem; }
 .shortcut-content-wrap p { margin: 0; }
+.shortcut-when-wrap { display: flex; flex-direction: column; gap: 0.25rem; }
+.shortcut-when { width: 100%; font-size: 0.85rem; }
+.ai-shortcut-when { display: block; }
 .shortcut-thumb { max-width: 120px; max-height: 80px; border-radius: 6px; margin-top: 0.35rem; }
 .shortcuts-modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
 
