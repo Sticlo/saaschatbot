@@ -241,6 +241,14 @@ def test_only_a_401_right_after_the_code_counts_as_whatsapp_rejecting_the_link()
     assert is_rejected_link(session, 401)
 
 
+def test_our_own_logout_before_a_new_code_is_not_a_rejection():
+    from app.application.whatsapp.whatsapp_service import is_rejected_link, mark_own_logout
+
+    _, session = _connecting(qr_age_seconds=20)
+    mark_own_logout(session.tenant_id)
+    assert not is_rejected_link(session, 401)
+
+
 def _close_from_whatsapp(session, tenant, data):
     from app.application.messaging.message_service import handle_connection_update
 

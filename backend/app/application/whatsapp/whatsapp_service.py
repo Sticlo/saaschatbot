@@ -205,9 +205,33 @@ def link_error_for(tenant_id) -> Optional[str]:
     return raw.decode() if isinstance(raw, bytes) else str(raw)
 
 
+OWN_LOGOUT_TTL_SECONDS = 20
+
+
+def _own_logout_key(tenant_id) -> str:
+    return f"wa:own_logout:{tenant_id}"
+
+
+def mark_own_logout(tenant_id) -> None:
+    """El 401 que Evolution reporta tras nuestro propio logout no es un rechazo de WhatsApp."""
+    try:
+        get_redis().set(_own_logout_key(tenant_id), "1", ex=OWN_LOGOUT_TTL_SECONDS)
+    except Exception:
+        log.debug("No se pudo marcar el logout propio tenant=%s", tenant_id)
+
+
+def _recent_own_logout(tenant_id) -> bool:
+    try:
+        return bool(get_redis().exists(_own_logout_key(tenant_id)))
+    except Exception:
+        return False
+
+
 def is_rejected_link(session: WhatsAppSession, disconnect_code: Optional[int]) -> bool:
     """WhatsApp cortó con 401 un intento de vinculación que nunca llegó a conectar."""
     if disconnect_code != 401 or not session.qr_updated_at:
+        return False
+    if _recent_own_logout(session.tenant_id):
         return False
     started = session.qr_updated_at
     if started.tzinfo is None:
@@ -438,6 +462,7 @@ def _reset_gateway_instance_credentials(
     """Borra credenciales atascadas. Logout falla si Evolution está en 'connecting'."""
     name = session.instance_name
 
+    mark_own_logout(session.tenant_id)
     try:
         gateway_logout_instance(name)
     except WhatsAppGatewayError as exc:
@@ -803,6 +828,7 @@ def release_whatsapp_link(tenant: Tenant, session: WhatsAppSession) -> None:
 
 
 def _teardown_gateway_instance(session: WhatsAppSession) -> None:
+    mark_own_logout(session.tenant_id)
     try:
         gateway_logout_instance(session.instance_name)
     except WhatsAppGatewayError as exc:

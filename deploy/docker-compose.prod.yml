@@ -158,6 +158,8 @@ services:
       # rechaza el QR («No se pudo iniciar sesión») y el código de vinculación.
       WEBHOOK_GLOBAL_ENABLED: "false"
       LOG_LEVEL: ERROR,WARN
+      # Para depurar la vinculación: LOG_BAILEYS=info en .env y recrear evolution.
+      LOG_BAILEYS: ${LOG_BAILEYS:-error}
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
