@@ -249,6 +249,32 @@
     "Dispositivos vinculados y cierra los que no uses. Luego espera unas horas sin reintentar " +
     "y conecta escaneando el código QR desde un computador.";
 
+  const COMPRESS_PDF_URL = "https://www.ilovepdf.com/es/comprimir_pdf";
+
+  function compressLinkHtml(text) {
+    return escapeHtml(text).replace(
+      "ilovepdf.com/es/comprimir_pdf",
+      `<a href="${COMPRESS_PDF_URL}" target="_blank" rel="noopener">ilovepdf.com/es/comprimir_pdf</a>`
+    );
+  }
+
+  function compressButtonHtml(text) {
+    return String(text || "").includes("ilovepdf")
+      ? `<a class="btn primary import-compress" href="${COMPRESS_PDF_URL}" target="_blank" rel="noopener">Comprimir PDF gratis</a>`
+      : "";
+  }
+
+  // Un alert no deja tocar enlaces: con confirm, «Aceptar» abre la página para comprimir.
+  function alertWithCompress(message) {
+    if (!String(message || "").includes("ilovepdf")) {
+      alert(message);
+      return;
+    }
+    if (confirm(`${message}\n\nToca «Aceptar» para abrir la página y comprimirlo ahora.`)) {
+      window.open(COMPRESS_PDF_URL, "_blank", "noopener");
+    }
+  }
+
   function humanizeWaError(msg) {
     const raw = (msg || "").trim();
     const lower = raw.toLowerCase();
@@ -5396,11 +5422,11 @@
     const sizeMb = file.size / (1024 * 1024);
     if (sizeMb > maxMb) {
       box.classList.remove("hidden");
-      box.innerHTML = `<p class="import-error">${escapeHtml(
+      const msg =
         `El archivo pesa ${sizeMb.toFixed(1)} MB y el máximo es ${maxMb} MB. ` +
-          (slow ? "Comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez." : "")
-      )}</p>
-        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button></div>`;
+        (slow ? "Comprímelo gratis en ilovepdf.com/es/comprimir_pdf y súbelo otra vez." : "");
+      box.innerHTML = `<p class="import-error">${compressLinkHtml(msg)}</p>
+        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button>${compressButtonHtml(msg)}</div>`;
       $("products-upload-input").value = "";
       return;
     }
@@ -5415,8 +5441,8 @@
       state.importPreview = await api("/products/import-file", { method: "POST", body: fd }, slow ? 150000 : 30000);
       renderImportPreview();
     } catch (err) {
-      box.innerHTML = `<p class="import-error">${escapeHtml(err.message)}</p>
-        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button></div>`;
+      box.innerHTML = `<p class="import-error">${compressLinkHtml(err.message)}</p>
+        <div class="import-actions"><button type="button" class="btn ghost" data-import="cancel">Cerrar</button>${compressButtonHtml(err.message)}</div>`;
     } finally {
       btn.disabled = false;
       $("products-upload-input").value = "";
@@ -5871,7 +5897,7 @@
         const tooBig = shortcutFileTooBig(file);
         if (tooBig) {
           e.target.value = "";
-          alert(tooBig);
+          alertWithCompress(tooBig);
           return;
         }
         const draft = state.shortcutsDraft[idx];
@@ -5896,7 +5922,7 @@
           draft.content = res.content || "";
           draft.content_failed = !res.content_ok;
         } catch (err) {
-          alert(err.message);
+          alertWithCompress(err.message);
         } finally {
           draft.uploading = false;
           renderShortcutsEditor();

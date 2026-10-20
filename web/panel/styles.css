@@ -6400,6 +6400,8 @@ body.lightbox-open { overflow: hidden; }
 .import-update { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.85rem; }
 .import-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.85rem; }
 .import-actions .btn { width: auto; }
+.import-compress { display: inline-flex; align-items: center; text-decoration: none; }
+.import-error a { color: inherit; font-weight: 600; }
 @media (max-width: 560px) {
   .tab-head { flex-wrap: wrap; }
   .tab-head > .products-head-actions { width: 100%; justify-content: stretch; }
