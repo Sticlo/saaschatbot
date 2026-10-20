@@ -282,6 +282,61 @@ def test_panel_learns_that_whatsapp_rejected_the_code():
     set_link_error(tenant.id, None)
 
 
+def test_a_rejected_link_keeps_the_exact_reason_and_alerts_the_dev():
+    from app.application.whatsapp.whatsapp_service import record_link_rejection, store_pairing_code
+
+    tenant, session = _connecting(qr_age_seconds=20)
+    tenant.business_name = "Rin Eventos"
+    store_pairing_code(tenant.id, "WZYEH1YY", "573001234567")
+    db = MagicMock()
+    db.query.return_value.filter.return_value.count.return_value = 4
+    evolution = {
+        "code": 401,
+        "message": "Invalid account signature",
+        "data": {"omitel": "pairing-error", "reason": "Invalid account signature", "accountType": 1},
+    }
+
+    with patch(
+        "app.infrastructure.evolution.evolution_store.fetch_disconnection_detail", return_value=evolution
+    ), patch("app.application.billing.tenant_service.log_audit") as mock_audit, patch(
+        "app.application.monitoring.dev_alerts.alert_dev"
+    ) as mock_alert:
+        details = record_link_rejection(db, tenant, session, 401)
+
+    assert details["reason"] == "Invalid account signature"
+    assert details["account_type"] == 1
+    assert details["baileys_error"] is True
+    assert details["mode"] == "codigo"
+    assert details["attempts_24h"] == 4
+    assert mock_audit.call_args.kwargs["action"] == "whatsapp.link_rejected"
+    alert_detail = mock_alert.call_args.args[2]
+    assert "Invalid account signature" in alert_detail
+    assert "patch-baileys-hosted.js" in alert_detail
+    store_pairing_code(tenant.id, None)
+
+
+def test_a_plain_whatsapp_cut_is_reported_without_a_baileys_error():
+    from app.application.whatsapp.whatsapp_service import record_link_rejection
+
+    tenant, session = _connecting(qr_age_seconds=20)
+    tenant.business_name = "x"
+    evolution = {"code": 401, "message": "Connection Failure", "data": {"reason": "401", "location": "lla"}}
+
+    with patch(
+        "app.infrastructure.evolution.evolution_store.fetch_disconnection_detail", return_value=evolution
+    ), patch("app.application.billing.tenant_service.log_audit"), patch(
+        "app.application.monitoring.dev_alerts.alert_dev"
+    ) as mock_alert:
+        details = record_link_rejection(MagicMock(), tenant, session, 401)
+
+    assert details["reason"] == "Connection Failure"
+    assert details["baileys_error"] is False
+    assert details["whatsapp_location"] == "lla"
+    assert "límite de vinculaciones" in mock_alert.call_args.args[2]
+    assert details["mode"] == "qr"
+    assert mock_alert.called
+
+
 def test_a_network_drop_while_linking_is_not_reported_as_rejected():
     from app.application.whatsapp.whatsapp_service import link_error_for
 

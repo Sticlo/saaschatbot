@@ -5,7 +5,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
 from sqlalchemy.orm import Session
@@ -242,6 +242,81 @@ def is_rejected_link(session: WhatsAppSession, disconnect_code: Optional[int]) -
     if connected is not None and connected.tzinfo is None:
         connected = connected.replace(tzinfo=timezone.utc)
     return connected is None or connected < started
+
+
+_LINK_REJECTION_HINTS = {
+    "Invalid account signature": (
+        "Baileys no aceptó la firma de la cuenta (HMAC). Es un tipo de cuenta que el parche no "
+        "conoce: revisar accountType y deploy/evolution/patch-baileys-hosted.js, o actualizar Baileys."
+    ),
+    "Failed to verify account signature": (
+        "Baileys no pudo verificar la firma del dispositivo. Revisar deviceType y "
+        "deploy/evolution/patch-baileys-hosted.js, o actualizar Baileys."
+    ),
+    "Connection Failure": (
+        "WhatsApp cortó sin error de Baileys: suele ser límite de vinculaciones del número, "
+        "app desactualizada o número restringido."
+    ),
+}
+
+
+def record_link_rejection(db: Session, tenant: Tenant, session: WhatsAppSession, code: Optional[int]) -> dict:
+    """Deja el motivo exacto en auditoría y avisa al dev: una vinculación fallida es un cliente en riesgo."""
+    from app.application.billing.tenant_service import log_audit
+    from app.application.monitoring.dev_alerts import alert_dev
+    from app.domain.entities import AuditLog
+    from app.infrastructure.evolution.evolution_store import fetch_disconnection_detail
+
+    evolution = fetch_disconnection_detail(settings.evolution_database_url, session.instance_name)
+    data = evolution.get("data") or {}
+    baileys_error = data.get("omitel") == "pairing-error"
+    reason = str((data.get("reason") if baileys_error else None) or evolution.get("message") or "desconocido")
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    attempts = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.tenant_id == tenant.id,
+            AuditLog.action == "whatsapp.connect_started",
+            AuditLog.created_at >= since,
+        )
+        .count()
+    )
+    details = {
+        "mode": "codigo" if _recent_pairing_number(tenant.id) else "qr",
+        "code": code,
+        "reason": reason,
+        "account_type": data.get("accountType"),
+        "device_type": data.get("deviceType"),
+        "baileys_error": baileys_error,
+        "whatsapp_location": data.get("location"),
+        "attempts_24h": attempts,
+    }
+    log_audit(
+        db,
+        tenant_id=tenant.id,
+        user_id=None,
+        action="whatsapp.link_rejected",
+        details=details,
+        message=f"WhatsApp rechazó la vinculación: {reason}",
+    )
+    hint = _LINK_REJECTION_HINTS.get(reason, "Motivo nuevo: revisar logs de Evolution ([omitel]) y actualizar Baileys.")
+    alert_dev(
+        f"wa-link-rejected:{tenant.id}",
+        f"WhatsApp no pudo vincular a {tenant.business_name}",
+        "\n".join(
+            [
+                f"Negocio: {tenant.business_name} ({tenant.id})",
+                f"Motivo exacto: {reason}",
+                f"Tipo de cuenta: {details['account_type']} · dispositivo: {details['device_type']}",
+                f"Modo: {details['mode']} · intentos en 24 h: {attempts}",
+                "",
+                hint,
+            ]
+        ),
+        severity="warning",
+        throttle_seconds=1800,
+    )
+    return details
 
 
 def extract_pairing_code(payload: Any) -> Optional[str]:

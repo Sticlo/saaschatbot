@@ -1265,20 +1265,31 @@ def handle_connection_update(
     from app.application.whatsapp.whatsapp_service import (
         LINK_REJECTED,
         is_rejected_link,
+        record_link_rejection,
         set_link_error,
         store_pairing_code,
     )
 
     link_error = None
+    disconnect_code = classify_disconnect(data)[1]
     if mapped == WhatsAppStatus.CONNECTED.value:
         set_link_error(tenant.id, None)
-    elif mapped == WhatsAppStatus.DISCONNECTED.value and is_rejected_link(
-        session, classify_disconnect(data)[1]
-    ):
+    elif mapped == WhatsAppStatus.DISCONNECTED.value and is_rejected_link(session, disconnect_code):
         link_error = LINK_REJECTED
         set_link_error(tenant.id, link_error)
+        try:
+            details = record_link_rejection(db, tenant, session, disconnect_code)
+        except Exception:
+            log.exception("No se pudo registrar el rechazo de vinculación tenant=%s", tenant.id)
+            details = {}
         store_pairing_code(tenant.id, None)
-        log.warning("WhatsApp rechazó la vinculación tenant=%s (401)", tenant.id)
+        log.warning(
+            "WhatsApp rechazó la vinculación tenant=%s code=%s reason=%s account_type=%s",
+            tenant.id,
+            disconnect_code,
+            details.get("reason"),
+            details.get("account_type"),
+        )
 
     apply_session_status(
         session,

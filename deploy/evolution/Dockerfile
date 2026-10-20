@@ -42,6 +42,12 @@ RUN node /tmp/patch-baileys-hosted.js && \
     grep -q "Buffer.concat(\[hmacPrefix, details\])" node_modules/baileys/lib/Utils/validate-connection.js && \
     node --check node_modules/baileys/lib/Utils/validate-connection.js
 
+COPY patch-baileys-pairing-error.js /tmp/patch-baileys-pairing-error.js
+RUN node /tmp/patch-baileys-pairing-error.js && \
+    grep -q "omitel: 'pairing-error'" node_modules/baileys/lib/Socket/socket.js && \
+    node --check node_modules/baileys/lib/Socket/socket.js && \
+    node --check node_modules/baileys/lib/Utils/validate-connection.js
+
 RUN cp .env.example .env && chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
 RUN ./Docker/scripts/generate_database.sh

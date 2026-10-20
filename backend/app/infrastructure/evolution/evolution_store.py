@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Optional
@@ -51,6 +52,43 @@ def purge_instance_stored_data(dsn: str, instance_name: str) -> None:
         log.info("Evolution DB limpiada para instancia=%s", instance_name)
     except Exception as exc:
         log.warning("No se pudo limpiar Evolution DB instancia=%s: %s", instance_name, exc)
+
+
+def fetch_disconnection_detail(dsn: str, instance_name: str) -> dict:
+    """Último cierre que Evolution guardó: código, mensaje y datos del parche de vinculación."""
+    if not dsn or not instance_name:
+        return {}
+    try:
+        with psycopg.connect(_normalize_dsn(dsn), **_CONNECT_KWARGS) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT "disconnectionReasonCode", "disconnectionObject", "disconnectionAt"
+                    FROM "Instance" WHERE name = %s
+                    """,
+                    (instance_name,),
+                )
+                row = cur.fetchone()
+    except Exception as exc:
+        log.warning("No se pudo leer el cierre de Evolution instancia=%s: %s", instance_name, exc)
+        return {}
+    if not row:
+        return {}
+    code, raw, at = row
+    detail: dict = {"code": code, "at": at.isoformat() if at else None}
+    try:
+        obj = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if isinstance(obj, str):
+            obj = json.loads(obj)
+    except (TypeError, ValueError):
+        return detail
+    error = obj.get("error") if isinstance(obj, dict) else None
+    if isinstance(error, dict):
+        payload = (error.get("output") or {}).get("payload") or {}
+        detail["message"] = payload.get("message")
+        if isinstance(error.get("data"), dict):
+            detail["data"] = error["data"]
+    return detail
 
 
 def connection_since_unix(connection_started_at) -> Optional[int]:
