@@ -48,6 +48,8 @@ MEDIA_RULES = """
 
 Notas de voz e imágenes del cliente te llegan ya convertidas a texto: "(nota de voz) …" o "(imagen: …)".
 Respóndelas con naturalidad, como si las hubieras visto o escuchado.
+Si es un pantallazo del catálogo («me gustó este»), busca ese producto o paquete en «Productos del negocio»
+por su nombre, número o precio y respóndele sobre ese, sin volver a mandarle el catálogo.
 Nunca confirmes que un pago fue recibido o verificado, aunque veas un comprobante: di que el equipo lo revisa y le confirma."""
 
 # Va en todas las respuestas, también cuando el negocio tiene sus propias instrucciones guardadas.

@@ -56,10 +56,17 @@ STAGE_RANK = {STAGE_CHATTING: 0, STAGE_INTERESTED: 1, STAGE_CLOSING: 2}
 _REPLY_FORMAT = """
 
 Responde SOLO con JSON válido (sin markdown), exactamente con estas claves:
-{{"message":"tu respuesta al cliente","shortcut_id":null,{photo_key}"book_slot":null,"stage":"conversando","missing":""{order_key}}}
+{{"message":"tu respuesta al cliente","shortcut_id":null,{photo_key}"book_slot":null,"stage":"conversando","missing":"","chosen":""{order_key}}}
 {key_rules}missing = si el cliente preguntó algo que NO está en la información del negocio y por eso no pudiste
 responderlo, escribe en pocas palabras qué dato te faltó (ej. "costo del envío a Cali", "si hay talla 42").
 Si pudiste responder todo, "". No lo uses para cosas que el cliente debe decirte (su dirección, su talla).
+
+chosen = si en este mensaje el cliente elige un producto, paquete o servicio concreto (por ejemplo manda
+un pantallazo o foto del catálogo y dice «me gustó este», «quiero este»), su nombre tal como aparece en
+«Productos del negocio» (o en la imagen, si no está en la lista); si no eligió nada, "".
+Cuando elige así: confírmale cuál es y su precio, solo si está en la información del negocio, y pídele el
+siguiente dato para dejarlo listo (ej. fecha y ciudad del evento, talla, cantidad). Si en la imagen se ven
+varios y no está claro cuál le gustó, chosen = "" y pregúntale cuál fue, nombrando las opciones que se ven.
 
 stage = en qué punto está el cliente, mirando toda la conversación:
 - "conversando": saluda, charla o pregunta en general; aún no muestra intención de compra.
@@ -142,6 +149,8 @@ class AiGeneratedReply:
     missing: str = ""
     # Producto (ref) cuyas fotos se envían después del mensaje.
     photo_ref: Optional[str] = None
+    # Producto o paquete que el cliente acaba de elegir (ej. «me gustó este» con un pantallazo).
+    chosen: str = ""
 
 
 @dataclass(frozen=True)
@@ -515,7 +524,15 @@ def parse_ai_reply(
         order=parse_order(data.get("order")),
         missing=clean_topic(data.get("missing")),
         photo_ref=_photo_ref(data.get("photo_ref"), valid_photo_refs),
+        chosen=_chosen(data.get("chosen")),
     )
+
+
+def _chosen(raw: Any) -> str:
+    if not isinstance(raw, str):
+        return ""
+    text = " ".join(raw.split())
+    return "" if text.lower() in {"null", "none", "ninguno"} else text[:120]
 
 
 def _photo_ref(raw: Any, valid: frozenset[str]) -> Optional[str]:

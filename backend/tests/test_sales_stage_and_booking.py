@@ -36,6 +36,47 @@ def test_reply_carries_sales_stage():
     assert parse_ai_reply(raw, valid_ids=frozenset()).stage == "conversando"
 
 
+def test_reply_carries_the_product_the_customer_chose():
+    raw = json.dumps({"message": "¡Hermoso! El Paquete Baby Shower Rosa cuesta $450.000", "chosen": "Paquete  Baby Shower Rosa"})
+    assert parse_ai_reply(raw, valid_ids=frozenset()).chosen == "Paquete Baby Shower Rosa"
+    for empty in ("", None, "null", 3):
+        assert parse_ai_reply(json.dumps({"message": "Hola", "chosen": empty}), valid_ids=frozenset()).chosen == ""
+
+
+def test_choosing_from_a_catalog_screenshot_alerts_the_owner(monkeypatch):
+    from app.application.ai import ai_service as svc
+
+    sent = []
+    monkeypatch.setattr(svc, "_send_sales_alert", lambda tenant, **kw: sent.append(kw))
+    monkeypatch.setattr(svc, "publish_conversation_updated", lambda *_a, **_kw: None)
+    monkeypatch.setattr(svc, "_contact_label", lambda _c: "Laura")
+    monkeypatch.setattr(svc, "_contact_line", lambda _c: "Cliente: Laura")
+    tenant = SimpleNamespace(id=uuid.uuid4(), business_name="Rino Eventos")
+    conversation = SimpleNamespace(id=uuid.uuid4(), interest_status="none")
+    message = SimpleNamespace(content="me gustó este", transcript="Pantallazo del catálogo: Paquete Baby Shower Rosa $450.000")
+
+    svc._apply_stage(
+        None, tenant=tenant, conversation=conversation, message=message,
+        stage="interesado", chosen="Paquete Baby Shower Rosa",
+    )
+
+    assert len(sent) == 1
+    assert "eligió *Paquete Baby Shower Rosa*" in sent[0]["text"]
+    assert conversation.interest_status == "interested"
+
+    sent.clear()
+    svc._apply_stage(None, tenant=tenant, conversation=conversation, message=message, stage="interesado")
+    assert sent == []
+
+
+def test_reply_format_asks_for_the_chosen_product():
+    from app.application.ai.ai_shortcut_service import reply_format_instruction
+
+    text = reply_format_instruction(has_shortcuts=False, booking_enabled=False)
+    assert '"chosen":""' in text
+    assert "me gustó este" in text
+
+
 def test_broken_json_never_reaches_the_customer():
     raw = '{"message": "Claro, te cuento 😊", "stage": "interesado", '
     assert parse_ai_reply(raw, valid_ids=frozenset()).message == "Claro, te cuento 😊"

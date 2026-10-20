@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import time
@@ -135,6 +136,7 @@ AI_ENABLED_MARKER_TTL_SECONDS = 90 * 24 * 3600
 # La IA le dijo al cliente que el negocio le confirma: si el dueño no le escribe, se le recuerda.
 OWNER_CONFIRM_REMINDER_SECONDS = (5 * 60, 30 * 60)
 CLOSING_ALERT_COOLDOWN_SECONDS = 6 * 3600
+CHOSEN_ALERT_COOLDOWN_SECONDS = 12 * 3600
 ORDER_ALERT_TTL_SECONDS = 12 * 3600
 BOOKING_TIP = (
     "\n\n💡 Te pidió una cita. Si activas «La IA agenda citas sola» en la sección Citas del panel, "
@@ -1357,11 +1359,25 @@ def _apply_stage(
     message: Message,
     stage: str,
     booking_tip: bool = False,
+    chosen: str = "",
 ) -> None:
     if stage == STAGE_CHATTING:
         return
     changed = conversation.interest_status != ConversationInterest.INTERESTED.value
     conversation.interest_status = ConversationInterest.INTERESTED.value
+    chosen_line = f"Eligió: *{chosen}*\n" if chosen else ""
+    if chosen and stage != STAGE_CLOSING:
+        _send_sales_alert(
+            tenant,
+            key=f"ai:chosen_alert:{conversation.id}:{hashlib.sha1(chosen.lower().encode()).hexdigest()[:10]}",
+            ttl_seconds=CHOSEN_ALERT_COOLDOWN_SECONDS,
+            text=(
+                f"🎯 *{tenant.business_name}*: {_contact_label(conversation)} eligió *{chosen}*. "
+                "La IA le está confirmando los detalles; si quieres cerrar tú, escríbele y ella se aparta.\n\n"
+                f"{_contact_line(conversation)}\nRespóndele aquí: {_panel_link()}"
+            ),
+        )
+        log.info("Cliente eligió producto conv=%s", conversation.id)
     if stage == STAGE_CLOSING:
         # La IA no suelta el chat: un cliente listo para comprar no puede quedar hablándole al vacío
         # (a veces la última respuesta le acaba de hacer una pregunta). Se aparta cuando el dueño
@@ -1377,7 +1393,7 @@ def _apply_stage(
             text=(
                 f"🔥 *{tenant.business_name}*: {_contact_label(conversation)} ya quiere comprar. "
                 "La IA lo sigue atendiendo; apenas le escribas, se aparta para que cierres tú la venta.\n\n"
-                f"{_contact_line(conversation)}\n"
+                f"{_contact_line(conversation)}\n{chosen_line}"
                 f"Último mensaje: «{snippet}»\n\nRespóndele aquí: {_panel_link()}"
                 + (BOOKING_TIP if booking_tip else "")
             ),
@@ -1536,6 +1552,8 @@ def _deliver_reply(
         _save_order(db, tenant, conversation, reply.order)
         _alert_order(tenant, conversation, reply.order, _reserve_stock_once(db, tenant, conversation, reply.order))
         stage = _max_stage(stage, STAGE_INTERESTED)
+    if reply.chosen:
+        stage = _max_stage(stage, STAGE_INTERESTED)
     _apply_stage(
         db,
         tenant=tenant,
@@ -1543,6 +1561,7 @@ def _deliver_reply(
         message=message,
         stage=stage,
         booking_tip=_could_have_booked(tenant, message),
+        chosen=reply.chosen,
     )
     return True
 
