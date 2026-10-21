@@ -95,6 +95,10 @@ class TenantProfile(Base):
     payment_methods: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Envíos o domicilios: a dónde, cuánto cuestan, cuánto tardan (o «solo se recoge en el local»).
     delivery_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Promociones vigentes: la IA las usa para negociar.
+    promotions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Qué ofrecer y qué no según la fecha o temporada, y qué atajo usar en cada una.
+    seasonal_rules: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     maps_prospect_business: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     maps_prospect_city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     ai_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="qualify")

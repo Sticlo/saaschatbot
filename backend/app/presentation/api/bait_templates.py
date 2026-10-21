@@ -110,6 +110,8 @@ def _profile_response(db: Session, tenant: Tenant, profile) -> BusinessProfileRe
         tone=answers.get("tone"),
         restrictions=answers.get("restrictions"),
         payment_methods=answers.get("payment_methods"),
+        promotions=answers.get("promotions"),
+        seasonal_rules=answers.get("seasonal_rules"),
         maps_prospect_business=answers.get("maps_prospect_business"),
         maps_prospect_city=answers.get("maps_prospect_city"),
         ai_system_prompt=profile.ai_system_prompt,
@@ -176,6 +178,8 @@ def update_business_profile(
         "restrictions",
         "payment_methods",
         "delivery_info",
+        "promotions",
+        "seasonal_rules",
         "maps_prospect_business",
         "maps_prospect_city",
     ):

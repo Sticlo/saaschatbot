@@ -367,6 +367,16 @@
                 <span class="ai-row-body"><strong>Cómo habla</strong><span class="ai-row-sub" data-ai-sub="estilo"></span></span>
                 <span class="ai-row-mark" data-ai-mark="estilo"></span>
               </button>
+              <button type="button" class="ai-row" data-ai-open="promociones">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8L3 12zM9 15l6-6M9.5 9.5h.01M14.5 14.5h.01"/></svg></span>
+                <span class="ai-row-body"><strong>Promociones</strong><span class="ai-row-sub" data-ai-sub="promociones"></span></span>
+                <span class="ai-row-mark" data-ai-mark="promociones"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="temporada">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></svg></span>
+                <span class="ai-row-body"><strong>Temporada y fechas</strong><span class="ai-row-sub" data-ai-sub="temporada"></span></span>
+                <span class="ai-row-mark" data-ai-mark="temporada"></span>
+              </button>
 
               <p class="ai-list-group">Cómo trabaja</p>
               <button type="button" class="ai-row" data-ai-open="probar">
@@ -485,6 +495,30 @@
                 <label class="ai-field">
                   <span>Precios de referencia</span>
                   <textarea id="biz-prices" rows="2" maxlength="10000" placeholder="Almuerzos desde $18.000"></textarea>
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="promociones" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Promociones</h3><p>Opcional. Si tienes descuentos o promociones, la IA los usa para negociar cuando el cliente duda o dice que está caro. Si no tienes, déjalo vacío.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Promociones vigentes</span>
+                  <textarea id="biz-promotions" rows="5" maxlength="10000" placeholder="10% de descuento pagando de contado. 2x1 en globos los martes. Si reserva antes del 15 de diciembre, el montaje es gratis. Máximo descuento: 15%."></textarea>
+                </label>
+                <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="temporada" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Temporada y fechas</h3><p>Opcional. Qué ofrecer y qué no según la fecha, y qué atajo usar en cada temporada. La IA sabe qué día es: no ofrece lo que todavía no aplica.</p></div>
+                </header>
+                <label class="ai-field">
+                  <span class="sr-only">Temporada y fechas</span>
+                  <textarea id="biz-seasonal" rows="6" maxlength="10000" placeholder="Hasta el 31 de octubre: solo Halloween, usa el atajo «Halloween». No ofrecer Navidad todavía.&#10;Desde el 1 de noviembre: eventos de Navidad, usa el atajo «Navidad».&#10;Domingos y festivos no hacemos montajes."></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -1053,6 +1087,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=193"></script>
+  <script src="/static/panel/app.js?v=194"></script>
 </body>
 </html>

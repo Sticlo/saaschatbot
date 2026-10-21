@@ -17,6 +17,8 @@ _BUSINESS_FIELDS = (
     "restrictions",
     "payment_methods",
     "delivery_info",
+    "promotions",
+    "seasonal_rules",
     "maps_prospect_business",
     "maps_prospect_city",
 )

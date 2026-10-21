@@ -99,6 +99,8 @@ class BusinessProfileUpdate(BaseModel):
     restrictions: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
     payment_methods: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
     delivery_info: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    promotions: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    seasonal_rules: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
     maps_prospect_business: Optional[str] = Field(default=None, max_length=2000)
     maps_prospect_city: Optional[str] = Field(default=None, max_length=120)
     ai_system_prompt: Optional[str] = Field(default=None, max_length=4000)
@@ -117,6 +119,8 @@ class BusinessProfileResponse(BaseModel):
     restrictions: Optional[str] = None
     payment_methods: Optional[str] = None
     delivery_info: Optional[str] = None
+    promotions: Optional[str] = None
+    seasonal_rules: Optional[str] = None
     maps_prospect_business: Optional[str] = None
     maps_prospect_city: Optional[str] = None
     ai_system_prompt: Optional[str] = None

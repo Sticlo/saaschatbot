@@ -178,6 +178,31 @@ def format_history(messages: list[Message], *, limit: Optional[int] = None) -> l
     return formatted
 
 
+def promotions_and_season_block(profile: Optional[TenantProfile]) -> str:
+    """Lo que el dueño configuró para negociar y para la temporada: aplica aunque tenga prompt propio."""
+    promotions = ((getattr(profile, "promotions", None) or "") if profile else "").strip()
+    seasonal = ((getattr(profile, "seasonal_rules", None) or "") if profile else "").strip()
+    block = ""
+    if promotions:
+        block += (
+            "\n\nPromociones vigentes del negocio:\n"
+            f"{promotions}\n"
+            "- Úsalas para negociar y cerrar: ofrécelas cuando el cliente dude, pida descuento, diga que está "
+            "caro o compare con otro lugar, o cuando le ayuden a decidirse.\n"
+            "- Respeta sus condiciones y fechas tal cual. No inventes otras promociones ni mejores descuentos."
+        )
+    if seasonal:
+        block += (
+            "\n\nQué ofrecer según la fecha o temporada (lo definió el dueño; manda sobre productos y atajos):\n"
+            f"{seasonal}\n"
+            "- Compáralo con la fecha de hoy. Lo que todavía no aplica o ya pasó, no lo ofrezcas ni lo menciones, "
+            "aunque esté en productos o atajos. Si el cliente lo pide él mismo, dile con amabilidad cuándo estará "
+            "(si se sabe) y llévalo a lo que sí hay ahora.\n"
+            "- Si dice qué atajo usar en una temporada, envía ese y no los de otras temporadas."
+        )
+    return block
+
+
 def _complete_reply(
     *,
     system: str,
@@ -188,6 +213,7 @@ def _complete_reply(
     payment_methods: str = "",
     products: Optional[list[Product]] = None,
     knowledge: str = "",
+    business_rules: str = "",
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
@@ -202,6 +228,7 @@ def _complete_reply(
     if payment_methods:
         system += payment_methods_block(payment_methods)
     system += date_context()
+    system += business_rules
     if booking is not None:
         system = append_appointment_instructions(
             system,
@@ -264,6 +291,7 @@ def generate_qualify_reply(
         payment_methods=payment_methods_of(profile),
         products=products,
         knowledge=knowledge,
+        business_rules=promotions_and_season_block(profile),
     )
 
 
@@ -294,6 +322,7 @@ def generate_reply(
             payment_methods=payment_methods_of(profile),
             products=products,
             knowledge=knowledge,
+            business_rules=promotions_and_season_block(profile),
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

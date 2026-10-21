@@ -4262,6 +4262,8 @@
     "biz-hours",
     "biz-tone",
     "biz-restrictions",
+    "biz-promotions",
+    "biz-seasonal",
   ];
 
   function readBizForm() {
@@ -4276,6 +4278,8 @@
       location_hours: $("biz-hours")?.value.trim() || "",
       tone: $("biz-tone")?.value.trim() || "",
       restrictions: $("biz-restrictions")?.value.trim() || "",
+      promotions: $("biz-promotions")?.value.trim() || "",
+      seasonal_rules: $("biz-seasonal")?.value.trim() || "",
     };
   }
 
@@ -4303,6 +4307,8 @@
     $("biz-hours").value = profile?.location_hours || "";
     $("biz-tone").value = profile?.tone || "";
     $("biz-restrictions").value = profile?.restrictions || "";
+    $("biz-promotions").value = profile?.promotions || "";
+    $("biz-seasonal").value = profile?.seasonal_rules || "";
     if (["biz-target", "biz-prices", "biz-tone", "biz-restrictions"].some((id) => $(id).value.trim())) $("biz-more").open = true;
     renderBizSummary(profile);
     renderReadiness();
@@ -4618,6 +4624,8 @@
       envios: required("delivery", "biz-delivery"),
       horario: required("location", "biz-hours"),
       estilo: { sub: aiRowText(val("biz-tone")) || "Opcional", mark: val("biz-tone") || val("biz-restrictions") ? "ok" : "" },
+      promociones: { sub: aiRowText(val("biz-promotions")) || "Opcional · para negociar mejor", mark: val("biz-promotions") ? "ok" : "" },
+      temporada: { sub: aiRowText(val("biz-seasonal")) || "Opcional · qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
       respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
       atajos: { sub: shortcuts ? `${shortcuts} ${shortcuts === 1 ? "atajo" : "atajos"}` : "Menú, precios, fotos…", mark: "" },

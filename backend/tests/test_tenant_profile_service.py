@@ -67,6 +67,44 @@ def test_business_answers_can_be_long(client: TestClient):
     assert too_long.status_code == 422
 
 
+def test_promotions_and_season_are_saved(client: TestClient):
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    payload = {
+        "promotions": "10% pagando de contado",
+        "seasonal_rules": "Hasta el 31 de octubre solo Halloween; no ofrecer Navidad todavía.",
+    }
+    put = client.put("/api/v1/outbound/business-profile", json=payload, headers=headers)
+    assert put.status_code == 200, put.text
+    saved = client.get("/api/v1/outbound/business-profile", headers=headers).json()
+    assert saved["promotions"] == payload["promotions"]
+    assert saved["seasonal_rules"] == payload["seasonal_rules"]
+
+    client.put("/api/v1/outbound/business-profile", json={"promotions": ""}, headers=headers)
+    cleared = client.get("/api/v1/outbound/business-profile", headers=headers).json()
+    assert not cleared["promotions"]
+    assert cleared["seasonal_rules"] == payload["seasonal_rules"]
+
+
+def test_promotions_and_season_reach_the_ai():
+    from app.application.ai.ai_conversation_service import promotions_and_season_block
+
+    assert promotions_and_season_block(None) == ""
+    assert promotions_and_season_block(TenantProfile(tenant_id=uuid.uuid4())) == ""
+
+    profile = TenantProfile(
+        tenant_id=uuid.uuid4(),
+        promotions="10% pagando de contado",
+        seasonal_rules="Hasta el 31 de octubre solo Halloween, atajo «Halloween». Navidad desde noviembre.",
+    )
+    block = promotions_and_season_block(profile)
+    assert "Promociones vigentes del negocio:\n10% pagando de contado" in block
+    assert "No inventes otras promociones" in block
+    assert "solo Halloween" in block
+    assert "Compáralo con la fecha de hoy" in block
+    assert "envía ese y no los de otras temporadas" in block
+
+
 def test_apply_business_answers_columns():
     profile = TenantProfile(tenant_id=uuid.uuid4(), onboarding_answers={})
     apply_business_answers(profile, {"industry": "Café", "tone": "Formal"})
