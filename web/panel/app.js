@@ -3683,6 +3683,8 @@
     if ($("schedule-slot-minutes")) {
       $("schedule-slot-minutes").value = String(schedule.slot_minutes || 60);
     }
+    if ($("schedule-break-start")) $("schedule-break-start").value = schedule.break_start || "";
+    if ($("schedule-break-end")) $("schedule-break-end").value = schedule.break_end || "";
     state.onboarding.bookingEnabled = !!schedule.ai_booking_enabled;
     state.onboarding.bookingAllowed = schedule.ai_booking_allowed !== false;
     renderOnboarding();
@@ -3714,12 +3716,15 @@
     const open = $("schedule-open")?.value;
     const close = $("schedule-close")?.value;
     const minutes = $("schedule-slot-minutes")?.value;
+    const breakStart = $("schedule-break-start")?.value;
+    const breakEnd = $("schedule-break-end")?.value;
+    const lunch = breakStart && breakEnd ? ` · almuerzo ${breakStart}–${breakEnd}` : "";
     const booking = $("schedule-ai-booking");
     const aiBooks = !!booking?.checked;
     setSplitRow(
       panel,
       "horario",
-      `${open}–${close} · citas de ${minutes} min${aiBooks ? " · la IA agenda" : ""}`,
+      `${open}–${close}${lunch} · citas de ${minutes} min${aiBooks ? " · la IA agenda" : ""}`,
       aiBooks ? "ok" : "",
     );
     const team = state.staff || [];
@@ -4164,6 +4169,8 @@
         open_time: $("schedule-open")?.value || "08:00",
         close_time: $("schedule-close")?.value || "18:00",
         slot_minutes: Number($("schedule-slot-minutes")?.value || 60),
+        break_start: $("schedule-break-start")?.value || "",
+        break_end: $("schedule-break-end")?.value || "",
         ai_booking_enabled: !!$("schedule-ai-booking")?.checked,
         appointment_reminders: !!$("schedule-reminders")?.checked,
         staff_label: $("schedule-staff-label")?.value?.trim() || "",

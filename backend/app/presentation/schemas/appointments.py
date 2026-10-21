@@ -11,6 +11,8 @@ class AppointmentScheduleResponse(BaseModel):
     open_time: str
     close_time: str
     slot_minutes: int
+    break_start: str = ""
+    break_end: str = ""
     ai_booking_enabled: bool = False
     ai_booking_allowed: bool = True
     staff_label: str = ""
@@ -21,6 +23,9 @@ class AppointmentScheduleUpdate(BaseModel):
     open_time: str = Field(min_length=4, max_length=5)
     close_time: str = Field(min_length=4, max_length=5)
     slot_minutes: int = Field(ge=15, le=240)
+    # None = no cambiar; "" en ambos = sin almuerzo.
+    break_start: Optional[str] = Field(default=None, max_length=5)
+    break_end: Optional[str] = Field(default=None, max_length=5)
     ai_booking_enabled: Optional[bool] = None
     staff_label: Optional[str] = Field(default=None, max_length=40)
     appointment_reminders: Optional[bool] = None

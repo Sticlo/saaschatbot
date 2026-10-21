@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=124" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=125" />
 </head>
 <body>
   <div id="app">
@@ -831,7 +831,7 @@
               <section class="ai-pane appointments-schedule-pane" data-ai-pane="horario">
                 <header class="ai-pane-head">
                   <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-                  <div><h3>Horario</h3><p>A qué hora abres y cuánto dura cada cita.</p></div>
+                  <div><h3>Horario</h3><p>A qué hora abres, a qué hora almuerzas y cuánto dura cada cita.</p></div>
                 </header>
                 <div class="appointments-schedule-grid">
                   <label>
@@ -846,7 +846,16 @@
                     Cada cita dura (min)
                     <input type="number" id="schedule-slot-minutes" min="15" max="240" step="15" value="60" />
                   </label>
+                  <label>
+                    Almuerzo desde
+                    <input type="time" id="schedule-break-start" />
+                  </label>
+                  <label>
+                    Almuerzo hasta
+                    <input type="time" id="schedule-break-end" />
+                  </label>
                 </div>
+                <p class="muted small">Opcional. En ese rato no se agendan citas. Déjalo vacío si no paras a almorzar.</p>
                 <label class="appointments-ai-toggle">
                   <input type="checkbox" id="schedule-ai-booking" />
                   <span>
@@ -1121,6 +1130,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=198"></script>
+  <script src="/static/panel/app.js?v=199"></script>
 </body>
 </html>

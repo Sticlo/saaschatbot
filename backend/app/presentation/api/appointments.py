@@ -68,6 +68,8 @@ def _schedule_response(profile, *, booking_allowed: bool = True) -> AppointmentS
         open_time=schedule.open_time,
         close_time=schedule.close_time,
         slot_minutes=schedule.slot_minutes,
+        break_start=schedule.break_start or "",
+        break_end=schedule.break_end or "",
         ai_booking_enabled=bool(profile.ai_booking_enabled) and booking_allowed,
         ai_booking_allowed=booking_allowed,
         staff_label=profile.staff_label or "",
@@ -106,6 +108,8 @@ def put_appointment_schedule(
             open_time=body.open_time,
             close_time=body.close_time,
             slot_minutes=body.slot_minutes,
+            break_start=body.break_start,
+            break_end=body.break_end,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -129,6 +133,7 @@ def put_appointment_schedule(
             "open_time": schedule.open_time,
             "close_time": schedule.close_time,
             "slot_minutes": schedule.slot_minutes,
+            "break": f"{schedule.break_start}-{schedule.break_end}" if schedule.break_start else "",
             "ai_booking_enabled": bool(profile.ai_booking_enabled),
         },
         ip_address=request.client.host if request.client else None,

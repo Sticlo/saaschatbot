@@ -22,6 +22,8 @@ class ScheduleSettings:
     open_time: str
     close_time: str
     slot_minutes: int
+    break_start: Optional[str] = None
+    break_end: Optional[str] = None
 
 
 def _parse_hhmm(value: str) -> time:
@@ -49,6 +51,8 @@ def get_schedule(profile: TenantProfile) -> ScheduleSettings:
         open_time=profile.schedule_open_time or "08:00",
         close_time=profile.schedule_close_time or "18:00",
         slot_minutes=slot,
+        break_start=getattr(profile, "schedule_break_start", None) or None,
+        break_end=getattr(profile, "schedule_break_end", None) or None,
     )
 
 
@@ -62,6 +66,8 @@ def update_schedule(
     open_time: str,
     close_time: str,
     slot_minutes: int,
+    break_start: Optional[str] = None,
+    break_end: Optional[str] = None,
 ) -> ScheduleSettings:
     open_clock = _parse_hhmm(open_time)
     close_clock = _parse_hhmm(close_time)
@@ -71,18 +77,41 @@ def update_schedule(
     profile.schedule_open_time = _format_hhmm(open_clock)
     profile.schedule_close_time = _format_hhmm(close_clock)
     profile.schedule_slot_minutes = slot
+    if break_start is not None or break_end is not None:
+        if not (break_start or "").strip() and not (break_end or "").strip():
+            profile.schedule_break_start = None
+            profile.schedule_break_end = None
+        else:
+            if not (break_start or "").strip() or not (break_end or "").strip():
+                raise ValueError("Pon a qué hora empieza y a qué hora termina el almuerzo")
+            pause_start, pause_end = _parse_hhmm(break_start), _parse_hhmm(break_end)
+            if pause_end <= pause_start:
+                raise ValueError("El almuerzo debe terminar después de empezar")
+            if pause_start < open_clock or pause_end > close_clock:
+                raise ValueError("El almuerzo debe quedar dentro del horario de atención")
+            profile.schedule_break_start = _format_hhmm(pause_start)
+            profile.schedule_break_end = _format_hhmm(pause_end)
     return get_schedule(profile)
 
 
+def _work_windows(schedule: ScheduleSettings) -> list[tuple[time, time]]:
+    open_clock, close_clock = _parse_hhmm(schedule.open_time), _parse_hhmm(schedule.close_time)
+    if not (schedule.break_start and schedule.break_end):
+        return [(open_clock, close_clock)]
+    pause_start, pause_end = _parse_hhmm(schedule.break_start), _parse_hhmm(schedule.break_end)
+    return [(open_clock, pause_start), (pause_end, close_clock)]
+
+
 def _slot_ranges(day: date, schedule: ScheduleSettings) -> list[tuple[datetime, datetime]]:
-    start = _combine_local(day, _parse_hhmm(schedule.open_time))
-    end = _combine_local(day, _parse_hhmm(schedule.close_time))
+    """Bloques del día; después del almuerzo arrancan de nuevo a la hora en que vuelve."""
     step = timedelta(minutes=schedule.slot_minutes)
     slots: list[tuple[datetime, datetime]] = []
-    cursor = start
-    while cursor + step <= end:
-        slots.append((cursor, cursor + step))
-        cursor += step
+    for window_start, window_end in _work_windows(schedule):
+        cursor = _combine_local(day, window_start)
+        end = _combine_local(day, window_end)
+        while cursor + step <= end:
+            slots.append((cursor, cursor + step))
+            cursor += step
     return slots
 
 
@@ -121,6 +150,10 @@ def _staff_works(staff: StaffMember, schedule: ScheduleSettings, starts_at: date
     if local_end.date() != local_start.date():
         return False
     window = staff_window(staff, schedule, local_start.date())
+    if schedule.break_start and schedule.break_end:
+        pause_start, pause_end = _parse_hhmm(schedule.break_start), _parse_hhmm(schedule.break_end)
+        if local_start.time() < pause_end and pause_start < local_end.time():
+            return False
     return bool(window and window[0] <= local_start.time() and local_end.time() <= window[1])
 
 
@@ -220,6 +253,8 @@ def build_day_view(
             "open_time": schedule.open_time,
             "close_time": schedule.close_time,
             "slot_minutes": schedule.slot_minutes,
+            "break_start": schedule.break_start or "",
+            "break_end": schedule.break_end or "",
             "ai_booking_enabled": bool(profile.ai_booking_enabled),
             "staff_label": profile.staff_label or "",
         },
