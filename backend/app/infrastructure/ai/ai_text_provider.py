@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from app.config import settings
 from app.infrastructure.ai import deepseek_client, gemini_client
@@ -56,6 +56,36 @@ def _report_deepseek_failure(exc: DeepSeekError) -> None:
             f"Último error: {exc}\nLos clientes no lo notan. {fallback}",
             severity="warning",
         )
+
+
+def chat_completion_tools(
+    messages: list[dict[str, str]],
+    *,
+    tools: list[dict],
+    run_tool: Callable[[str, dict], str],
+    unavailable_note: str,
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> str:
+    """Como chat_completion, pero la IA puede consultar herramientas. Solo DeepSeek las soporta: si falla,
+    responde sin ellas y con la nota de que no pudo consultar."""
+    if deepseek_client.is_configured():
+        try:
+            return deepseek_client.chat_completion_with_tools(
+                messages,
+                tools=tools,
+                run_tool=run_tool,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=settings.ai_provider_timeout_seconds,
+            )
+        except DeepSeekError as exc:
+            log.warning("DeepSeek con herramientas falló: %s", exc)
+    return chat_completion(
+        [*messages, {"role": "system", "content": unavailable_note}],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 def chat_completion(

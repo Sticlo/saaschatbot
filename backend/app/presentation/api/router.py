@@ -18,6 +18,7 @@ from app.presentation.api import (
     products,
     quick_shortcuts,
     results,
+    site_connection,
     subscriptions,
     tenants,
     users,
@@ -35,6 +36,7 @@ api_router.include_router(conversations.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
 api_router.include_router(availability.router)
+api_router.include_router(site_connection.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(appointments.router)

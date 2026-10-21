@@ -107,6 +107,8 @@ class TenantProfile(Base):
     quick_shortcuts: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # Calendario de cada alojamiento o espacio (enlace iCal de Airbnb, Booking, Google…).
     availability_calendars: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Conexión MCP con la web del negocio; los tokens van cifrados (secret_box).
+    site_connection: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     schedule_open_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
     schedule_close_time: Mapped[str] = mapped_column(String(5), nullable=False, default="18:00")
     schedule_slot_minutes: Mapped[int] = mapped_column(nullable=False, default=60)

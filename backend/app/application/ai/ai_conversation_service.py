@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 from app.application.appointments.appointment_service import BOGOTA
 from app.application.availability.availability_service import availability_block
+from app.application.availability.site_connector import UNAVAILABLE_TEXT, ai_tools, run_ai_tool, site_tools_block
 from app.application.ai.ai_appointment_service import (
     BookingContext,
     append_appointment_instructions,
@@ -32,7 +33,7 @@ from app.application.products.product_service import product_ref, products_promp
 from app.config import settings
 from app.domain.entities import Message, Product, Tenant, TenantProfile
 from app.domain.entities.enums import MessageDirection
-from app.infrastructure.ai.ai_text_provider import chat_completion
+from app.infrastructure.ai.ai_text_provider import chat_completion, chat_completion_tools
 from app.infrastructure.ai.deepseek_client import DeepSeekError
 
 log = logging.getLogger(__name__)
@@ -209,8 +210,12 @@ def promotions_and_season_block(profile: Optional[TenantProfile]) -> str:
     return block
 
 
-def business_rules_block(profile: Optional[TenantProfile]) -> str:
-    return promotions_and_season_block(profile) + availability_block(profile)
+def business_rules_block(profile: Optional[TenantProfile], site_tools: Optional[list[dict]] = None) -> str:
+    return promotions_and_season_block(profile) + availability_block(profile) + site_tools_block(site_tools or [])
+
+
+def _site_tool_runner(tenant: Tenant) -> Callable[[str, dict], str]:
+    return lambda name, args: run_ai_tool(tenant.id, name, args)
 
 
 def _complete_reply(
@@ -224,6 +229,8 @@ def _complete_reply(
     products: Optional[list[Product]] = None,
     knowledge: str = "",
     business_rules: str = "",
+    site_tools: Optional[list[dict]] = None,
+    run_site_tool: Optional[Callable[[str, dict], str]] = None,
 ) -> AiGeneratedReply:
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
@@ -261,11 +268,21 @@ def _complete_reply(
     if correction:
         # Al final pesa más que lo que la IA misma dijo antes en el chat.
         messages.append({"role": "system", "content": correction})
-    raw = chat_completion(
-        messages,
-        temperature=0.45,
-        max_tokens=settings.ai_reply_max_tokens,
-    )
+    if site_tools and run_site_tool:
+        raw = chat_completion_tools(
+            messages,
+            tools=site_tools,
+            run_tool=run_site_tool,
+            unavailable_note=UNAVAILABLE_TEXT,
+            temperature=0.45,
+            max_tokens=settings.ai_reply_max_tokens,
+        )
+    else:
+        raw = chat_completion(
+            messages,
+            temperature=0.45,
+            max_tokens=settings.ai_reply_max_tokens,
+        )
     return parse_ai_reply(raw, valid_ids=ids, valid_book_keys=book_keys, valid_photo_refs=photo_refs)
 
 
@@ -292,6 +309,7 @@ def generate_qualify_reply(
     if contact_name and not contact_name.startswith("+"):
         system += f"\n\nNombre del contacto: {contact_name}"
 
+    site_tools = ai_tools(profile)
     return _complete_reply(
         system=system,
         history=history,
@@ -301,7 +319,9 @@ def generate_qualify_reply(
         payment_methods=payment_methods_of(profile),
         products=products,
         knowledge=knowledge,
-        business_rules=business_rules_block(profile),
+        business_rules=business_rules_block(profile, site_tools),
+        site_tools=site_tools,
+        run_site_tool=_site_tool_runner(tenant),
     )
 
 
@@ -322,6 +342,7 @@ def generate_reply(
     if contact_name and not contact_name.startswith("+"):
         system += f"\n\nNombre del contacto: {contact_name}"
 
+    site_tools = ai_tools(profile)
     try:
         return _complete_reply(
             system=system,
@@ -332,7 +353,9 @@ def generate_reply(
             payment_methods=payment_methods_of(profile),
             products=products,
             knowledge=knowledge,
-            business_rules=business_rules_block(profile),
+            business_rules=business_rules_block(profile, site_tools),
+            site_tools=site_tools,
+            run_site_tool=_site_tool_runner(tenant),
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=122" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=123" />
 </head>
 <body>
   <div id="app">
@@ -533,6 +533,26 @@
                   <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
                   <div><h3>Disponibilidad</h3><p>Opcional. Para alojamientos, cabañas o salones: pega el enlace del calendario de cada uno y la IA revisa qué fechas están ocupadas antes de ofrecerlas. Se actualiza solo cada 10 minutos.</p></div>
                 </header>
+                <div class="site-connect">
+                  <h4>Tu sitio web</h4>
+                  <p class="muted small">Si tu web tiene conexión para asistentes de IA (MCP), conéctala: la IA consulta la disponibilidad en vivo mientras conversa.</p>
+                  <div id="site-connect-form" class="site-connect-form">
+                    <label class="ai-field"><span>Dirección para asistentes de IA</span><input type="url" id="site-connect-url" maxlength="1000" placeholder="https://tusitio.com/mcp" /></label>
+                    <button type="button" id="site-connect-btn" class="btn primary small">Conectar</button>
+                  </div>
+                  <div id="site-connected" class="hidden">
+                    <p class="site-connected-head"><strong id="site-connected-name"></strong> <span id="site-connected-state" class="muted small"></span></p>
+                    <p class="muted small">Elige qué puede consultar la IA:</p>
+                    <ul id="site-tools" class="site-tools"></ul>
+                    <div class="availability-item-foot">
+                      <button type="button" id="site-tools-save" class="btn primary small">Guardar</button>
+                      <button type="button" id="site-refresh" class="btn ghost small">Actualizar</button>
+                      <button type="button" id="site-disconnect" class="btn ghost small">Desconectar</button>
+                    </div>
+                  </div>
+                  <p id="site-connect-status" class="ai-save-status muted small"></p>
+                </div>
+                <h4 class="availability-subhead">Calendarios (iCal)</h4>
                 <details class="ai-availability-help">
                   <summary>¿Dónde consigo el enlace?</summary>
                   <p class="muted small"><strong>Airbnb:</strong> Calendario → Disponibilidad → Conectar calendarios → Exportar calendario.<br><strong>Booking:</strong> Tarifas y disponibilidad → Sincronizar calendarios → Exportar.<br><strong>Google Calendar:</strong> Configuración del calendario → Dirección secreta en formato iCal.<br>Si tu página de reservas tiene un enlace «.ics» o «iCal», también sirve.</p>
@@ -1107,6 +1127,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=196"></script>
+  <script src="/static/panel/app.js?v=197"></script>
 </body>
 </html>

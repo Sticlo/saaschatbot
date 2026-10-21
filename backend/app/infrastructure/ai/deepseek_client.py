@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -86,15 +87,68 @@ def chat_completion(
     if not is_configured():
         raise DeepSeekError("DEEPSEEK_API_KEY no configurada — agrégala en .env")
 
-    effective_model = resolve_model(model)
     payload: dict[str, Any] = {
-        "model": effective_model,
+        "model": resolve_model(model),
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         # Con thinking activo, el razonamiento consume max_tokens y content llega vacío.
         "thinking": {"type": "disabled"},
     }
+    content = _completion_message(payload, timeout).get("content")
+    if not content or not str(content).strip():
+        raise DeepSeekError("DeepSeek devolvió contenido vacío")
+    return str(content).strip()
+
+
+def chat_completion_with_tools(
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict],
+    run_tool: Callable[[str, dict], str],
+    model: Optional[str] = None,
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+    timeout: float = 60.0,
+    max_rounds: int = 3,
+) -> str:
+    """La IA puede consultar herramientas antes de responder; en la última vuelta tiene que responder."""
+    if not is_configured():
+        raise DeepSeekError("DEEPSEEK_API_KEY no configurada — agrégala en .env")
+    convo = list(messages)
+    for round_no in range(max_rounds + 1):
+        payload: dict[str, Any] = {
+            "model": resolve_model(model),
+            "messages": convo,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "thinking": {"type": "disabled"},
+            "tools": tools,
+            "tool_choice": "auto" if round_no < max_rounds else "none",
+        }
+        message = _completion_message(payload, timeout)
+        calls = message.get("tool_calls") or []
+        if not calls or round_no == max_rounds:
+            content = message.get("content")
+            if not content or not str(content).strip():
+                raise DeepSeekError("DeepSeek devolvió contenido vacío")
+            return str(content).strip()
+        convo.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": calls})
+        for call in calls:
+            fn = call.get("function") or {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            convo.append({
+                "role": "tool",
+                "tool_call_id": call.get("id"),
+                "content": run_tool(str(fn.get("name") or ""), args if isinstance(args, dict) else {}),
+            })
+    raise DeepSeekError("DeepSeek no terminó de responder")
+
+
+def _completion_message(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     headers = {
         "Authorization": f"Bearer {settings.deepseek_api_key.strip()}",
         "Content-Type": "application/json",
@@ -129,8 +183,4 @@ def chat_completion(
     choices = data.get("choices") or []
     if not choices:
         raise DeepSeekError("DeepSeek devolvió respuesta vacía")
-
-    content = choices[0].get("message", {}).get("content")
-    if not content or not str(content).strip():
-        raise DeepSeekError("DeepSeek devolvió contenido vacío")
-    return str(content).strip()
+    return choices[0].get("message") or {}

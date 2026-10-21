@@ -4628,8 +4628,11 @@
       promociones: { sub: aiRowText(val("biz-promotions")) || "Opcional · para negociar mejor", mark: val("biz-promotions") ? "ok" : "" },
       temporada: { sub: aiRowText(val("biz-seasonal")) || "Opcional · qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
       disponibilidad: {
-        sub: calendars ? `${calendars} ${calendars === 1 ? "calendario conectado" : "calendarios conectados"}` : "Opcional · fechas libres y ocupadas",
-        mark: calendars ? "ok" : "",
+        sub: [
+          state.siteConnection?.connected ? "Tu sitio web conectado" : "",
+          calendars ? `${calendars} ${calendars === 1 ? "calendario" : "calendarios"}` : "",
+        ].filter(Boolean).join(" · ") || "Opcional · fechas libres y ocupadas",
+        mark: calendars || state.siteConnection?.connected ? "ok" : "",
       },
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
       respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
@@ -5044,7 +5047,7 @@
     if (!isPhoneLayout() && !$("ai-setup-panel").classList.contains("is-open")) {
       openAiPane(defaultAiPane(), { animate: false });
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability(), loadSiteConnection()]);
     renderAiShortcutsSummary();
   }
 
@@ -5760,6 +5763,108 @@
     $("ai-availability-row")?.classList.toggle("hidden", state.availability == null);
     renderAvailability(state.availability || []);
     renderAiList();
+  }
+
+  async function loadSiteConnection() {
+    if (!state.canManageGlobal) return;
+    try {
+      state.siteConnection = await api("/site-connection");
+    } catch {
+      state.siteConnection = null;
+    }
+    renderSiteConnection();
+    renderAiList();
+  }
+
+  const SITE_SAFE_TOOL = /availab|disponib/i;
+
+  function renderSiteConnection() {
+    const conn = state.siteConnection;
+    const connected = !!conn?.connected;
+    $("site-connect-form")?.classList.toggle("hidden", connected);
+    $("site-connected")?.classList.toggle("hidden", !connected);
+    if (!connected) return;
+    $("site-connected-name").textContent = conn.name || conn.server_url;
+    $("site-connected-state").textContent = conn.status === "ok" ? "· Conectado" : "· Hay que volver a conectarlo";
+    $("site-tools").innerHTML = conn.tools.length
+      ? conn.tools.map((t) => {
+          const warn = SITE_SAFE_TOOL.test(t.name)
+            ? ""
+            : '<br><span class="small site-tool-warn">Puede mostrar datos de tus reservas o huéspedes: actívala solo si sabes lo que hace.</span>';
+          return `<li><label><input type="checkbox" value="${escapeHtml(t.name)}"${t.allowed ? " checked" : ""} />
+            <span><strong>${escapeHtml(t.title || t.name)}</strong><br><span class="muted small">${escapeHtml(t.description.slice(0, 220))}</span>${warn}</span></label></li>`;
+        }).join("")
+      : '<li class="muted small">Tu sitio no ofrece consultas todavía. Dale a «Actualizar».</li>';
+    if (conn.last_error) $("site-connect-status").textContent = conn.last_error;
+  }
+
+  async function startSiteConnection() {
+    const status = $("site-connect-status");
+    const url = $("site-connect-url").value.trim();
+    if (!url) {
+      status.textContent = "Pega la dirección para asistentes de IA de tu sitio.";
+      return;
+    }
+    status.textContent = "Revisando tu sitio…";
+    try {
+      const res = await api("/site-connection/start", { method: "POST", body: JSON.stringify({ url }) }, 30000);
+      status.textContent = "Inicia sesión en tu sitio y autoriza a Omitel…";
+      location.href = res.authorize_url;
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  }
+
+  async function saveSiteTools() {
+    const allowed = [...$("site-tools").querySelectorAll("input:checked")].map((i) => i.value);
+    const status = $("site-connect-status");
+    status.textContent = "Guardando…";
+    try {
+      state.siteConnection = await api("/site-connection/tools", { method: "PUT", body: JSON.stringify({ allowed }) });
+      renderSiteConnection();
+      status.textContent = allowed.length ? "Guardado. La IA ya consulta tu sitio." : "Guardado. La IA no consultará tu sitio.";
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  }
+
+  async function refreshSiteTools() {
+    const status = $("site-connect-status");
+    status.textContent = "Actualizando…";
+    try {
+      state.siteConnection = await api("/site-connection/refresh", { method: "POST" }, 30000);
+      status.textContent = "";
+      renderSiteConnection();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  }
+
+  async function disconnectSite() {
+    if (!confirm("¿Desconectar tu sitio? La IA dejará de consultarlo.")) return;
+    try {
+      state.siteConnection = await api("/site-connection", { method: "DELETE" });
+      $("site-connect-status").textContent = "Desconectado.";
+      renderSiteConnection();
+    } catch (err) {
+      $("site-connect-status").textContent = err.message;
+    }
+  }
+
+  // Al volver de autorizar en la web del dueño: /panel?site=ok|error&msg=…
+  async function openSiteConnectionResult() {
+    const params = new URLSearchParams(location.search);
+    const result = params.get("site");
+    if (!result) return;
+    const msg = params.get("msg") || "";
+    params.delete("site");
+    params.delete("msg");
+    const rest = params.toString();
+    history.replaceState(history.state, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
+    switchPanelMode("ai");
+    openAiPane("disponibilidad");
+    await loadSiteConnection();
+    $("site-connect-status").textContent = result === "ok" ? "¡Listo! Tu sitio quedó conectado. Revisa qué puede consultar la IA." : msg;
   }
 
   function availabilityItemHtml(cal) {
@@ -7573,6 +7678,10 @@
   $("alert-recipients").addEventListener("change", () => checkAlertRecipients());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("availability-add")?.addEventListener("click", addAvailabilityRow);
+  $("site-connect-btn")?.addEventListener("click", startSiteConnection);
+  $("site-tools-save")?.addEventListener("click", saveSiteTools);
+  $("site-refresh")?.addEventListener("click", refreshSiteTools);
+  $("site-disconnect")?.addEventListener("click", disconnectSite);
   $("availability-save")?.addEventListener("click", saveAvailability);
   $("availability-list")?.addEventListener("click", (e) => {
     const li = e.target.closest(".availability-item");
@@ -8323,6 +8432,7 @@
       renderWaUi();
     }
     await openChatFromLink();
+    await openSiteConnectionResult();
   }
 
   // Las alertas de WhatsApp traen /panel?chat=<id>: se abre directo ese chat.
