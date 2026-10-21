@@ -79,6 +79,13 @@ def get_calendars(db: Session, tenant_id: uuid.UUID) -> list[dict]:
 def save_calendars(db: Session, tenant_id: uuid.UUID, calendars: list[Any]) -> list[dict]:
     profile = get_or_create_tenant_profile(db, tenant_id)
     cleaned = normalize_calendars(calendars)
+    known = {c["url"] for c in calendars_of(profile)}
+    for cal in cleaned:
+        if cal["url"] not in known:
+            try:
+                parse_ics(_download(cal["url"]))
+            except CalendarError as exc:
+                raise CalendarError(f"«{cal['name']}»: {exc}") from exc
     profile.availability_calendars = cleaned
     db.flush()
     return cleaned
@@ -112,7 +119,15 @@ def _download(url: str) -> str:
                         data.extend(chunk)
                         if len(data) > MAX_ICS_BYTES:
                             raise CalendarError("Ese calendario es demasiado grande.")
-                    return data.decode("utf-8", errors="replace")
+                    text = data.decode("utf-8", errors="replace")
+                    # Una página web sin eventos se leería como «todo libre»: solo vale un iCal de verdad.
+                    if "BEGIN:VCALENDAR" not in text[:4096].upper():
+                        raise CalendarError(
+                            "Ese enlace no es un calendario iCal (es una página web). Pega el enlace de "
+                            "exportar calendario de Airbnb, Booking o Google. Si quieres conectar tu página "
+                            "web, usa «Tu sitio web» arriba."
+                        )
+                    return text
         except httpx.HTTPError as exc:
             raise CalendarError("No pude abrir el calendario. Intenta de nuevo en un rato.") from exc
     raise CalendarError("El enlace redirige demasiadas veces.")
@@ -179,7 +194,7 @@ def parse_ics(text: str) -> list[tuple[date, date]]:
 
 
 def _cache_key(url: str, kind: str) -> str:
-    return f"avail:ical:{kind}:{hashlib.sha1(url.encode()).hexdigest()}"
+    return f"avail:ical2:{kind}:{hashlib.sha1(url.encode()).hexdigest()}"
 
 
 def busy_ranges(url: str) -> tuple[Optional[list[tuple[date, date]]], Optional[float], str]:

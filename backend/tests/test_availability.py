@@ -111,6 +111,26 @@ def test_only_https_links(url):
         svc.normalize_url(url)
 
 
+def test_web_page_is_not_a_calendar(monkeypatch):
+    """Pegar la página del negocio no puede convertirse en «todo libre» para la IA."""
+    import httpx
+
+    real_client = httpx.Client
+    page = "<!DOCTYPE html><html><body>Reserva ahora</body></html>"
+    monkeypatch.setattr(svc, "_require_public_host", lambda host: None)
+    monkeypatch.setattr(
+        svc.httpx,
+        "Client",
+        lambda **kw: real_client(transport=httpx.MockTransport(lambda req: httpx.Response(200, text=page))),
+    )
+    with pytest.raises(svc.CalendarError, match="no es un calendario iCal"):
+        svc._download("https://glamping.example.com")
+    profile = SimpleNamespace(availability_calendars=[{"id": "1", "name": "Glamping", "url": "https://glamping.example.com"}])
+    block = svc.availability_block(profile, today=TODAY)
+    assert "todo libre" not in block
+    assert "no se pudo revisar su calendario" in block
+
+
 def test_webcal_becomes_https():
     assert svc.normalize_url(" webcal://example.com/c.ics ") == "https://example.com/c.ics"
 
