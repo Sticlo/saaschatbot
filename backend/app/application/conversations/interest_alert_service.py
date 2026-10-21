@@ -148,19 +148,22 @@ def unanswered_interested_conversations(db: Session, tenant_id: uuid.UUID) -> li
     )
 
 
+def panel_chat_link(conversation_id) -> str:
+    """Abre el panel directo en ese chat (WhatsApp lo muestra como enlace tocable)."""
+    return f"{settings.app_public_url.rstrip('/')}/panel?chat={conversation_id}"
+
+
 def build_alert_text(business_name: str, pending: list[Conversation]) -> str:
-    names = [
-        resolve_display_name(c.contact_name, c.contact_phone, contact_jid=c.contact_jid or "")
-        for c in pending[:MAX_NAMES_IN_ALERT]
-    ]
+    shown = pending[:MAX_NAMES_IN_ALERT]
     lines = [
         f"🔔 *{business_name}*: tienes {len(pending)} clientes interesados esperando respuesta.",
         "",
-        *[f"• {name}" for name in names],
     ]
-    if len(pending) > len(names):
-        lines.append(f"…y {len(pending) - len(names)} más.")
-    lines += ["", f"Respóndeles aquí: {settings.app_public_url.rstrip('/')}/panel"]
+    for c in shown:
+        name = resolve_display_name(c.contact_name, c.contact_phone, contact_jid=c.contact_jid or "")
+        lines += [f"• {name}", f"  👉 Abrir chat: {panel_chat_link(c.id)}"]
+    if len(pending) > len(shown):
+        lines += ["", f"…y {len(pending) - len(shown)} más: {settings.app_public_url.rstrip('/')}/panel"]
     return "\n".join(lines)
 
 

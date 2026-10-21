@@ -8210,6 +8210,25 @@
       console.error(err);
       renderWaUi();
     }
+    await openChatFromLink();
+  }
+
+  // Las alertas de WhatsApp traen /panel?chat=<id>: se abre directo ese chat.
+  async function openChatFromLink() {
+    const params = new URLSearchParams(location.search);
+    const id = params.get("chat");
+    if (!id) return;
+    params.delete("chat");
+    const rest = params.toString();
+    history.replaceState(history.state, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+    try {
+      switchPanelMode("chats");
+      if (!state.conversations.some((c) => c.id === id)) await switchChatTab("all");
+      await selectConversation(id);
+    } catch (err) {
+      devWarn("No se pudo abrir el chat del enlace:", err.message);
+    }
   }
 
   tryRestoreSession().catch((err) => console.error(err));

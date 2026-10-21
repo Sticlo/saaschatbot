@@ -62,11 +62,28 @@ def test_choosing_from_a_catalog_screenshot_alerts_the_owner(monkeypatch):
 
     assert len(sent) == 1
     assert "eligió *Paquete Baby Shower Rosa*" in sent[0]["text"]
+    assert f"👉 Abrir el chat: " in sent[0]["text"]
+    assert f"/panel?chat={conversation.id}" in sent[0]["text"]
     assert conversation.interest_status == "interested"
 
     sent.clear()
     svc._apply_stage(None, tenant=tenant, conversation=conversation, message=message, stage="interesado")
     assert sent == []
+
+
+def test_interested_backlog_alert_links_each_chat():
+    from app.application.conversations.interest_alert_service import MAX_NAMES_IN_ALERT, build_alert_text
+
+    pending = [
+        SimpleNamespace(id=uuid.uuid4(), contact_name=f"Cliente {i}", contact_phone="", contact_jid="")
+        for i in range(MAX_NAMES_IN_ALERT + 2)
+    ]
+    text = build_alert_text("Rino Eventos", pending)
+    for conv in pending[:MAX_NAMES_IN_ALERT]:
+        assert f"/panel?chat={conv.id}" in text
+    for conv in pending[MAX_NAMES_IN_ALERT:]:
+        assert str(conv.id) not in text
+    assert "…y 2 más" in text
 
 
 def test_reply_format_asks_for_the_chosen_product():

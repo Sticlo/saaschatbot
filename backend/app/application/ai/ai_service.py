@@ -441,12 +441,12 @@ def _remind_owner_of_waiting_client(tenant: Tenant, conversation: Conversation, 
         text = (
             f"⏰ *{tenant.business_name}*: nadie le respondió a {_contact_label(conversation)} en "
             f"{minutes} min, así que la IA retomó el chat para que no se enfríe.\n\n"
-            f"Si prefieres atenderlo tú, apaga la IA en ese chat: {_panel_link()}"
+            f"Si prefieres atenderlo tú, apaga la IA en ese chat.\n{_chat_link(conversation)}"
         )
     else:
         text = (
             f"⏰ *{tenant.business_name}*: {_contact_label(conversation)} lleva {minutes} min "
-            f"esperando respuesta.\n\nRespóndele aquí: {_panel_link()}"
+            f"esperando respuesta.\n\n{_chat_link(conversation)}"
         )
     if not send_alerts(session, phones, text):
         log.warning("No se pudo recordar al dueño el chat en espera conv=%s", conversation.id)
@@ -471,7 +471,7 @@ def _remind_owner_to_confirm(tenant: Tenant, conversation: Conversation, *, sinc
         f"⏰ *{tenant.business_name}*: {_contact_label(conversation)} lleva {minutes} min esperando "
         "que le confirmes. La IA le dijo que por ese chat le confirmabas los detalles; "
         "si nadie le escribe, se enfría.\n\n"
-        f"Respóndele aquí: {_panel_link()}"
+        f"{_chat_link(conversation)}"
     )
     if not send_alerts(session, phones, text):
         log.warning("No se pudo recordar al dueño que confirme conv=%s", conversation.id)
@@ -959,7 +959,7 @@ def _notify_owner_of_handoff(tenant: Tenant, conversation: Conversation) -> None
     text = (
         f"🔔 *{tenant.business_name}*: {name} está esperando respuesta. "
         "Te pasamos el chat para que le respondas tú.\n\n"
-        f"Respóndele aquí: {settings.app_public_url.rstrip('/')}/panel"
+        f"{_chat_link(conversation)}"
     )
     if not send_alerts(session, phones, text):
         log.warning("No se pudo avisar al dueño del traspaso tenant=%s", tenant.id)
@@ -1298,8 +1298,10 @@ def _notify_assigned_staff(tenant: Tenant, appointment) -> Optional[str]:
     return notice.phone if send_staff_notice(notice) else None
 
 
-def _panel_link() -> str:
-    return f"{settings.app_public_url.rstrip('/')}/panel"
+def _chat_link(conversation: Conversation) -> str:
+    from app.application.conversations.interest_alert_service import panel_chat_link
+
+    return f"👉 Abrir el chat: {panel_chat_link(conversation.id)}"
 
 
 def _resolve_stage(
@@ -1374,7 +1376,7 @@ def _apply_stage(
             text=(
                 f"🎯 *{tenant.business_name}*: {_contact_label(conversation)} eligió *{chosen}*. "
                 "La IA le está confirmando los detalles; si quieres cerrar tú, escríbele y ella se aparta.\n\n"
-                f"{_contact_line(conversation)}\nRespóndele aquí: {_panel_link()}"
+                f"{_contact_line(conversation)}\n{_chat_link(conversation)}"
             ),
         )
         log.info("Cliente eligió producto conv=%s", conversation.id)
@@ -1394,7 +1396,7 @@ def _apply_stage(
                 f"🔥 *{tenant.business_name}*: {_contact_label(conversation)} ya quiere comprar. "
                 "La IA lo sigue atendiendo; apenas le escribas, se aparta para que cierres tú la venta.\n\n"
                 f"{_contact_line(conversation)}\n{chosen_line}"
-                f"Último mensaje: «{snippet}»\n\nRespóndele aquí: {_panel_link()}"
+                f"Último mensaje: «{snippet}»\n\n{_chat_link(conversation)}"
                 + (BOOKING_TIP if booking_tip else "")
             ),
         )
@@ -1542,7 +1544,7 @@ def _deliver_reply(
                 f"📅 *{tenant.business_name}*: la IA agendó una cita para "
                 f"{_contact_label(conversation)} — {describe_appointment(appointment)}.\n\n"
                 f"{_contact_line(conversation)}\n"
-                f"Ver agenda: {_panel_link()}"
+                f"{_chat_link(conversation)}"
             ),
             skip_phone=staff_phone,
         )
@@ -1600,7 +1602,7 @@ def _record_missing_info(
             "Preguntas pendientes, para que no vuelva a pasar. Si es un producto, agrégalo en "
             "Inventario (puedes subir tu Excel, Word o PDF con todos de una vez).\n\n"
             f"{_contact_line(conversation)}\n"
-            f"Abrir panel: {_panel_link()}"
+            f"{_chat_link(conversation)}"
         ),
     )
 
@@ -1672,7 +1674,7 @@ def _alert_order(
     else:
         lines.append(f"• Pago: {order.payment or 'aún no'} (pendiente del comprobante)")
     lines += _stock_lines(list(stock))
-    lines += ["", _contact_line(conversation), f"Ver chat: {_panel_link()}"]
+    lines += ["", _contact_line(conversation), _chat_link(conversation)]
     _send_sales_alert(
         tenant,
         key=f"ai:order_alert:{conversation.id}:{kind}",
