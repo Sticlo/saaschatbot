@@ -91,6 +91,11 @@ def date_context(now: Optional[datetime] = None) -> str:
     today = f"{_WEEKDAYS_ES[local.weekday()]} {local.day} de {_MONTHS_ES[local.month - 1]} de {local.year}"
     return (
         f"\n\nHoy es {today}, {hour} (hora de Colombia).\n"
+        "- Una fecha que el cliente escribe, o que aparece en una imagen, NO es automáticamente la de su "
+        "evento, reserva o entrega: puede ser cuándo le pagan, una pregunta por disponibilidad, la fecha de un "
+        "anuncio, de una promoción o de otro evento. Si no dijo claramente para qué es, pregúntaselo en una "
+        "frase corta (ej. «¿El 15 sería la fecha de tu evento?») antes de venderle, cotizarle o agendarle para "
+        "ese día. Cuando lo confirme, sigue con la venta.\n"
         "- Pedidos, entregas, reservas y citas solo pueden ser de hoy en adelante. Si el cliente da una "
         "fecha u hora que ya pasó o que no existe, no la aceptes: díselo con amabilidad y pregúntale "
         "cuál quiere.\n"

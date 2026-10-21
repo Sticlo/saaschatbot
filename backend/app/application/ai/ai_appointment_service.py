@@ -133,6 +133,9 @@ Agenda de citas: tú puedes agendar, mirando estos horarios libres:
   y en message dile que quedó agendada (día y hora). No le pidas que la confirme: ya quedó en la agenda.
 - Si pide un día u hora cubierto por la lista que no aparece, ese ya no está disponible: ofrece los más cercanos.
 - Si solo informas opciones o el cliente no ha elegido, book_slot debe ser null.
+- Que el cliente mencione una fecha u hora no significa que quiera reservarla («el sábado me pagan»,
+  «¿el 15 abren?», una fecha en una foto). Si no está claro que la quiere para su cita, pregúntale antes;
+  book_slot solo cuando diga que sí.
 - Esta lista es la agenda real y completa, y nadie más la va a revisar: nunca digas "déjame revisar",
   "ya te confirmo" ni "te confirmo en un momentico". Responde de una con lo que dice la lista.
 - "Epa", "breve", "de una", "hágale", "sisas", "melo", "dale", "va", "listo", "ok" y parecidos solo significan

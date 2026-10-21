@@ -367,6 +367,18 @@ def test_ai_knows_today_in_colombia_to_reject_past_dates():
     assert "miércoles 7 de octubre de 2026, 10:00 p. m." in late
 
 
+def test_a_date_the_customer_mentions_is_confirmed_before_selling_for_it():
+    from app.application.ai.ai_appointment_service import append_appointment_instructions
+    from app.application.ai.ai_conversation_service import date_context
+
+    assert "NO es automáticamente la de su evento" in date_context()
+    assert "¿El 15 sería la fecha de tu evento?" in date_context()
+
+    slots = [{"date": "2026-10-24", "start": "15:00", "end": "16:00", "label": "sábado 24 3:00 p. m."}]
+    booking = append_appointment_instructions("", slots)
+    assert "book_slot solo cuando diga que sí" in booking
+
+
 def test_secrets_match_is_constant_time():
     assert secrets_match("abc", "abc") is True
     assert secrets_match("abc", "abd") is False
