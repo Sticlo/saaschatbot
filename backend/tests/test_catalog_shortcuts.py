@@ -58,6 +58,13 @@ def test_owner_tells_the_ai_when_to_send_each_shortcut():
     assert 'Si un atajo tiene "enviarlo cuando"' in prompt
 
 
+def test_text_shortcut_keeps_long_text():
+    long_text = "Paquete baby shower: globos, mesa dulce, fondo y montaje. " * 120
+    assert len(long_text) > 6000
+    rows = _normalize([{"label": "Paquetes", "type": "text", "text": long_text}])
+    assert rows[0]["text"] == long_text.strip()
+
+
 def test_prompt_includes_catalog_knowledge_and_sent_marker():
     line = format_shortcut_line({**CATALOG_SHORTCUT, "already_sent": True})
     assert "archivo PDF (catalogo-katshoes.pdf)" in line

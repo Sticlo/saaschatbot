@@ -9,12 +9,12 @@ class QuickShortcutInput(BaseModel):
     id: Optional[str] = None
     label: str = Field(min_length=1, max_length=20)
     type: Literal["text", "image", "document"] = "text"
-    text: Optional[str] = Field(default=None, max_length=2000)
+    text: Optional[str] = Field(default=None, max_length=10000)
     image_path: Optional[str] = Field(default=None, max_length=512)
     file_path: Optional[str] = Field(default=None, max_length=512)
     file_name: Optional[str] = Field(default=None, max_length=80)
     content: Optional[str] = Field(default=None, max_length=4000)
-    send_when: Optional[str] = Field(default=None, max_length=200)
+    send_when: Optional[str] = Field(default=None, max_length=1000)
 
 
 class QuickShortcutResponse(BaseModel):

@@ -9,7 +9,8 @@ from app.application.billing.tenant_profile_service import get_or_create_tenant_
 
 _MAX_SHORTCUTS = 12
 MAX_CONTENT_CHARS = 4000
-MAX_SEND_WHEN_CHARS = 200
+MAX_SEND_WHEN_CHARS = 1000
+MAX_TEXT_CHARS = 10000
 
 
 def _normalize(raw: list[dict]) -> list[dict]:
@@ -52,7 +53,7 @@ def _normalize(raw: list[dict]) -> list[dict]:
             text = str(item.get("text") or "").strip()
             if not text:
                 continue
-            row = {"id": sid, "label": label[:20], "type": "text", "text": text[:2000]}
+            row = {"id": sid, "label": label[:20], "type": "text", "text": text[:MAX_TEXT_CHARS]}
         if send_when:
             row["send_when"] = send_when
         out.append(row)

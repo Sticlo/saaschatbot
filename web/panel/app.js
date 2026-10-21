@@ -5866,7 +5866,7 @@
             <label><input type="radio" name="stype-${idx}" value="document" ${type === "document" ? "checked" : ""} /> PDF</label>
           </div>
           <div class="shortcut-text-wrap ${isFile ? "hidden" : ""}">
-            <textarea class="shortcut-text" rows="2" maxlength="500" placeholder="Ej: Hola! Aquí tienes nuestros precios…">${escapeHtml(s.text || "")}</textarea>
+            <textarea class="shortcut-text" rows="4" maxlength="10000" placeholder="Ej: Hola! Aquí tienes nuestros precios…">${escapeHtml(s.text || "")}</textarea>
           </div>
           <div class="shortcut-image-wrap ${isFile ? "" : "hidden"}">
             <label class="btn ghost small wa-upload-btn">
@@ -5880,7 +5880,7 @@
             : ""}
           <div class="shortcut-when-wrap">
             <label class="small muted">¿Cuándo lo envía la IA? (opcional)</label>
-            <input type="text" class="shortcut-when" maxlength="200" placeholder="Ej: cuando pregunten por baby shower o decoración para baby shower" value="${escapeHtml(s.send_when || "")}" />
+            <textarea class="shortcut-when" rows="2" maxlength="1000" placeholder="Ej: cuando pregunten por baby shower o decoración para baby shower">${escapeHtml(s.send_when || "")}</textarea>
           </div>
           <div class="shortcut-content-wrap ${type === "image" && hasFile ? "" : "hidden"}">
             <label class="small muted">Lo que la IA sabe de este archivo</label>
