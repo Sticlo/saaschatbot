@@ -8,6 +8,7 @@ from app.presentation.api import (
     appointments,
     audit_logs,
     auth,
+    availability,
     bait_templates,
     billing,
     conversations,
@@ -33,6 +34,7 @@ api_router.include_router(whatsapp.router)
 api_router.include_router(conversations.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
+api_router.include_router(availability.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(appointments.router)

@@ -4601,6 +4601,7 @@
     const tips = state.aiProfile?.tips || [];
     const openQ = (state.aiQuestions || []).filter((q) => q.status === "open").length;
     const shortcuts = (state.quickShortcuts || []).length;
+    const calendars = (state.availability || []).length;
     const hours = Number($("followup-hours")?.value || 0);
     const alertCount = state.onboarding?.alertCount;
     const required = (key, id) => {
@@ -4626,6 +4627,10 @@
       estilo: { sub: aiRowText(val("biz-tone")) || "Opcional", mark: val("biz-tone") || val("biz-restrictions") ? "ok" : "" },
       promociones: { sub: aiRowText(val("biz-promotions")) || "Opcional · para negociar mejor", mark: val("biz-promotions") ? "ok" : "" },
       temporada: { sub: aiRowText(val("biz-seasonal")) || "Opcional · qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
+      disponibilidad: {
+        sub: calendars ? `${calendars} ${calendars === 1 ? "calendario conectado" : "calendarios conectados"}` : "Opcional · fechas libres y ocupadas",
+        mark: calendars ? "ok" : "",
+      },
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
       respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
       atajos: { sub: shortcuts ? `${shortcuts} ${shortcuts === 1 ? "atajo" : "atajos"}` : "Menú, precios, fotos…", mark: "" },
@@ -5039,7 +5044,7 @@
     if (!isPhoneLayout() && !$("ai-setup-panel").classList.contains("is-open")) {
       openAiPane(defaultAiPane(), { animate: false });
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability()]);
     renderAiShortcutsSummary();
   }
 
@@ -5740,6 +5745,102 @@
     }
     renderQuickShortcuts();
     renderAiShortcutsSummary();
+  }
+
+  async function loadAvailability() {
+    if (!state.canManageGlobal) {
+      state.availability = null;
+    } else {
+      try {
+        state.availability = await api("/availability/calendars");
+      } catch {
+        state.availability = null;
+      }
+    }
+    $("ai-availability-row")?.classList.toggle("hidden", state.availability == null);
+    renderAvailability(state.availability || []);
+    renderAiList();
+  }
+
+  function availabilityItemHtml(cal) {
+    return `<li class="availability-item" data-id="${escapeHtml(cal.id || "")}">
+      <label class="ai-field"><span>Nombre</span><input type="text" class="availability-name" maxlength="60" placeholder="Cabaña del lago" value="${escapeHtml(cal.name || "")}" /></label>
+      <label class="ai-field"><span>Enlace del calendario (iCal)</span><input type="url" class="availability-url" maxlength="1000" placeholder="https://www.airbnb.com/calendar/ical/…" value="${escapeHtml(cal.url || "")}" /></label>
+      <div class="availability-item-foot">
+        <span class="availability-result muted small"></span>
+        <button type="button" class="btn ghost small availability-check">Revisar enlace</button>
+        <button type="button" class="btn ghost small availability-remove">Quitar</button>
+      </div>
+    </li>`;
+  }
+
+  function renderAvailability(items) {
+    const list = $("availability-list");
+    if (!list) return;
+    list.innerHTML = items.map(availabilityItemHtml).join("");
+    if (!items.length) addAvailabilityRow();
+  }
+
+  function addAvailabilityRow() {
+    const list = $("availability-list");
+    list.insertAdjacentHTML("beforeend", availabilityItemHtml({}));
+    list.lastElementChild.querySelector(".availability-name").focus({ preventScroll: true });
+  }
+
+  function readAvailabilityRows() {
+    return [...$("availability-list").querySelectorAll(".availability-item")]
+      .map((li) => ({
+        id: li.dataset.id || null,
+        name: li.querySelector(".availability-name").value.trim(),
+        url: li.querySelector(".availability-url").value.trim(),
+      }))
+      .filter((c) => c.name || c.url);
+  }
+
+  async function checkAvailabilityRow(li) {
+    const url = li.querySelector(".availability-url").value.trim();
+    const out = li.querySelector(".availability-result");
+    out.classList.remove("is-ok", "is-error");
+    if (!url) {
+      out.textContent = "Pega primero el enlace.";
+      out.classList.add("is-error");
+      return;
+    }
+    out.textContent = "Revisando…";
+    try {
+      const res = await api("/availability/calendars/check", { method: "POST", body: JSON.stringify({ url }) }, 20000);
+      out.textContent = res.busy_days
+        ? `Funciona: ${res.busy_days} ${res.busy_days === 1 ? "día ocupado" : "días ocupados"} en los próximos 3 meses`
+        : "Funciona: todo libre en los próximos 3 meses";
+      out.classList.add("is-ok");
+    } catch (err) {
+      out.textContent = err.message;
+      out.classList.add("is-error");
+    }
+  }
+
+  async function saveAvailability() {
+    const status = $("availability-status");
+    const rows = readAvailabilityRows();
+    const incomplete = rows.find((c) => !c.name || !c.url);
+    if (incomplete) {
+      status.textContent = "A cada uno ponle nombre y enlace.";
+      return;
+    }
+    status.textContent = "Guardando…";
+    try {
+      state.availability = await api("/availability/calendars", {
+        method: "PUT",
+        body: JSON.stringify({ calendars: rows }),
+      });
+      renderAvailability(state.availability);
+      renderAiList();
+      status.textContent = state.availability.length
+        ? "Guardado. La IA ya revisa estas fechas antes de ofrecerlas."
+        : "Guardado.";
+    } catch (err) {
+      status.textContent = err.message;
+    }
   }
 
   function renderAiShortcutsSummary() {
@@ -7471,6 +7572,17 @@
   $("alert-recipients").addEventListener("input", () => checkAlertRecipients());
   $("alert-recipients").addEventListener("change", () => checkAlertRecipients());
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
+  $("availability-add")?.addEventListener("click", addAvailabilityRow);
+  $("availability-save")?.addEventListener("click", saveAvailability);
+  $("availability-list")?.addEventListener("click", (e) => {
+    const li = e.target.closest(".availability-item");
+    if (!li) return;
+    if (e.target.closest(".availability-check")) checkAvailabilityRow(li);
+    else if (e.target.closest(".availability-remove")) {
+      li.remove();
+      if (!$("availability-list").children.length) addAvailabilityRow();
+    }
+  });
   $("products-add-btn")?.addEventListener("click", addProductRow);
   $("products-import-btn")?.addEventListener("click", importProductsFromCatalog);
   $("products-upload-btn")?.addEventListener("click", () => $("products-upload-input").click());

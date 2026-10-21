@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.application.appointments.appointment_service import BOGOTA
+from app.application.availability.availability_service import availability_block
 from app.application.ai.ai_appointment_service import (
     BookingContext,
     append_appointment_instructions,
@@ -208,6 +209,10 @@ def promotions_and_season_block(profile: Optional[TenantProfile]) -> str:
     return block
 
 
+def business_rules_block(profile: Optional[TenantProfile]) -> str:
+    return promotions_and_season_block(profile) + availability_block(profile)
+
+
 def _complete_reply(
     *,
     system: str,
@@ -296,7 +301,7 @@ def generate_qualify_reply(
         payment_methods=payment_methods_of(profile),
         products=products,
         knowledge=knowledge,
-        business_rules=promotions_and_season_block(profile),
+        business_rules=business_rules_block(profile),
     )
 
 
@@ -327,7 +332,7 @@ def generate_reply(
             payment_methods=payment_methods_of(profile),
             products=products,
             knowledge=knowledge,
-            business_rules=promotions_and_season_block(profile),
+            business_rules=business_rules_block(profile),
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

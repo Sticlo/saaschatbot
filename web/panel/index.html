@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=121" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=122" />
 </head>
 <body>
   <div id="app">
@@ -377,6 +377,11 @@
                 <span class="ai-row-body"><strong>Temporada y fechas</strong><span class="ai-row-sub" data-ai-sub="temporada"></span></span>
                 <span class="ai-row-mark" data-ai-mark="temporada"></span>
               </button>
+              <button type="button" class="ai-row hidden" data-ai-open="disponibilidad" id="ai-availability-row">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M9 15l2 2 4-4"/></svg></span>
+                <span class="ai-row-body"><strong>Disponibilidad</strong><span class="ai-row-sub" data-ai-sub="disponibilidad"></span></span>
+                <span class="ai-row-mark" data-ai-mark="disponibilidad"></span>
+              </button>
 
               <p class="ai-list-group">Cómo trabaja</p>
               <button type="button" class="ai-row" data-ai-open="probar">
@@ -521,6 +526,21 @@
                   <textarea id="biz-seasonal" rows="6" maxlength="10000" placeholder="Hasta el 31 de octubre: solo Halloween, usa el atajo «Halloween». No ofrecer Navidad todavía.&#10;Desde el 1 de noviembre: eventos de Navidad, usa el atajo «Navidad».&#10;Domingos y festivos no hacemos montajes."></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="disponibilidad" data-ai-group="negocio">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Disponibilidad</h3><p>Opcional. Para alojamientos, cabañas o salones: pega el enlace del calendario de cada uno y la IA revisa qué fechas están ocupadas antes de ofrecerlas. Se actualiza solo cada 10 minutos.</p></div>
+                </header>
+                <details class="ai-availability-help">
+                  <summary>¿Dónde consigo el enlace?</summary>
+                  <p class="muted small"><strong>Airbnb:</strong> Calendario → Disponibilidad → Conectar calendarios → Exportar calendario.<br><strong>Booking:</strong> Tarifas y disponibilidad → Sincronizar calendarios → Exportar.<br><strong>Google Calendar:</strong> Configuración del calendario → Dirección secreta en formato iCal.<br>Si tu página de reservas tiene un enlace «.ics» o «iCal», también sirve.</p>
+                </details>
+                <ul id="availability-list" class="availability-list"></ul>
+                <button type="button" id="availability-add" class="btn ghost small">+ Agregar alojamiento o espacio</button>
+                <div class="ai-pane-actions"><button type="button" id="availability-save" class="btn primary">Guardar</button></div>
+                <p id="availability-status" class="ai-save-status muted small"></p>
               </section>
 
               <section class="ai-pane" data-ai-pane="probar" data-ai-group="probar">
@@ -1087,6 +1107,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=195"></script>
+  <script src="/static/panel/app.js?v=196"></script>
 </body>
 </html>
