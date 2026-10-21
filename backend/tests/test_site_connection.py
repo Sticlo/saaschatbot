@@ -85,6 +85,25 @@ def test_start_builds_pkce_link_and_remembers_state(monkeypatch, fake_redis):
     assert saved["tenant_id"] == str(tenant) and saved["verifier"]
 
 
+def test_owner_only_pastes_their_page_link(monkeypatch):
+    tried = []
+
+    def fake_server(url):
+        tried.append(url)
+        if url != "https://glamping.example.com/mcp":
+            raise sc.SiteConnectionError("no")
+        return _meta()
+
+    monkeypatch.setattr(sc, "_get_json", lambda url: None)
+    monkeypatch.setattr(sc, "_discover_server", fake_server)
+    assert sc.discover("glamping.example.com")["server_url"] == "https://glamping.example.com/mcp"
+    assert tried == ["https://glamping.example.com/mcp"]
+
+    monkeypatch.setattr(sc, "_discover_server", lambda url: (_ for _ in ()).throw(sc.SiteConnectionError("no")))
+    with pytest.raises(sc.SiteConnectionError, match="todavía no deja que la IA revise"):
+        sc.discover("https://otra.example.com/reservas")
+
+
 def test_parse_rpc_reads_event_stream():
     resp = httpx.Response(
         200,

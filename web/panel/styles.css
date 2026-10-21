@@ -6805,7 +6805,5 @@ body.lightbox-open { overflow: hidden; }
 .site-connect p { margin: 0; }
 .site-connect-form { display: grid; gap: 0.5rem; justify-items: start; }
 .site-connect-form .ai-field { width: 100%; margin: 0; }
-.site-tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
-.site-tools label { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; }
-.site-tools input { margin-top: 0.2rem; }
-.site-tool-warn { color: var(--danger, #dc2626); }
+.availability-calendars summary { cursor: pointer; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.availability-calendars > p { margin: 0 0 0.75rem; line-height: 1.5; }

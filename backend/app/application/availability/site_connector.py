@@ -94,7 +94,39 @@ def _initialize_payload() -> dict:
     }
 
 
-def discover(server_url: str) -> dict:
+NOT_SUPPORTED_TEXT = (
+    "Tu página todavía no deja que la IA revise la disponibilidad. Si usas Airbnb, Booking o Google Calendar, "
+    "puedes conectar ese calendario más abajo."
+)
+
+
+def discover(page_url: str) -> dict:
+    """El dueño pega el enlace de su página; aquí se encuentra sola la conexión para asistentes."""
+    page_url = (page_url or "").strip()
+    if page_url and "://" not in page_url:
+        page_url = f"https://{page_url}"
+    try:
+        page_url = normalize_url(page_url)
+    except CalendarError as exc:
+        raise SiteConnectionError("Pega el enlace de tu página, por ejemplo https://tupagina.com") from exc
+    parts = urlsplit(page_url)
+    origin = f"https://{parts.netloc}"
+    candidates = []
+    published = _get_json(f"{origin}/.well-known/oauth-protected-resource")
+    if published and published.get("resource"):
+        candidates.append(str(published["resource"]))
+    if parts.path not in ("", "/"):
+        candidates.append(page_url)
+    candidates.append(f"{origin}/mcp")
+    for candidate in dict.fromkeys(candidates):
+        try:
+            return _discover_server(candidate)
+        except CalendarError as exc:
+            log.info("Sin conexión para asistentes en %s: %s", candidate, exc)
+    raise SiteConnectionError(NOT_SUPPORTED_TEXT)
+
+
+def _discover_server(server_url: str) -> dict:
     """Cómo autoriza ese servidor MCP (RFC 9728 + RFC 8414)."""
     server_url = normalize_url(server_url)
     parts = urlsplit(server_url)
@@ -177,7 +209,7 @@ def _register_client(meta: dict) -> tuple[str, str]:
         data = {}
     if resp.status_code not in (200, 201) or not data.get("client_id"):
         log.warning("Registro MCP rechazado %s: %s", resp.status_code, resp.text[:300])
-        raise SiteConnectionError("Tu sitio no aceptó registrar a Omitel. Intenta de nuevo en un rato.")
+        raise SiteConnectionError("Tu página no aceptó la conexión. Intenta de nuevo en un rato.")
     return str(data["client_id"]), str(data.get("client_secret") or "")
 
 
@@ -227,7 +259,7 @@ def _token_request(conn: dict, form: dict) -> dict:
         data = {}
     if resp.status_code != 200 or not data.get("access_token"):
         log.warning("Token MCP rechazado %s: %s", resp.status_code, str(data.get("error") or "")[:100])
-        raise SiteConnectionError("Tu sitio no aceptó la autorización. Vuelve a conectarlo.")
+        raise SiteConnectionError("Tu página no aceptó el permiso. Vuelve a conectarla.")
     return data
 
 
@@ -243,7 +275,7 @@ def _store_tokens(conn: dict, data: dict) -> dict:
 def finish_connection(db: Session, state: str, code: str) -> uuid.UUID:
     raw = get_redis().getdel(f"siteconn:state:{state}") if state else None
     if not raw:
-        raise SiteConnectionError("La autorización venció. Vuelve a darle a «Conectar».")
+        raise SiteConnectionError("Pasó mucho tiempo. Vuelve a darle a «Conectar».")
     pending = json.loads(raw)
     meta = pending["meta"]
     conn = {
@@ -271,7 +303,7 @@ def finish_connection(db: Session, state: str, code: str) -> uuid.UUID:
     except (_Unauthorized, SiteConnectionError, CalendarError) as exc:
         log.warning("Conectado pero sin lista de herramientas tenant=%s: %s", tenant_id, exc)
         tools = []
-        conn["last_error"] = "Conectado, pero no pude leer qué consultas ofrece tu sitio. Dale a «Actualizar»."
+        conn["last_error"] = "Tu página quedó conectada, pero no pude revisarla todavía. Intenta de nuevo en un rato."
     conn["tools"] = tools
     conn["allowed_tools"] = [t["name"] for t in tools if _DEFAULT_ALLOWED.search(t["name"])]
     profile = get_or_create_tenant_profile(db, tenant_id)
@@ -319,7 +351,7 @@ def _refresh(tenant_id: uuid.UUID, conn: dict) -> dict:
     try:
         data = _token_request(conn, {"grant_type": "refresh_token", "refresh_token": refresh_token})
     except SiteConnectionError:
-        conn = {**conn, "status": "expired", "last_error": "La autorización venció: vuelve a conectar tu sitio."}
+        conn = {**conn, "status": "expired", "last_error": "Tu página se desconectó. Vuelve a conectarla."}
         _save(tenant_id, conn)
         raise _Unauthorized()
     finally:
@@ -405,11 +437,11 @@ def _list_tools(tenant_id: uuid.UUID, conn: dict) -> list[dict]:
 def refresh_tools(tenant_id: uuid.UUID) -> dict:
     conn = _load(tenant_id)
     if not conn:
-        raise SiteConnectionError("Tu sitio no está conectado.")
+        raise SiteConnectionError("Tu página no está conectada.")
     try:
         tools = _list_tools(tenant_id, conn)
     except _Unauthorized as exc:
-        raise SiteConnectionError("La autorización venció: vuelve a conectar tu sitio.") from exc
+        raise SiteConnectionError("Tu página se desconectó. Vuelve a conectarla.") from exc
     conn = _load(tenant_id) or conn
     names = {t["name"] for t in tools}
     conn.update(tools=tools, allowed_tools=[n for n in conn.get("allowed_tools") or [] if n in names], status="ok", last_error="")
@@ -421,7 +453,7 @@ def set_allowed_tools(db: Session, tenant_id: uuid.UUID, names: list[str]) -> di
     profile = get_or_create_tenant_profile(db, tenant_id)
     conn = dict(profile.site_connection or {})
     if not conn:
-        raise SiteConnectionError("Tu sitio no está conectado.")
+        raise SiteConnectionError("Tu página no está conectada.")
     known = {t["name"] for t in conn.get("tools") or []}
     conn["allowed_tools"] = [n for n in dict.fromkeys(names) if n in known]
     profile.site_connection = conn

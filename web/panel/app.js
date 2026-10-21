@@ -4629,7 +4629,7 @@
       temporada: { sub: aiRowText(val("biz-seasonal")) || "Opcional · qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
       disponibilidad: {
         sub: [
-          state.siteConnection?.connected ? "Tu sitio web conectado" : "",
+          state.siteConnection?.connected ? "Tu página conectada" : "",
           calendars ? `${calendars} ${calendars === 1 ? "calendario" : "calendarios"}` : "",
         ].filter(Boolean).join(" · ") || "Opcional · fechas libres y ocupadas",
         mark: calendars || state.siteConnection?.connected ? "ok" : "",
@@ -5776,25 +5776,22 @@
     renderAiList();
   }
 
-  const SITE_SAFE_TOOL = /availab|disponib/i;
-
   function renderSiteConnection() {
     const conn = state.siteConnection;
-    const connected = !!conn?.connected;
-    $("site-connect-form")?.classList.toggle("hidden", connected);
-    $("site-connected")?.classList.toggle("hidden", !connected);
-    if (!connected) return;
-    $("site-connected-name").textContent = conn.name || conn.server_url;
-    $("site-connected-state").textContent = conn.status === "ok" ? "· Conectado" : "· Hay que volver a conectarlo";
-    $("site-tools").innerHTML = conn.tools.length
-      ? conn.tools.map((t) => {
-          const warn = SITE_SAFE_TOOL.test(t.name)
-            ? ""
-            : '<br><span class="small site-tool-warn">Puede mostrar datos de tus reservas o huéspedes: actívala solo si sabes lo que hace.</span>';
-          return `<li><label><input type="checkbox" value="${escapeHtml(t.name)}"${t.allowed ? " checked" : ""} />
-            <span><strong>${escapeHtml(t.title || t.name)}</strong><br><span class="muted small">${escapeHtml(t.description.slice(0, 220))}</span>${warn}</span></label></li>`;
-        }).join("")
-      : '<li class="muted small">Tu sitio no ofrece consultas todavía. Dale a «Actualizar».</li>';
+    const ok = !!conn?.connected && conn.status === "ok";
+    // Si se desconectó, se vuelve a mostrar el campo para conectarla de nuevo.
+    $("site-connect-form")?.classList.toggle("hidden", ok);
+    $("site-connected")?.classList.toggle("hidden", !conn?.connected);
+    if (!conn?.connected) return;
+    if (!$("site-connect-url").value) $("site-connect-url").value = conn.server_url ? new URL(conn.server_url).origin : "";
+    $("site-connected-name").textContent = conn.name || "Tu página";
+    $("site-connected-state").textContent = ok ? "· Conectada" : "· Se desconectó";
+    const checksDates = conn.tools.some((t) => t.allowed);
+    $("site-connected-note").textContent = !ok
+      ? "Vuelve a conectarla para que la IA siga revisando las fechas."
+      : checksDates
+        ? "La IA ya revisa en tu página qué fechas están libres antes de responder."
+        : "Tu página quedó conectada, pero no encontramos dónde revisar las fechas libres. Escríbenos y lo revisamos.";
     if (conn.last_error) $("site-connect-status").textContent = conn.last_error;
   }
 
@@ -5802,46 +5799,21 @@
     const status = $("site-connect-status");
     const url = $("site-connect-url").value.trim();
     if (!url) {
-      status.textContent = "Pega la dirección para asistentes de IA de tu sitio.";
+      status.textContent = "Pega el enlace de tu página.";
       return;
     }
-    status.textContent = "Revisando tu sitio…";
+    status.textContent = "Revisando tu página…";
     try {
-      const res = await api("/site-connection/start", { method: "POST", body: JSON.stringify({ url }) }, 30000);
-      status.textContent = "Inicia sesión en tu sitio y autoriza a Omitel…";
+      const res = await api("/site-connection/start", { method: "POST", body: JSON.stringify({ url }) }, 45000);
+      status.textContent = "Te llevamos a tu página para que inicies sesión y le des permiso a Omitel…";
       location.href = res.authorize_url;
     } catch (err) {
       status.textContent = err.message;
     }
   }
 
-  async function saveSiteTools() {
-    const allowed = [...$("site-tools").querySelectorAll("input:checked")].map((i) => i.value);
-    const status = $("site-connect-status");
-    status.textContent = "Guardando…";
-    try {
-      state.siteConnection = await api("/site-connection/tools", { method: "PUT", body: JSON.stringify({ allowed }) });
-      renderSiteConnection();
-      status.textContent = allowed.length ? "Guardado. La IA ya consulta tu sitio." : "Guardado. La IA no consultará tu sitio.";
-    } catch (err) {
-      status.textContent = err.message;
-    }
-  }
-
-  async function refreshSiteTools() {
-    const status = $("site-connect-status");
-    status.textContent = "Actualizando…";
-    try {
-      state.siteConnection = await api("/site-connection/refresh", { method: "POST" }, 30000);
-      status.textContent = "";
-      renderSiteConnection();
-    } catch (err) {
-      status.textContent = err.message;
-    }
-  }
-
   async function disconnectSite() {
-    if (!confirm("¿Desconectar tu sitio? La IA dejará de consultarlo.")) return;
+    if (!confirm("¿Desconectar tu página? La IA dejará de revisar las fechas en ella.")) return;
     try {
       state.siteConnection = await api("/site-connection", { method: "DELETE" });
       $("site-connect-status").textContent = "Desconectado.";
@@ -5864,7 +5836,7 @@
     switchPanelMode("ai");
     openAiPane("disponibilidad");
     await loadSiteConnection();
-    $("site-connect-status").textContent = result === "ok" ? "¡Listo! Tu sitio quedó conectado. Revisa qué puede consultar la IA." : msg;
+    $("site-connect-status").textContent = result === "ok" ? "¡Listo! Tu página quedó conectada." : msg;
   }
 
   function availabilityItemHtml(cal) {
@@ -5883,6 +5855,7 @@
     const list = $("availability-list");
     if (!list) return;
     list.innerHTML = items.map(availabilityItemHtml).join("");
+    list.closest("details").open = items.length > 0;
     if (!items.length) addAvailabilityRow();
   }
 
@@ -7679,8 +7652,6 @@
   $("ai-shortcuts-config-btn")?.addEventListener("click", () => openShortcutsModal());
   $("availability-add")?.addEventListener("click", addAvailabilityRow);
   $("site-connect-btn")?.addEventListener("click", startSiteConnection);
-  $("site-tools-save")?.addEventListener("click", saveSiteTools);
-  $("site-refresh")?.addEventListener("click", refreshSiteTools);
   $("site-disconnect")?.addEventListener("click", disconnectSite);
   $("availability-save")?.addEventListener("click", saveAvailability);
   $("availability-list")?.addEventListener("click", (e) => {
