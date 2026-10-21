@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.application.ai.ai_readiness_service import autostart_ai_for_tenant_id
+from app.application.billing.tenant_service import log_audit
 from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.outbound.tenant_asset_service import delete_asset
 from app.application.products.product_service import (
@@ -79,12 +80,23 @@ def patch_product(
 
 
 @router.delete("/{product_id}", status_code=204)
-def delete_product(product_id: uuid.UUID, current: RequireOwner, db: Session = Depends(get_db)):
+def delete_product(
+    product_id: uuid.UUID, request: Request, current: RequireOwner, db: Session = Depends(get_db)
+):
     try:
         product = get_product(db, current.tenant_id, product_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     photos = list(product.photos or [])
+    # La copia en el registro permite rehacer a mano un producto borrado por error.
+    log_audit(
+        db,
+        tenant_id=current.tenant_id,
+        user_id=current.id,
+        action="products.deleted",
+        details={key: value for key, value in product_to_dict(product).items() if key != "photos"},
+        ip_address=request.client.host if request.client else None,
+    )
     db.delete(product)
     db.commit()
     for path in photos:

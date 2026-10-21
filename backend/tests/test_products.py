@@ -98,6 +98,14 @@ def test_products_api_and_catalog_import(client: TestClient):
 
     assert client.delete(f"/api/v1/products/{tenis_id}", headers=headers).status_code == 204
     assert len(client.get("/api/v1/products", headers=headers).json()) == 2
+    from app.domain.entities import AuditLog
+
+    with SessionLocal() as db:
+        entry = db.query(AuditLog).filter(
+            AuditLog.tenant_id == uuid.UUID(auth["tenant_id"]), AuditLog.action == "products.deleted"
+        ).one()
+        assert entry.user_id is not None
+        assert entry.details["name"] == "Tenis blancos" and entry.details["price_cop"] == 175000
 
     other = _register(client)
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
