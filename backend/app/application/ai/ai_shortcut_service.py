@@ -608,6 +608,7 @@ def send_shortcut_content(
             conversation=conversation,
             text=str(shortcut["text"]),
             source=source,
+            verbatim=True,
         )
     if shortcut.get("id"):
         mark_shortcut_sent(message.conversation_id, str(shortcut["id"]))

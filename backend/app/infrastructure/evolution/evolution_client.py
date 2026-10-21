@@ -217,6 +217,14 @@ class EvolutionClient:
             "POST", f"/message/sendText/{instance_name}", json=payload, timeout=30.0 + typing_ms / 1000
         )
 
+    def mark_read(self, instance_name: str, remote_jid: str, message_ids: list[str]) -> dict:
+        payload = {
+            "readMessages": [{"remoteJid": remote_jid, "fromMe": False, "id": mid} for mid in message_ids]
+        }
+        return self._request(
+            "POST", f"/chat/markMessageAsRead/{instance_name}", json=payload, timeout=10.0
+        )
+
     def send_media(
         self,
         instance_name: str,

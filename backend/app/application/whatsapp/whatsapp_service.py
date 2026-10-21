@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import re
 import time
 import uuid
 from contextlib import contextmanager
@@ -45,6 +47,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     gateway_request,
     instance_exists as gateway_instance_exists,
     logout_instance as gateway_logout_instance,
+    mark_read as gateway_mark_read,
     restart_instance as gateway_restart_instance,
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
@@ -946,7 +949,115 @@ def typing_delay_ms(text: str) -> int:
     cap = settings.ai_typing_max_ms
     if cap <= 0:
         return 0
-    return min(cap, 1200 + 25 * len(text.strip()))
+    # Una pausa siempre exacta para el mismo largo también delata al bot.
+    return min(cap, int((1200 + 25 * len(text.strip())) * random.uniform(0.85, 1.2)))
+
+
+_SPLIT_LEVELS = (r"\n", r"(?<=[.!?…])\s+", r"\s+")
+
+
+def _split_block(text: str, limit: int, level: int = 0) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+    if level >= len(_SPLIT_LEVELS):
+        return [text[i : i + limit] for i in range(0, len(text), limit)]
+    joiner = "\n" if level == 0 else " "
+    parts: list[str] = []
+    current = ""
+    for unit in (u.strip() for u in re.split(_SPLIT_LEVELS[level], text)):
+        if not unit:
+            continue
+        for piece in _split_block(unit, limit, level + 1):
+            if current and len(current) + len(joiner) + len(piece) > limit:
+                parts.append(current)
+                current = piece
+            else:
+                current = f"{current}{joiner}{piece}" if current else piece
+    if current:
+        parts.append(current)
+    return parts
+
+
+def split_for_whatsapp(text: str, limit: Optional[int] = None) -> list[str]:
+    """Un mensaje larguísimo no lo escribe una persona: se parte por párrafos, líneas o frases."""
+    text = text.strip()
+    limit = limit if limit is not None else settings.ai_max_message_chars
+    if limit <= 0 or len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    current = ""
+    for block in (b.strip() for b in re.split(r"\n\s*\n", text)):
+        if not block:
+            continue
+        for piece in _split_block(block, limit):
+            if current and len(current) + 2 + len(piece) > limit:
+                parts.append(current)
+                current = piece
+            else:
+                current = f"{current}\n\n{piece}" if current else piece
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _bot_sends_key(instance_name: str) -> str:
+    return f"wa:bot_sends:{instance_name}"
+
+
+def wait_for_bot_send_slot(instance_name: str, *, sleep=time.sleep) -> None:
+    """Ráfagas de envío marcan el número: pasado el tope por minuto, la IA espera turno."""
+    cap = settings.ai_max_sends_per_minute
+    if cap <= 0:
+        return
+    key = _bot_sends_key(instance_name)
+    deadline = time.monotonic() + settings.ai_send_queue_max_wait_seconds
+    try:
+        client = get_redis()
+        while True:
+            now = time.time()
+            client.zremrangebyscore(key, 0, now - 60)
+            # Pasada la espera máxima se envía igual: un cliente sin respuesta es peor que una ráfaga.
+            if client.zcard(key) < cap or time.monotonic() >= deadline:
+                client.zadd(key, {f"{now}:{uuid.uuid4().hex}": now})
+                client.expire(key, 120)
+                return
+            oldest = client.zrange(key, 0, 0, withscores=True)
+            wait = oldest[0][1] + 60 - now if oldest else 1.0
+            sleep(min(max(wait, 0.5), 5.0))
+    except Exception:
+        log.debug("Sin control de ritmo de envío instance=%s", instance_name, exc_info=True)
+
+
+def mark_customer_messages_read(
+    db: Session, *, session: WhatsAppSession, conversation: Conversation
+) -> None:
+    """Leído → escribiendo… → respuesta, como una persona; no se vuelve a marcar lo ya respondido."""
+    if not settings.ai_mark_read_before_reply:
+        return
+    from sqlalchemy import func
+
+    last_out = (
+        db.query(func.max(Message.created_at))
+        .filter(Message.conversation_id == conversation.id, Message.direction == MessageDirection.OUT.value)
+        .scalar()
+    )
+    query = db.query(Message.evolution_message_id).filter(
+        Message.conversation_id == conversation.id,
+        Message.direction == MessageDirection.IN.value,
+        Message.evolution_message_id.isnot(None),
+    )
+    if last_out is not None:
+        query = query.filter(Message.created_at > last_out)
+    ids = [row[0].split(":", 1)[0] for row in query.order_by(Message.created_at.desc()).limit(20) if row[0]]
+    if not ids:
+        return
+    jid = conversation.contact_jid or ""
+    if "@" not in jid:
+        jid = f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
+    try:
+        gateway_mark_read(session.instance_name, jid, ids)
+    except Exception:
+        log.debug("No se pudo marcar leído conv=%s", conversation.id, exc_info=True)
 
 
 def send_text_message(
@@ -958,7 +1069,9 @@ def send_text_message(
     text: str,
     source: str,
     reply_to: Optional[Message] = None,
+    verbatim: bool = False,
 ) -> Message:
+    """`verbatim`: lo escribió el dueño (un atajo) y sale en un solo mensaje aunque sea largo."""
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
@@ -986,28 +1099,40 @@ def send_text_message(
             "message": {"conversation": quoted_body},
         }
 
-    typing_ms = typing_delay_ms(text) if source == MessageSource.BOT.value else 0
-    result = gateway_send_text(session.instance_name, recipient, text, typing_ms=typing_ms, quoted=quoted)
     from app.application.messaging.message_service import extract_whatsapp_message_id
 
-    evolution_id = extract_whatsapp_message_id(result)
-
-    message = Message(
-        tenant_id=tenant.id,
-        conversation_id=conversation.id,
-        direction=MessageDirection.OUT.value,
-        source=source,
-        body=text,
-        status=MessageStatus.SENT.value,
-        evolution_message_id=str(evolution_id) if evolution_id else None,
-        quoted_evolution_id=quoted_id or None,
-        quoted_body=quoted_body or None,
-    )
-    conversation.last_message_at = datetime.now(timezone.utc)
-    db.add(message)
-    db.flush()
-
-    publish_message_event(tenant, conversation, message, event_type="message.out")
+    is_bot = source == MessageSource.BOT.value
+    if is_bot:
+        mark_customer_messages_read(db, session=session, conversation=conversation)
+    parts = split_for_whatsapp(text) if is_bot and not verbatim else [text]
+    message: Optional[Message] = None
+    for index, part in enumerate(parts):
+        first = index == 0
+        if is_bot:
+            wait_for_bot_send_slot(session.instance_name)
+        result = gateway_send_text(
+            session.instance_name,
+            recipient,
+            part,
+            typing_ms=typing_delay_ms(part) if is_bot else 0,
+            quoted=quoted if first else None,
+        )
+        evolution_id = extract_whatsapp_message_id(result)
+        message = Message(
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            direction=MessageDirection.OUT.value,
+            source=source,
+            body=part,
+            status=MessageStatus.SENT.value,
+            evolution_message_id=str(evolution_id) if evolution_id else None,
+            quoted_evolution_id=(quoted_id or None) if first else None,
+            quoted_body=(quoted_body or None) if first else None,
+        )
+        conversation.last_message_at = datetime.now(timezone.utc)
+        db.add(message)
+        db.flush()
+        publish_message_event(tenant, conversation, message, event_type="message.out")
     return message
 
 
@@ -1057,6 +1182,8 @@ def send_image_data_message(
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation
     )
+    if source == MessageSource.BOT.value:
+        wait_for_bot_send_slot(session.instance_name)
     result = gateway_send_image(
         session.instance_name,
         recipient,
@@ -1175,6 +1302,8 @@ def send_document_message(
     from app.application.outbound.tenant_asset_service import read_asset_base64
 
     b64, mime = read_asset_base64(file_path, tenant_id=tenant.id)
+    if source == MessageSource.BOT.value:
+        wait_for_bot_send_slot(session.instance_name)
     result = gateway_send_document(
         session.instance_name,
         recipient,

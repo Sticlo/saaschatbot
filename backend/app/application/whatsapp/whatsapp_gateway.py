@@ -262,6 +262,17 @@ def send_text(
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
+def mark_read(session_name: str, remote_jid: str, message_ids: list[str]) -> None:
+    if uses_waha() or not message_ids:
+        return
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        evolution_client.mark_read(session_name, remote_jid, message_ids)
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
 def _resolve_chat_id(recipient: str) -> tuple[str, str]:
     from app.shared.core.phone import phone_to_evolution_number
 

@@ -54,6 +54,8 @@ def classify_disconnect(data: Optional[dict]) -> Tuple[str, Optional[int]]:
     raw = str(data).lower()
     if "device_removed" in raw:
         return "device_removed", code
+    if "conflict" in raw or "replaced" in raw:
+        return "replaced", code
     if "forbidden" in raw or "banned" in raw:
         return "banned", code
     return "unknown", code

@@ -8,9 +8,10 @@ from app.infrastructure.evolution.evolution_client import evolution_client
 
 
 def test_typing_grows_with_the_message_and_has_a_cap():
-    short, long = typing_delay_ms("Hola"), typing_delay_ms("x" * 400)
-    assert 1200 < short < 2000
-    assert long == 4500
+    shorts = {typing_delay_ms("Hola") for _ in range(30)}
+    assert all(1000 < s < 2000 for s in shorts)
+    assert len(shorts) > 1, "la pausa varía: siempre exacta delata al bot"
+    assert typing_delay_ms("x" * 400) == 4500
     with patch("app.application.whatsapp.whatsapp_service.settings.ai_typing_max_ms", 0):
         assert typing_delay_ms("Hola") == 0
 

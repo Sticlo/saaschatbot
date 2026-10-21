@@ -68,6 +68,18 @@ def note_outage_start(tenant_id: Any, details: dict[str, Any]) -> None:
     get_redis().set(_pending_outage_key(tenant_id), json.dumps(details), nx=True, ex=DOWN_MARK_TTL_SECONDS)
 
 
+def pending_outage(tenant_id: Any) -> Optional[dict]:
+    """El corte anotado que todavía no cuenta como caída (None si no hay o ya se registró)."""
+    try:
+        raw = get_redis().get(_pending_outage_key(tenant_id))
+        if not raw:
+            return None
+        details = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        return details if isinstance(details, dict) else {}
+    except Exception:
+        return None
+
+
 def report_outage_if_lasting(tenant_id: Any, now: Optional[float] = None) -> bool:
     from app.application.platform.incidents import record_incident
     from app.application.whatsapp.whatsapp_status import DISCONNECT_REASONS
@@ -96,6 +108,66 @@ def report_outage_if_lasting(tenant_id: Any, now: Optional[float] = None) -> boo
         throttle_seconds=1800,
         throttle_scope=reason,
     )
+    return True
+
+
+REPLACED_ALERT_COOLDOWN_SECONDS = 6 * 3600
+
+
+def record_blip(tenant_id: Any, *, reason: str, code: Optional[int], down_seconds: Optional[float]) -> None:
+    """Cada corte, aunque dure un segundo: si un número empieza a caerse seguido, se ve antes del bloqueo."""
+    from app.application.platform.incidents import record_incident
+
+    details: dict[str, Any] = {"reason": reason, "code": code}
+    if down_seconds is not None:
+        details["down_seconds"] = round(down_seconds, 1)
+    record_incident(
+        tenant_id,
+        "system.whatsapp_blip",
+        "WhatsApp se cortó y volvió" + (f" en {int(down_seconds)} s" if down_seconds is not None else ""),
+        details=details,
+        throttle_seconds=0,
+    )
+
+
+def warn_owner_session_replaced(db: Session, tenant: Tenant) -> bool:
+    """Abrir la cuenta en otro lado tumba la conexión de la IA y es una señal de riesgo para el número."""
+    from app.application.platform.incidents import record_incident
+    from app.infrastructure.email.email_service import send_billing_email
+
+    key = tenant_cache_key(str(tenant.id), "wa_replaced_alert")
+    try:
+        if not get_redis().set(key, "1", nx=True, ex=REPLACED_ALERT_COOLDOWN_SECONDS):
+            return False
+    except Exception:
+        return False
+    record_incident(
+        tenant.id,
+        "system.whatsapp_replaced",
+        "El WhatsApp del negocio se abrió en otro equipo y cortó la conexión de la IA",
+        throttle_seconds=0,
+    )
+    email = _owner_email(db, tenant.id)
+    if not email:
+        return False
+    try:
+        send_billing_email(
+            to_email=email,
+            subject="Tu WhatsApp se abrió en otro equipo",
+            title="Tu WhatsApp se abrió en otro equipo",
+            paragraphs=[
+                f"El WhatsApp de <b>{tenant.business_name}</b> se abrió en otro lado (por ejemplo WhatsApp Web "
+                "en otro computador) y eso cortó por un momento la conexión de la IA.",
+                "Para cuidar tu número: deja abierto WhatsApp Web solo en un equipo y cierra las sesiones que no "
+                "uses en WhatsApp › Dispositivos vinculados. Si no fuiste tú, revisa esa lista ahora.",
+            ],
+            cta_label="Ver mi panel",
+            cta_url=f"{settings.app_public_url.rstrip('/')}/panel",
+            footer="Omitel · Aviso sobre la conexión de tu WhatsApp.",
+        )
+    except Exception:
+        log.exception("No se pudo avisar la sesión reemplazada tenant=%s", tenant.id)
+        return False
     return True
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -482,18 +483,33 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
         if event == "connection.update":
             from app.domain.entities.enums import WhatsAppStatus
 
+            from app.application.whatsapp import whatsapp_health_service as health
+
             was_connected = tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value
+            went_down_at = health.down_started_at(tenant_id)
+            short_outage = health.pending_outage(tenant_id)
             handle_connection_update(db, tenant=tenant, session=session, data=data)
             db.commit()
             if was_connected and tenant.whatsapp_status != WhatsAppStatus.CONNECTED.value:
-                from app.application.whatsapp.whatsapp_health_service import note_outage_start
                 from app.application.whatsapp.whatsapp_status import classify_disconnect
 
                 reason, code = classify_disconnect(data)
-                note_outage_start(tenant_id, {"reason": reason, "code": code, "status": tenant.whatsapp_status})
+                health.note_outage_start(
+                    tenant_id, {"reason": reason, "code": code, "status": tenant.whatsapp_status}
+                )
+                if reason == "replaced":
+                    health.warn_owner_session_replaced(db, tenant)
             elif not was_connected and tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
                 from app.application.platform.incidents import record_incident
 
+                # Las caídas largas ya quedan como «desconectado»; aquí, los cortes que volvieron solos.
+                if short_outage is not None:
+                    health.record_blip(
+                        tenant_id,
+                        reason=short_outage.get("reason") or "unknown",
+                        code=short_outage.get("code"),
+                        down_seconds=time.time() - went_down_at if went_down_at else None,
+                    )
                 record_incident(
                     tenant_id,
                     "system.whatsapp_connected",
