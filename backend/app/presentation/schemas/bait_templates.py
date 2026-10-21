@@ -6,6 +6,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+# Respuestas de «Tu negocio»: van completas en cada respuesta de la IA.
+BUSINESS_ANSWER_MAX = 10000
+
 
 class BaitButtonInput(BaseModel):
     label: str = Field(min_length=1, max_length=40)
@@ -87,15 +90,15 @@ class AssetUploadResponse(BaseModel):
 
 class BusinessProfileUpdate(BaseModel):
     business_name: Optional[str] = Field(default=None, max_length=255)
-    industry: Optional[str] = Field(default=None, max_length=255)
-    products_services: Optional[str] = Field(default=None, max_length=2000)
-    target_customer: Optional[str] = Field(default=None, max_length=500)
-    price_range: Optional[str] = Field(default=None, max_length=255)
-    location_hours: Optional[str] = Field(default=None, max_length=500)
-    tone: Optional[str] = Field(default=None, max_length=120)
-    restrictions: Optional[str] = Field(default=None, max_length=1000)
-    payment_methods: Optional[str] = Field(default=None, max_length=1000)
-    delivery_info: Optional[str] = Field(default=None, max_length=1000)
+    industry: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    products_services: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    target_customer: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    price_range: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    location_hours: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    tone: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    restrictions: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    payment_methods: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
+    delivery_info: Optional[str] = Field(default=None, max_length=BUSINESS_ANSWER_MAX)
     maps_prospect_business: Optional[str] = Field(default=None, max_length=2000)
     maps_prospect_city: Optional[str] = Field(default=None, max_length=120)
     ai_system_prompt: Optional[str] = Field(default=None, max_length=4000)

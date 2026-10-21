@@ -84,12 +84,12 @@ class TenantProfile(Base):
         index=True,
     )
     onboarding_answers: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    industry: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     products_services: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    target_customer: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    price_range: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    location_hours: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    tone: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    target_customer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    price_range: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    location_hours: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     restrictions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Con medios de pago la IA cierra la venta sola; sin ellos le pasa el chat al dueño.
     payment_methods: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

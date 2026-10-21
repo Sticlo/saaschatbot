@@ -44,6 +44,29 @@ def test_business_profile_save_persists(client: TestClient):
     assert again["products_services"] == payload["products_services"]
 
 
+def test_business_answers_can_be_long(client: TestClient):
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    payload = {
+        key: f"{key} " + "Decoración de baby shower con globos, mesa dulce y fondo. " * 150
+        for key in (
+            "industry", "products_services", "target_customer", "price_range", "location_hours",
+            "tone", "restrictions", "payment_methods", "delivery_info",
+        )
+    }
+    assert all(len(v) > 8000 for v in payload.values())
+    put = client.put("/api/v1/outbound/business-profile", json=payload, headers=headers)
+    assert put.status_code == 200, put.text
+    saved = client.get("/api/v1/outbound/business-profile", headers=headers).json()
+    for key, value in payload.items():
+        assert saved[key] == value.strip()
+
+    too_long = client.put(
+        "/api/v1/outbound/business-profile", json={"tone": "x" * 10001}, headers=headers
+    )
+    assert too_long.status_code == 422
+
+
 def test_apply_business_answers_columns():
     profile = TenantProfile(tenant_id=uuid.uuid4(), onboarding_answers={})
     apply_business_answers(profile, {"industry": "Café", "tone": "Formal"})

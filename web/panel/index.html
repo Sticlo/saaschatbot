@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=120" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=121" />
 </head>
 <body>
   <div id="app">
@@ -408,7 +408,7 @@
                 </label>
                 <label class="ai-field">
                   <span>¿A qué se dedica?</span>
-                  <input type="text" id="biz-industry" maxlength="255" placeholder="Restaurante, peluquería, tienda online…" />
+                  <input type="text" id="biz-industry" maxlength="10000" placeholder="Restaurante, peluquería, tienda online…" />
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -420,7 +420,7 @@
                 </header>
                 <label class="ai-field">
                   <span class="sr-only">Qué vendes u ofreces</span>
-                  <textarea id="biz-products" rows="4" maxlength="2000" placeholder="Almuerzos, menú del día, domicilios en la zona…"></textarea>
+                  <textarea id="biz-products" rows="4" maxlength="10000" placeholder="Almuerzos, menú del día, domicilios en la zona…"></textarea>
                 </label>
                 <div class="ai-pane-note">
                   <span>Los <strong>precios exactos</strong> van en Inventario: con esos cotiza la IA.</span>
@@ -436,7 +436,7 @@
                 </header>
                 <label class="ai-field">
                   <span class="sr-only">Cómo te pagan</span>
-                  <textarea id="biz-payments" rows="3" maxlength="1000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
+                  <textarea id="biz-payments" rows="3" maxlength="10000" placeholder="Nequi 300 123 4567 a nombre de Laura; Bancolombia ahorros 123-456789-00; contra entrega en Medellín"></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -448,7 +448,7 @@
                 </header>
                 <label class="ai-field">
                   <span class="sr-only">Envíos y entregas</span>
-                  <textarea id="biz-delivery" rows="3" maxlength="1000" placeholder="Envíos a todo Colombia por Interrapidísimo, $15.000, llegan en 2-3 días. Domicilio en Medellín $8.000 el mismo día."></textarea>
+                  <textarea id="biz-delivery" rows="3" maxlength="10000" placeholder="Envíos a todo Colombia por Interrapidísimo, $15.000, llegan en 2-3 días. Domicilio en Medellín $8.000 el mismo día."></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -460,7 +460,7 @@
                 </header>
                 <label class="ai-field">
                   <span class="sr-only">Dónde estás y horario</span>
-                  <input type="text" id="biz-hours" maxlength="500" placeholder="Medellín, Laureles — lun a sáb 11am-8pm" />
+                  <textarea id="biz-hours" rows="3" maxlength="10000" placeholder="Medellín, Laureles — lun a sáb 11am-8pm"></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -472,19 +472,19 @@
                 </header>
                 <label class="ai-field">
                   <span>Tono</span>
-                  <input type="text" id="biz-tone" maxlength="120" placeholder="Cercano y amable, como un amigo" />
+                  <input type="text" id="biz-tone" maxlength="10000" placeholder="Cercano y amable, como un amigo" />
                 </label>
                 <label class="ai-field">
                   <span>Lo que no debe decir</span>
-                  <textarea id="biz-restrictions" rows="2" maxlength="1000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
+                  <textarea id="biz-restrictions" rows="2" maxlength="10000" placeholder="No dar descuentos sin mi ok, no confirmar pedidos sin pago…"></textarea>
                 </label>
                 <label class="ai-field">
                   <span>A quién le vendes</span>
-                  <input type="text" id="biz-target" maxlength="500" placeholder="Oficinistas del sector, familias del barrio…" />
+                  <textarea id="biz-target" rows="2" maxlength="10000" placeholder="Oficinistas del sector, familias del barrio…"></textarea>
                 </label>
                 <label class="ai-field">
                   <span>Precios de referencia</span>
-                  <input type="text" id="biz-prices" maxlength="255" placeholder="Almuerzos desde $18.000" />
+                  <textarea id="biz-prices" rows="2" maxlength="10000" placeholder="Almuerzos desde $18.000"></textarea>
                 </label>
                 <div class="ai-pane-actions"><button type="button" class="btn primary ai-pane-save">Guardar</button></div>
               </section>
@@ -1053,6 +1053,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=191"></script>
+  <script src="/static/panel/app.js?v=192"></script>
 </body>
 </html>
