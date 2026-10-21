@@ -4428,6 +4428,11 @@
     return `<div class="msg in try-ai-msg">📄 ${escapeHtml(a.file_name || a.label)}</div>`;
   }
 
+  function tryAiTurnText(t) {
+    const flowTexts = (t.flow || []).filter((step) => step.type === "text").map((step) => step.text);
+    return [...flowTexts, t.text].filter(Boolean).join("\n").slice(0, 1000);
+  }
+
   function renderTryAi() {
     const box = $("try-ai-messages");
     box.innerHTML =
@@ -4436,7 +4441,8 @@
           if (t.from === "client") return `<div class="msg out try-ai-msg">${escapeHtml(t.text)}</div>`;
           const photos = (t.photos || []).map((u) => `<img src="${escapeHtml(u)}" alt="" loading="lazy" />`).join("");
           return (
-            `<div class="msg in try-ai-msg">${escapeHtml(t.text)}</div>` +
+            (t.flow || []).map(tryAiAttachmentHtml).join("") +
+            (t.text ? `<div class="msg in try-ai-msg">${escapeHtml(t.text)}</div>` : "") +
             (photos ? `<div class="try-ai-photos">${photos}</div>` : "") +
             tryAiAttachmentHtml(t.attachment) +
             (t.notes || []).map((n) => `<p class="try-ai-note">${escapeHtml(n)}</p>`).join("")
@@ -4461,10 +4467,24 @@
     try {
       const res = await api(
         "/outbound/try-ai",
-        { method: "POST", body: JSON.stringify({ turns: tryAi.turns.slice(-20).map((t) => ({ from: t.from, text: t.text })) }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            turns: tryAi.turns.slice(-20).map((t) => ({ from: t.from, text: tryAiTurnText(t) })),
+            sent_flows: tryAi.turns.map((t) => t.flowId).filter(Boolean).slice(0, 20),
+          }),
+        },
         60000
       );
-      tryAi.turns.push({ from: "ai", text: res.reply, photos: res.photos, attachment: res.attachment, notes: res.notes });
+      tryAi.turns.push({
+        from: "ai",
+        text: res.reply,
+        photos: res.photos,
+        attachment: res.attachment,
+        notes: res.notes,
+        flow: res.flow,
+        flowId: res.flow_id,
+      });
       if ((state.aiProfile?.tips || []).some((t) => t.key === "try")) refreshReadinessSoon();
     } catch (err) {
       tryAi.turns.pop();
@@ -4608,6 +4628,7 @@
     const tips = state.aiProfile?.tips || [];
     const openQ = (state.aiQuestions || []).filter((q) => q.status === "open").length;
     const shortcuts = (state.quickShortcuts || []).length;
+    const activeFlows = (state.aiFlows || []).filter((f) => f.active !== false).length;
     const calendars = (state.availability || []).length;
     const hours = Number($("followup-hours")?.value || 0);
     const alertCount = state.onboarding?.alertCount;
@@ -4643,6 +4664,10 @@
       },
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
       respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
+      flujos: {
+        sub: activeFlows ? `${activeFlows} ${activeFlows === 1 ? "flujo activo" : "flujos activos"}` : "Saludo y respuestas en orden",
+        mark: activeFlows ? "ok" : "",
+      },
       atajos: { sub: shortcuts ? `${shortcuts} ${shortcuts === 1 ? "atajo" : "atajos"}` : "Menú, precios, fotos…", mark: "" },
       avisos: {
         sub: alertCount ? `${alertCount} ${alertCount === 1 ? "número recibe" : "números reciben"} los avisos` : "Nadie recibe los avisos",
@@ -5054,8 +5079,9 @@
     if (!isPhoneLayout() && !$("ai-setup-panel").classList.contains("is-open")) {
       openAiPane(defaultAiPane(), { animate: false });
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability(), loadSiteConnection()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability(), loadSiteConnection(), loadFlows()]);
     renderAiShortcutsSummary();
+    renderFlows();
   }
 
   async function loadInventoryPanel() {
@@ -5923,6 +5949,203 @@
       status.textContent = state.availability.length
         ? "Guardado. La IA ya revisa estas fechas antes de ofrecerlas."
         : "Guardado.";
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  }
+
+  async function loadFlows() {
+    try {
+      state.aiFlows = (await api("/ai-flows")).flows || [];
+    } catch {
+      state.aiFlows = [];
+    }
+    renderFlows();
+  }
+
+  function flowShortcutLabel(s) {
+    const kind = s.type === "image" ? "Foto" : s.type === "document" ? "PDF" : "Texto";
+    return `${s.label} · ${kind}`;
+  }
+
+  function flowStepHtml(step, j, total) {
+    const shortcuts = state.quickShortcuts || [];
+    const body =
+      step.type === "text"
+        ? `<textarea class="flow-step-text" rows="2" maxlength="2000" placeholder="Escribe el mensaje tal como quieres que llegue">${escapeHtml(step.text || "")}</textarea>`
+        : `<select class="flow-step-shortcut">${shortcuts
+            .map((sc) => `<option value="${escapeHtml(sc.id)}"${sc.id === step.shortcut_id ? " selected" : ""}>${escapeHtml(flowShortcutLabel(sc))}</option>`)
+            .join("")}</select>`;
+    return `<li class="flow-step" data-step="${j}">
+      <span class="flow-step-num">${j + 1}</span>
+      <div class="flow-step-body">${body}</div>
+      <div class="flow-step-tools">
+        <button type="button" class="icon-btn" data-step-act="up" aria-label="Subir"${j === 0 ? " disabled" : ""}>↑</button>
+        <button type="button" class="icon-btn" data-step-act="down" aria-label="Bajar"${j === total - 1 ? " disabled" : ""}>↓</button>
+        <button type="button" class="icon-btn" data-step-act="remove" aria-label="Quitar paso">×</button>
+      </div>
+    </li>`;
+  }
+
+  function flowCardHtml(flow, i) {
+    const greeting = flow.trigger === "first_contact";
+    const hasShortcuts = (state.quickShortcuts || []).length > 0;
+    const steps = flow.steps || [];
+    return `<li class="flow-card${flow.active === false ? " is-off" : ""}" data-flow="${i}">
+      <div class="flow-card-head">
+        <label class="ai-field flow-trigger"><span>Cuándo</span>
+          <select class="flow-trigger-select">
+            <option value="first_contact"${greeting ? " selected" : ""}>Cuando alguien escribe por primera vez</option>
+            <option value="asks_about"${greeting ? "" : " selected"}>Cuando pregunta por…</option>
+          </select>
+        </label>
+        <label class="flow-active"><input type="checkbox" class="flow-active-input"${flow.active === false ? "" : " checked"} /> Activo</label>
+      </div>
+      ${
+        greeting
+          ? '<p class="muted small flow-hint">Se envía una sola vez, apenas un cliente nuevo te escribe. Después la IA sigue la conversación.</p>'
+          : `<label class="ai-field"><span>Pregunta por</span><input type="text" class="flow-topic" maxlength="200" placeholder="precios, el menú, los planes…" value="${escapeHtml(flow.topic || "")}" /></label>
+             <p class="muted small flow-hint">Escríbelo como lo diría un cliente: la IA entiende otras formas de preguntarlo. Se envía una vez por chat.</p>`
+      }
+      <p class="flow-steps-title">Se envía en este orden:</p>
+      <ol class="flow-steps">${steps.map((st, j) => flowStepHtml(st, j, steps.length)).join("")}</ol>
+      <div class="flow-card-foot">
+        <button type="button" class="btn ghost small" data-flow-add="text"${steps.length >= 8 ? " disabled" : ""}>+ Mensaje</button>
+        <button type="button" class="btn ghost small" data-flow-add="shortcut"${!hasShortcuts || steps.length >= 8 ? " disabled" : ""}>+ Atajo (foto, PDF o texto)</button>
+        <button type="button" class="link-btn flow-remove">Quitar flujo</button>
+      </div>
+      ${hasShortcuts ? "" : '<p class="muted small flow-hint">Para enviar fotos o PDF, créalos primero en «Atajos rápidos».</p>'}
+    </li>`;
+  }
+
+  function renderFlows() {
+    const list = $("flows-list");
+    if (!list) return;
+    const flows = state.aiFlows || [];
+    list.innerHTML = flows.length
+      ? flows.map(flowCardHtml).join("")
+      : '<li class="muted small">Aún no tienes flujos. Empieza con tu saludo de bienvenida 👇</li>';
+    const hasGreeting = flows.some((f) => f.trigger === "first_contact");
+    const welcome = document.querySelector('[data-flow-template="welcome"]');
+    if (welcome) welcome.disabled = hasGreeting;
+    const canEdit = !!state.canManageGlobal;
+    $("flows-templates")?.classList.toggle("hidden", !canEdit || flows.length >= 20);
+    $("flows-save")?.closest(".ai-pane-actions")?.classList.toggle("hidden", !canEdit);
+    list.querySelectorAll("input, textarea, select, button").forEach((el) => {
+      if (!canEdit) el.disabled = true;
+    });
+    renderAiList();
+  }
+
+  function syncFlowsFromDom() {
+    const list = $("flows-list");
+    if (!list) return;
+    list.querySelectorAll(".flow-card").forEach((card) => {
+      const flow = state.aiFlows[Number(card.dataset.flow)];
+      if (!flow) return;
+      flow.active = card.querySelector(".flow-active-input").checked;
+      const topic = card.querySelector(".flow-topic");
+      if (topic) flow.topic = topic.value;
+      card.querySelectorAll(".flow-step").forEach((li) => {
+        const step = flow.steps[Number(li.dataset.step)];
+        if (!step) return;
+        if (step.type === "text") step.text = li.querySelector(".flow-step-text").value;
+        else step.shortcut_id = li.querySelector(".flow-step-shortcut").value;
+      });
+    });
+  }
+
+  function addFlowFromTemplate(kind) {
+    syncFlowsFromDom();
+    const shortcuts = state.quickShortcuts || [];
+    const business = $("biz-name")?.value.trim();
+    let flow;
+    if (kind === "welcome") {
+      flow = {
+        name: "Bienvenida",
+        trigger: "first_contact",
+        steps: [{ type: "text", text: `¡Hola! 👋 Gracias por escribir${business ? ` a ${business}` : ""}. ¿En qué te puedo ayudar?` }],
+      };
+    } else if (kind === "prices") {
+      const match = shortcuts.find((sc) => /precio|tarifa|men[uú]|carta|cat[aá]logo|lista/i.test(sc.label)) || shortcuts[0];
+      flow = {
+        name: "Precios",
+        trigger: "asks_about",
+        topic: "precios, cuánto cuesta, tarifas",
+        steps: [
+          { type: "text", text: "¡Claro! Te comparto nuestros precios 👇" },
+          ...(match ? [{ type: "shortcut", shortcut_id: match.id }] : []),
+        ],
+      };
+    } else {
+      flow = { name: "", trigger: "asks_about", topic: "", steps: [{ type: "text", text: "" }] };
+    }
+    state.aiFlows = [...(state.aiFlows || []), { ...flow, active: true }];
+    renderFlows();
+    const cards = $("flows-list").querySelectorAll(".flow-card");
+    const card = cards[cards.length - 1];
+    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    (card?.querySelector(".flow-topic:placeholder-shown") || card?.querySelector(".flow-step-text"))?.focus({ preventScroll: true });
+    $("flows-status").textContent = "Revisa el texto y dale Guardar.";
+  }
+
+  function onFlowsClick(e) {
+    const card = e.target.closest(".flow-card");
+    if (!card) return;
+    syncFlowsFromDom();
+    const flow = state.aiFlows[Number(card.dataset.flow)];
+    const addKind = e.target.closest("[data-flow-add]")?.dataset.flowAdd;
+    const stepAct = e.target.closest("[data-step-act]")?.dataset.stepAct;
+    if (addKind === "text") flow.steps.push({ type: "text", text: "" });
+    else if (addKind === "shortcut") flow.steps.push({ type: "shortcut", shortcut_id: state.quickShortcuts[0]?.id });
+    else if (stepAct) {
+      const j = Number(e.target.closest(".flow-step").dataset.step);
+      const to = stepAct === "up" ? j - 1 : j + 1;
+      if (stepAct === "remove") flow.steps.splice(j, 1);
+      else if (to >= 0 && to < flow.steps.length) [flow.steps[j], flow.steps[to]] = [flow.steps[to], flow.steps[j]];
+    } else if (e.target.closest(".flow-remove")) state.aiFlows.splice(Number(card.dataset.flow), 1);
+    else return;
+    renderFlows();
+    if (addKind === "text") {
+      const steps = $("flows-list").querySelector(`[data-flow="${card.dataset.flow}"]`)?.querySelectorAll(".flow-step-text");
+      steps?.[steps.length - 1]?.focus();
+    }
+  }
+
+  function onFlowsChange(e) {
+    if (!e.target.classList.contains("flow-trigger-select")) return;
+    syncFlowsFromDom();
+    const flow = state.aiFlows[Number(e.target.closest(".flow-card").dataset.flow)];
+    if (e.target.value === "first_contact" && state.aiFlows.some((f) => f !== flow && f.trigger === "first_contact")) {
+      e.target.value = "asks_about";
+      $("flows-status").textContent = "Ya tienes un saludo de bienvenida. Solo puede haber uno.";
+      return;
+    }
+    flow.trigger = e.target.value;
+    renderFlows();
+  }
+
+  async function saveFlows() {
+    syncFlowsFromDom();
+    const status = $("flows-status");
+    const flows = (state.aiFlows || []).map((f) => ({
+      ...f,
+      name: f.name || (f.trigger === "first_contact" ? "Bienvenida" : (f.topic || "").slice(0, 60)),
+      steps: f.steps.filter((st) => (st.type === "text" ? st.text.trim() : st.shortcut_id)),
+    }));
+    if (flows.some((f) => !f.steps.length)) {
+      status.textContent = "Cada flujo necesita al menos un mensaje o atajo.";
+      return;
+    }
+    if (flows.some((f) => f.trigger === "asks_about" && !(f.topic || "").trim())) {
+      status.textContent = "Escribe por qué tiene que preguntar el cliente en cada flujo.";
+      return;
+    }
+    status.textContent = "Guardando…";
+    try {
+      state.aiFlows = (await api("/ai-flows", { method: "PUT", body: JSON.stringify({ flows }) })).flows || [];
+      renderFlows();
+      status.textContent = state.aiFlows.length ? "Guardado. Pruébalo en «Probar mi IA»." : "Guardado.";
     } catch (err) {
       status.textContent = err.message;
     }
@@ -7661,6 +7884,13 @@
   $("site-connect-btn")?.addEventListener("click", startSiteConnection);
   $("site-disconnect")?.addEventListener("click", disconnectSite);
   $("availability-save")?.addEventListener("click", saveAvailability);
+  $("flows-save")?.addEventListener("click", saveFlows);
+  $("flows-list")?.addEventListener("click", onFlowsClick);
+  $("flows-list")?.addEventListener("change", onFlowsChange);
+  $("flows-templates")?.addEventListener("click", (e) => {
+    const kind = e.target.closest("[data-flow-template]")?.dataset.flowTemplate;
+    if (kind) addFlowFromTemplate(kind);
+  });
   $("availability-list")?.addEventListener("click", (e) => {
     const li = e.target.closest(".availability-item");
     if (!li) return;

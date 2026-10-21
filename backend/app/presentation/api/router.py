@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.presentation.api import (
     ai,
+    ai_flows,
     ai_questions,
     appointments,
     audit_logs,
@@ -35,6 +36,7 @@ api_router.include_router(whatsapp.router)
 api_router.include_router(conversations.router)
 api_router.include_router(bait_templates.router)
 api_router.include_router(quick_shortcuts.router)
+api_router.include_router(ai_flows.router)
 api_router.include_router(availability.router)
 api_router.include_router(site_connection.router)
 api_router.include_router(products.router)

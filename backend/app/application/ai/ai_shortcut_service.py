@@ -153,6 +153,8 @@ class AiGeneratedReply:
     photo_ref: Optional[str] = None
     # Producto o paquete que el cliente acaba de elegir (ej. «me gustó este» con un pantallazo).
     chosen: str = ""
+    # Flujo del negocio que se envía antes del mensaje (ver ai_flow_service).
+    flow_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -492,6 +494,8 @@ def parse_ai_reply(
     valid_ids: frozenset[str],
     valid_book_keys: frozenset[tuple[str, str, str]] | None = None,
     valid_photo_refs: frozenset[str] = frozenset(),
+    valid_flow_ids: frozenset[str] = frozenset(),
+    allow_empty: bool = False,
 ) -> AiGeneratedReply:
     from app.application.ai.ai_appointment_service import parse_book_slot
 
@@ -506,7 +510,9 @@ def parse_ai_reply(
         return AiGeneratedReply(message=_salvage_message(text) or text)
 
     message = str(data.get("message") or data.get("reply") or "").strip()
-    if not message:
+    flow_id = str(data.get("flow_id") or "").strip()
+    flow_id = flow_id if flow_id in valid_flow_ids else None
+    if not message and not (flow_id or allow_empty):
         return AiGeneratedReply(message=text)
 
     raw_sid = data.get("shortcut_id")
@@ -530,6 +536,7 @@ def parse_ai_reply(
         missing=clean_topic(data.get("missing")),
         photo_ref=_photo_ref(data.get("photo_ref"), valid_photo_refs),
         chosen=_chosen(data.get("chosen")),
+        flow_id=flow_id,
     )
 
 
@@ -645,8 +652,11 @@ def send_reply_with_shortcut(
     allow_resend: bool = False,
 ) -> None:
     """Envía mensaje de la IA y atajo opcional — sin cerrar venta ni agendar."""
+    from app.application.ai.ai_flow_service import send_flow
     from app.domain.entities.enums import MessageSource
 
+    if reply.flow_id:
+        send_flow(db, tenant=tenant, session=session, conversation=conversation, flow_id=reply.flow_id)
     if not reply.message.strip():
         return
 

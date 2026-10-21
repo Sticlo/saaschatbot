@@ -49,6 +49,7 @@ from app.application.ai.ai_qualify_service import (
     handoff_reply,
     payment_methods_of,
 )
+from app.application.ai.ai_flow_service import FlowPlan, plan_for_conversation
 from app.application.ai.ai_shortcut_service import (
     STAGE_CHATTING,
     STAGE_CLOSING,
@@ -1193,6 +1194,11 @@ def _day_in_talk(history: list[Message]) -> Optional[str]:
     return None
 
 
+def _greeting_only(flows: FlowPlan) -> Optional[AiGeneratedReply]:
+    """Sin IA, el saludo del negocio igual sale: es texto fijo del dueño."""
+    return AiGeneratedReply(message="", flow_id=flows.auto_id) if flows.auto_id else None
+
+
 def _generate_without_stalling(generate, *, booking: Optional[BookingContext], history: list[Message], **kwargs):
     """Con la agenda delante, «déjame revisar y te confirmo» deja al cliente esperando a nadie."""
     if booking is None:
@@ -1925,6 +1931,7 @@ def _process_qualify(
     history = _load_history(db, conversation.id)
     is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
+    flows = plan_for_conversation(db, tenant.id, conversation.id, shortcuts, is_first_contact=is_first_contact)
     products = list_products(db, tenant.id)
     booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
 
@@ -1940,11 +1947,12 @@ def _process_qualify(
             booking=booking,
             products=products,
             knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
+            flows=flows,
         )
     except DeepSeekError as exc:
         log.warning("IA qualify sin respuesta conv=%s: %s", conversation.id, exc)
-        generated_reply = None
-    if generated_reply is None or not generated_reply.message.strip():
+        generated_reply = _greeting_only(flows)
+    if generated_reply is None or not (generated_reply.message.strip() or generated_reply.flow_id):
         return _handle_ai_unavailable(
             db,
             tenant=tenant,
@@ -2015,7 +2023,9 @@ def _process_full_reply(
         return True
 
     history = _load_history(db, conversation.id)
+    is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
+    flows = plan_for_conversation(db, tenant.id, conversation.id, shortcuts, is_first_contact=is_first_contact)
     products = list_products(db, tenant.id)
     booking = _booking_context(db, tenant=tenant, profile=profile, conversation=conversation, history=history)
     try:
@@ -2029,18 +2039,19 @@ def _process_full_reply(
             booking=booking,
             products=products,
             knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
+            flows=flows,
         )
     except DeepSeekError as exc:
         log.warning("IA sin respuesta conv=%s: %s", conversation.id, exc)
-        generated_reply = None
-    if generated_reply is None or not generated_reply.message.strip():
+        generated_reply = _greeting_only(flows)
+    if generated_reply is None or not (generated_reply.message.strip() or generated_reply.flow_id):
         return _handle_ai_unavailable(
             db,
             tenant=tenant,
             conversation=conversation,
             message=message,
             session=session,
-            is_first_contact=not any(m.direction == MessageDirection.OUT.value for m in history),
+            is_first_contact=is_first_contact,
         )
 
     increment_daily_reply_count(tenant.id)

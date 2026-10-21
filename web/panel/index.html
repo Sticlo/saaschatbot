@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=125" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=126" />
 </head>
 <body>
   <div id="app">
@@ -399,6 +399,11 @@
                 <span class="ai-row-body"><strong>Atajos rápidos</strong><span class="ai-row-sub" data-ai-sub="atajos"></span></span>
                 <span class="ai-row-mark" data-ai-mark="atajos"></span>
               </button>
+              <button type="button" class="ai-row" data-ai-open="flujos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v5H5zM13 15h6v5h-6zM8 9v3a3 3 0 0 0 3 3h2"/></svg></span>
+                <span class="ai-row-body"><strong>Flujos</strong><span class="ai-row-sub" data-ai-sub="flujos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="flujos"></span>
+              </button>
               <button type="button" class="ai-row" data-ai-open="avisos">
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15L6 16zM10 20a2 2 0 0 0 4 0"/></svg></span>
                 <span class="ai-row-body"><strong>Alertas a tu WhatsApp</strong><span class="ai-row-sub" data-ai-sub="avisos"></span></span>
@@ -605,6 +610,22 @@
                   <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
                 </ul>
                 <div class="ai-pane-actions"><button type="button" id="ai-shortcuts-config-btn" class="btn primary">Configurar atajos</button></div>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="flujos" data-ai-group="respuestas">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Flujos</h3><p>Mensajes que la IA envía solos y en orden: tu saludo, o lo que mandas cuando preguntan por algo.</p></div>
+                </header>
+                <ul id="flows-list" class="flows-list"></ul>
+                <div id="flows-templates" class="flows-templates">
+                  <span class="muted small">Agregar:</span>
+                  <button type="button" class="btn ghost small" data-flow-template="welcome">Saludo de bienvenida</button>
+                  <button type="button" class="btn ghost small" data-flow-template="prices">Cuando pregunten por precios</button>
+                  <button type="button" class="btn ghost small" data-flow-template="blank">Otro flujo</button>
+                </div>
+                <div class="ai-pane-actions"><button type="button" id="flows-save" class="btn primary">Guardar</button></div>
+                <p id="flows-status" class="ai-save-status muted small"></p>
               </section>
 
               <section class="ai-pane" data-ai-pane="avisos" data-ai-group="avisos">
@@ -1130,6 +1151,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=199"></script>
+  <script src="/static/panel/app.js?v=200"></script>
 </body>
 </html>

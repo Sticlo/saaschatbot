@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.application.ai.ai_appointment_service import BookingContext, without_wait_promise
 from app.application.ai.ai_conversation_service import generate_reply
+from app.application.ai.ai_flow_service import get_flows, plan_flows
 from app.application.ai.ai_knowledge_service import learned_answers_block
 from app.application.ai.ai_qualify_service import payment_methods_of
 from app.application.ai.ai_shortcut_service import attach_promised_media, without_internal_refs
@@ -39,6 +40,8 @@ class TrialReply:
     photos: list[str] = field(default_factory=list)
     attachment: Optional[dict] = None
     notes: list[str] = field(default_factory=list)
+    flow_id: Optional[str] = None
+    flow: list[dict] = field(default_factory=list)
 
 
 def _tries_key(tenant_id: uuid.UUID) -> str:
@@ -114,7 +117,7 @@ def _attachment(shortcut: dict) -> dict:
     return row
 
 
-def try_reply(db: Session, tenant: Tenant, turns: list[dict]) -> TrialReply:
+def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[str] | None = None) -> TrialReply:
     history = _history(turns)
     client_text = _client_turn(history)
     if not client_text.strip():
@@ -128,6 +131,13 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict]) -> TrialReply:
     products = list_products(db, tenant.id)
     shortcuts = get_shortcuts(db, tenant.id)
     booking = _booking(db, tenant, profile)
+    flows = get_flows(db, tenant.id)
+    plan = plan_flows(
+        flows,
+        shortcuts,
+        is_first_contact=not any(t.get("from") == "ai" for t in turns),
+        sent=sent_flows or set(),
+    )
     reply = generate_reply(
         tenant=tenant,
         profile=profile,
@@ -137,8 +147,9 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict]) -> TrialReply:
         booking=booking,
         products=products,
         knowledge=learned_answers_block(db, tenant.id),
+        flows=plan,
     )
-    if not reply.message.strip():
+    if not reply.message.strip() and not reply.flow_id:
         raise TrialError("La IA no respondió. Intenta otra vez en un momento.")
     recent = tuple(m.body or "" for m in reversed(history[:-1]))
     reply = attach_promised_media(
@@ -146,6 +157,16 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict]) -> TrialReply:
     )
 
     result = TrialReply(reply=without_internal_refs(without_wait_promise(reply.message), products))
+    flow = next((f for f in flows if f["id"] == reply.flow_id), None)
+    if flow is not None:
+        by_id = {str(s.get("id")): s for s in shortcuts}
+        result.flow_id = flow["id"]
+        result.flow = [
+            {"type": "text", "text": step["text"]} if step["type"] == "text" else _attachment(by_id[step["shortcut_id"]])
+            for step in flow["steps"]
+            if step["type"] == "text" or step["shortcut_id"] in by_id
+        ]
+        result.notes.insert(0, f"Se envió tu flujo «{flow['name']}».")
     if reply.photo_ref:
         product = find_by_ref(products, reply.photo_ref)
         if product is not None:

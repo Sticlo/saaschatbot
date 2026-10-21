@@ -105,6 +105,8 @@ class TenantProfile(Base):
     ai_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     bait_message_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     quick_shortcuts: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Flujos: [{id, name, trigger: first_contact|asks_about, topic, steps: [...], active}]
+    ai_flows: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # Calendario de cada alojamiento o espacio (enlace iCal de Airbnb, Booking, Google…).
     availability_calendars: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # Conexión MCP con la web del negocio; los tokens van cifrados (secret_box).

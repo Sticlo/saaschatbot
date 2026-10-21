@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime
 from typing import Callable, Optional
 
+from app.application.ai.ai_flow_service import FlowPlan
 from app.application.appointments.appointment_service import BOGOTA
 from app.application.availability.availability_service import availability_block
 from app.application.availability.site_connector import UNAVAILABLE_TEXT, ai_tools, run_ai_tool, site_tools_block
@@ -231,7 +233,9 @@ def _complete_reply(
     business_rules: str = "",
     site_tools: Optional[list[dict]] = None,
     run_site_tool: Optional[Callable[[str, dict], str]] = None,
+    flows: Optional[FlowPlan] = None,
 ) -> AiGeneratedReply:
+    flows = flows or FlowPlan()
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
     photo_refs = frozenset(product_ref(p) for p in products or [] if p.photos)
@@ -246,6 +250,7 @@ def _complete_reply(
         system += payment_methods_block(payment_methods)
     system += date_context()
     system += business_rules
+    system += flows.prompt
     if booking is not None:
         system = append_appointment_instructions(
             system,
@@ -283,7 +288,15 @@ def _complete_reply(
             temperature=0.45,
             max_tokens=settings.ai_reply_max_tokens,
         )
-    return parse_ai_reply(raw, valid_ids=ids, valid_book_keys=book_keys, valid_photo_refs=photo_refs)
+    reply = parse_ai_reply(
+        raw,
+        valid_ids=ids,
+        valid_book_keys=book_keys,
+        valid_photo_refs=photo_refs,
+        valid_flow_ids=flows.valid_ids,
+        allow_empty=flows.auto_id is not None,
+    )
+    return replace(reply, flow_id=flows.auto_id) if flows.auto_id else reply
 
 
 def generate_qualify_reply(
@@ -298,6 +311,7 @@ def generate_qualify_reply(
     correction: str = "",
     products: Optional[list[Product]] = None,
     knowledge: str = "",
+    flows: Optional[FlowPlan] = None,
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_qualify_system_prompt(
@@ -322,6 +336,7 @@ def generate_qualify_reply(
         business_rules=business_rules_block(profile, site_tools),
         site_tools=site_tools,
         run_site_tool=_site_tool_runner(tenant),
+        flows=flows,
     )
 
 
@@ -336,6 +351,7 @@ def generate_reply(
     correction: str = "",
     products: Optional[list[Product]] = None,
     knowledge: str = "",
+    flows: Optional[FlowPlan] = None,
 ) -> AiGeneratedReply:
     shortcut_rows = shortcuts or []
     system = build_system_prompt(tenant, profile, shortcuts=shortcut_rows)
@@ -356,6 +372,7 @@ def generate_reply(
             business_rules=business_rules_block(profile, site_tools),
             site_tools=site_tools,
             run_site_tool=_site_tool_runner(tenant),
+            flows=flows,
         )
     except DeepSeekError:
         log.warning("IA sin respuesta tenant=%s", tenant.id)

@@ -137,6 +137,7 @@ class TryAiTurn(BaseModel):
 
 class TryAiRequest(BaseModel):
     turns: list[TryAiTurn] = Field(min_length=1, max_length=20)
+    sent_flows: list[str] = Field(default_factory=list, max_length=20)
 
 
 class TryAiResponse(BaseModel):
@@ -144,3 +145,5 @@ class TryAiResponse(BaseModel):
     photos: list[str] = Field(default_factory=list)
     attachment: Optional[dict] = None
     notes: list[str] = Field(default_factory=list)
+    flow_id: Optional[str] = None
+    flow: list[dict] = Field(default_factory=list)

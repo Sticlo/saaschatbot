@@ -140,13 +140,20 @@ def try_ai(body: TryAiRequest, current: RequireAgent, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     turns = [{"from": t.from_, "text": t.text} for t in body.turns]
     try:
-        result = try_reply(db, tenant, turns)
+        result = try_reply(db, tenant, turns, sent_flows=set(body.sent_flows))
     except TrialError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except DeepSeekError as exc:
         raise HTTPException(status_code=503, detail="La IA no respondió. Intenta otra vez en un momento.") from exc
     db.rollback()
-    return TryAiResponse(reply=result.reply, photos=result.photos, attachment=result.attachment, notes=result.notes)
+    return TryAiResponse(
+        reply=result.reply,
+        photos=result.photos,
+        attachment=result.attachment,
+        notes=result.notes,
+        flow_id=result.flow_id,
+        flow=result.flow,
+    )
 
 
 @router.put("/business-profile", response_model=BusinessProfileResponse)
