@@ -6973,3 +6973,12 @@ body.lightbox-open { overflow: hidden; }
 .flows-example { padding: 0.9rem; border: 1px dashed var(--field-border); border-radius: 12px; font-size: 0.9rem; }
 .flows-example p { margin: 0.35rem 0; }
 .flows-example ol { margin: 0.35rem 0; padding-left: 1.2rem; }
+.ai-switch-state { font-weight: 600; }
+.ai-switch.is-off { background: color-mix(in srgb, #e5484d 16%, var(--surface2)); }
+.ai-switch.is-off .ai-switch-label { color: #e5484d; }
+@media (max-width: 420px) { .ai-switch-state { display: none; } }
+@media (max-width: 640px) {
+  .flow-bubble textarea,
+  .flow-card > .flow-topic { font-size: 16px; }
+  .flow-bubble { width: min(82%, 22rem); }
+}

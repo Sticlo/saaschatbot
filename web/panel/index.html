@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=129" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=130" />
 </head>
 <body>
   <div id="app">
@@ -113,10 +113,10 @@
             <span id="plan-status-label" class="plan-status-label"></span>
             <a href="/mi-plan" data-site-path="/mi-plan" id="plan-status-cta" class="btn ghost small hidden">Activar plan</a>
           </div>
-          <label class="ai-switch" title="Prende o apaga la IA en todos los chats">
+          <label class="ai-switch" id="ai-switch" title="Prende o apaga la IA en todos los chats">
             <input type="checkbox" id="toggle-ai-global" role="switch" />
             <span class="ai-switch-track" aria-hidden="true"><span class="ai-switch-thumb"></span></span>
-            <span class="ai-switch-label">IA</span>
+            <span class="ai-switch-label">IA <span id="ai-switch-state" class="ai-switch-state">apagada</span></span>
           </label>
           <button type="button" id="topbar-menu-btn" class="topbar-menu-btn" aria-label="Menú de la cuenta" aria-expanded="false" aria-controls="topbar-menu">
             <span id="topbar-avatar" class="topbar-avatar" aria-hidden="true">O</span>
@@ -395,16 +395,6 @@
                 <span class="ai-row-body"><strong>Preguntas sin responder</strong><span class="ai-row-sub" data-ai-sub="respuestas"></span></span>
                 <span class="ai-row-mark" data-ai-mark="respuestas"></span>
               </button>
-              <button type="button" class="ai-row" data-ai-open="atajos">
-                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13h6l-1 8 8-10h-6l1-8z"/></svg></span>
-                <span class="ai-row-body"><strong>Atajos rápidos</strong><span class="ai-row-sub" data-ai-sub="atajos"></span></span>
-                <span class="ai-row-mark" data-ai-mark="atajos"></span>
-              </button>
-              <button type="button" class="ai-row" data-ai-open="flujos">
-                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v5H5zM13 15h6v5h-6zM8 9v3a3 3 0 0 0 3 3h2"/></svg></span>
-                <span class="ai-row-body"><strong>Flujos</strong><span class="ai-row-sub" data-ai-sub="flujos"></span></span>
-                <span class="ai-row-mark" data-ai-mark="flujos"></span>
-              </button>
               <button type="button" class="ai-row" data-ai-open="avisos">
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15L6 16zM10 20a2 2 0 0 0 4 0"/></svg></span>
                 <span class="ai-row-body"><strong>Alertas a tu WhatsApp</strong><span class="ai-row-sub" data-ai-sub="avisos"></span></span>
@@ -414,6 +404,18 @@
                 <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/></svg></span>
                 <span class="ai-row-body"><strong>Seguimiento</strong><span class="ai-row-sub" data-ai-sub="seguimiento"></span></span>
                 <span class="ai-row-mark" data-ai-mark="seguimiento"></span>
+              </button>
+
+              <p class="ai-list-group">Respuestas listas</p>
+              <button type="button" class="ai-row" data-ai-open="flujos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v5H5zM13 15h6v5h-6zM8 9v3a3 3 0 0 0 3 3h2"/></svg></span>
+                <span class="ai-row-body"><strong>Flujos</strong><span class="ai-row-sub" data-ai-sub="flujos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="flujos"></span>
+              </button>
+              <button type="button" class="ai-row" data-ai-open="atajos">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 13h6l-1 8 8-10h-6l1-8z"/></svg></span>
+                <span class="ai-row-body"><strong>Atajos</strong><span class="ai-row-sub" data-ai-sub="atajos"></span></span>
+                <span class="ai-row-mark" data-ai-mark="atajos"></span>
               </button>
             </nav>
 
@@ -605,7 +607,7 @@
               <section class="ai-pane" data-ai-pane="atajos" data-ai-group="respuestas">
                 <header class="ai-pane-head">
                   <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-                  <div><h3>Atajos rápidos</h3><p>Menú, precios, fotos… Los envías con un clic y la IA también los usa sola.</p></div>
+                  <div><h3>Atajos</h3><p>Botones con tu menú, precios o fotos para <strong>enviarlos tú con un clic</strong> desde el chat. La IA también los usa cuando hace falta. ¿Quieres que se envíen solos y en orden? Usa <button type="button" class="link-btn" data-ai-open="flujos">Flujos</button>.</p></div>
                 </header>
                 <ul id="ai-shortcuts-summary" class="ai-shortcuts-summary">
                   <li class="skel-card" aria-hidden="true"><span class="skel" style="width:40%"></span><span class="skel skel-sm" style="width:65%"></span></li>
@@ -616,7 +618,7 @@
               <section class="ai-pane" data-ai-pane="flujos" data-ai-group="respuestas">
                 <header class="ai-pane-head">
                   <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-                  <div><h3>Flujos</h3><p>Mensajes, fotos y PDF que la IA envía sola, en orden, en el momento que tú eliges.</p></div>
+                  <div><h3>Flujos</h3><p>Mensajes, fotos y PDF que <strong>la IA envía sola</strong>, en orden, en el momento que tú eliges. ¿Prefieres enviarlos tú con un clic? Usa <button type="button" class="link-btn" data-ai-open="atajos">Atajos</button>.</p></div>
                 </header>
                 <ul id="flows-list" class="flows-list"></ul>
                 <div id="flows-templates" class="flows-templates">
@@ -958,7 +960,7 @@
       <div class="modal-backdrop" id="shortcuts-modal-backdrop"></div>
       <div class="modal-card shortcuts-modal-card">
         <button id="shortcuts-modal-close" class="modal-close" type="button" aria-label="Cerrar">×</button>
-        <h3>Atajos rápidos del negocio</h3>
+        <h3>Atajos del negocio</h3>
         <p class="muted small">Son los mismos en <strong>todos tus chats</strong>. Aparecen arriba del mensaje cuando atiendes a un cliente. Sube tu catálogo o carta en PDF o foto y dile a la IA cuándo enviarlo: lo manda sola, una vez por chat.</p>
         <div id="shortcuts-editor-list" class="shortcuts-editor-list"></div>
         <button type="button" id="shortcuts-add-btn" class="btn ghost small">+ Agregar atajo</button>
@@ -1151,6 +1153,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=203"></script>
+  <script src="/static/panel/app.js?v=204"></script>
 </body>
 </html>

@@ -183,7 +183,7 @@ def import_catalog(current: RequireOwner, db: Session = Depends(get_db)):
     """Arma la lista con lo que la IA ya leyó de los catálogos subidos (fotos o PDF)."""
     texts = [str(s.get("content") or "") for s in get_shortcuts(db, current.tenant_id) if s.get("content")]
     if not texts:
-        raise HTTPException(status_code=422, detail="Primero sube tu catálogo o carta en Atajos rápidos")
+        raise HTTPException(status_code=422, detail="Primero sube tu catálogo o carta en Personalizar IA › Atajos")
     created = import_from_catalog(db, current.tenant_id, texts)
     db.commit()
     autostart_ai_for_tenant_id(db, current.tenant_id)

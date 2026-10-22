@@ -1796,9 +1796,11 @@
       return {
         tone: "pause",
         icon: STRIP_ICONS.pause,
-        title: "Tu IA está en pausa",
+        title: waitingClients()
+          ? `Tu IA está apagada · ${waitingClients()} ${waitingClients() === 1 ? "cliente espera" : "clientes esperan"} respuesta`
+          : "Tu IA está apagada",
         text: state.canManageGlobal
-          ? "No le responde a nadie: aquí contestas tú. Enciéndela cuando quieras."
+          ? "No le responde a nadie: aquí contestas tú. Enciéndela y les responde sola."
           : "No le responde a nadie. El dueño de la cuenta la puede encender.",
         action: state.canManageGlobal ? { label: "Encender", run: turnOnGlobalAi } : null,
       };
@@ -1833,7 +1835,19 @@
     };
   }
 
+  function syncAiSwitchLabel() {
+    const on = !!$("toggle-ai-global")?.checked;
+    const label = $("ai-switch-state");
+    if (label) label.textContent = on ? "encendida" : "apagada";
+    $("ai-switch")?.classList.toggle("is-off", !on && !!state.tenant);
+  }
+
+  function waitingClients() {
+    return (state.conversations || []).filter((c) => c.unread_count > 0 && !c.is_archived).length;
+  }
+
   function renderStatusStrip() {
+    syncAiSwitchLabel();
     const strip = $("ai-alert-banner");
     if (!strip) return;
     const info = statusStripInfo();
@@ -4665,10 +4679,10 @@
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
       respuestas: { sub: openQ ? `${openQ} por responder` : "Nada pendiente", mark: openQ ? "count" : "", count: openQ },
       flujos: {
-        sub: activeFlows ? `${activeFlows} ${activeFlows === 1 ? "flujo activo" : "flujos activos"}` : "Saludo y respuestas en orden",
+        sub: activeFlows ? `La IA los envía sola · ${activeFlows} ${activeFlows === 1 ? "activo" : "activos"}` : "La IA los envía sola, en orden",
         mark: activeFlows ? "ok" : "",
       },
-      atajos: { sub: shortcuts ? `${shortcuts} ${shortcuts === 1 ? "atajo" : "atajos"}` : "Menú, precios, fotos…", mark: "" },
+      atajos: { sub: shortcuts ? `Los envías tú con un clic · ${shortcuts}` : "Los envías tú con un clic", mark: "" },
       avisos: {
         sub: alertCount ? `${alertCount} ${alertCount === 1 ? "número recibe" : "números reciben"} los avisos` : "Nadie recibe los avisos",
         mark: tips.some((t) => t.action === "alerts") || alertCount === 0 ? "tip" : alertCount ? "ok" : "",
@@ -5075,6 +5089,7 @@
       const profile = await api("/outbound/business-profile");
       state.aiProfile = profile;
       fillBizForm(profile);
+      bizLastSaved = JSON.stringify(readBizForm());
     } catch (err) {
       setBizSaveStatus(err.message);
       fillBizForm(null);
@@ -5724,23 +5739,59 @@
     await importProductsFromCatalog();
   }
 
-  async function saveAiSetup() {
+  let bizAutosaveTimer = null;
+  let bizSaving = false;
+  let bizSaveAgain = false;
+  let bizLastSaved = "";
+
+  function scheduleBizAutosave() {
     if (!state.canManageGlobal) return;
+    clearTimeout(bizAutosaveTimer);
+    bizAutosaveTimer = setTimeout(() => {
+      bizAutosaveTimer = null;
+      saveAiSetup({ auto: true });
+    }, 1500);
+  }
+
+  function flushBizAutosave() {
+    if (!bizAutosaveTimer) return;
+    clearTimeout(bizAutosaveTimer);
+    bizAutosaveTimer = null;
+    saveAiSetup({ auto: true });
+  }
+
+  async function saveAiSetup({ auto = false } = {}) {
+    if (!state.canManageGlobal) return;
+    if (bizSaving) {
+      bizSaveAgain = true;
+      return;
+    }
     const payload = readBizForm();
-    if (!payload.business_name && state.aiProfile?.business_name_is_placeholder && $("ai-setup-panel").dataset.pane === "negocio") {
+    const nameMissing = !payload.business_name && state.aiProfile?.business_name_is_placeholder;
+    if (auto && (payload.business_name || "").length === 1) return setBizSaveStatus("");
+    if (auto && JSON.stringify(payload) === bizLastSaved) return setBizSaveStatus("✓ Guardado");
+    if (!auto && nameMissing && $("ai-setup-panel").dataset.pane === "negocio") {
       setBizSaveStatus("Escribe el nombre de tu negocio");
       $("biz-name").focus();
       return;
     }
-    document.querySelectorAll(".ai-pane-save").forEach((b) => { b.disabled = true; });
+    bizSaving = true;
+    if (!auto) document.querySelectorAll(".ai-pane-save").forEach((b) => { b.disabled = true; });
     setBizSaveStatus("Guardando…");
     try {
       const profile = await api("/outbound/business-profile", {
         method: "PUT",
         body: JSON.stringify(payload),
       });
+      bizLastSaved = JSON.stringify(payload);
       state.aiProfile = profile;
-      fillBizForm(profile);
+      if (auto) {
+        renderBizSummary(profile);
+        renderReadiness();
+        renderAiList();
+      } else {
+        fillBizForm(profile);
+      }
       setBusinessName(profile.business_name, profile.business_name_is_placeholder);
       await syncAutostart();
       const missing = missingReadiness();
@@ -5757,7 +5808,12 @@
     } catch (err) {
       setBizSaveStatus(err.message);
     } finally {
+      bizSaving = false;
       updateAiSetupControls();
+      if (bizSaveAgain) {
+        bizSaveAgain = false;
+        saveAiSetup({ auto: true });
+      }
     }
   }
 
@@ -6478,6 +6534,7 @@
     if (state.tenant.ai_global_enabled === fresh.ai_global_enabled) return;
     state.tenant.ai_global_enabled = fresh.ai_global_enabled;
     $("toggle-ai-global").checked = fresh.ai_global_enabled;
+    syncAiSwitchLabel();
     renderReadyBanner();
     onAiGlobalChanged(fresh.ai_global_enabled);
     if (autostarted) toast("¡Tu IA ya está encendida! Desde ahora les responde a tus clientes.", { tone: "ok", duration: 6000 });
@@ -6767,6 +6824,7 @@
       if (tenant) {
         setBusinessName(tenant.business_name, !!bizProfile?.business_name_is_placeholder);
       $("toggle-ai-global").checked = tenant.ai_global_enabled;
+      syncAiSwitchLabel();
       }
       renderReadiness();
       loadAiQuestions({ badgeOnly: true });
@@ -7882,10 +7940,22 @@
       if (e.target.closest(".ai-pane-back")) $(id).classList.remove("is-open");
     });
   });
+  $("ai-setup-panel").addEventListener("input", (e) => {
+    if (!e.target.id?.startsWith("biz-")) return;
+    setBizSaveStatus("Guardando…");
+    scheduleBizAutosave();
+  });
+  $("ai-setup-panel").addEventListener("focusout", (e) => {
+    if (e.target.id?.startsWith("biz-")) flushBizAutosave();
+  });
+  window.addEventListener("beforeunload", flushBizAutosave);
   $("ai-setup-panel").addEventListener("click", (e) => {
     const row = e.target.closest("[data-ai-open]");
     if (row) return openAiPane(row.dataset.aiOpen);
-    if (e.target.closest(".ai-pane-back")) return closeAiPane();
+    if (e.target.closest(".ai-pane-back")) {
+      flushBizAutosave();
+      return closeAiPane();
+    }
     if (e.target.closest(".ai-pane-save")) return saveAiSetup();
     if (e.target.closest("[data-go-inventory]")) switchPanelMode("inventory");
   });
@@ -8610,6 +8680,7 @@
     }
   });
 
+  $("toggle-ai-global").addEventListener("change", syncAiSwitchLabel);
   $("toggle-ai-global").addEventListener("change", async (e) => {
     if (!state.canManageGlobal) return;
     if (e.target.checked && missingReadiness().length) {
