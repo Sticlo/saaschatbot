@@ -605,7 +605,7 @@ def save_inbound_message(
                     contacts_index={},
                     instance_name=inst,
                     dsn=app_settings.evolution_database_url,
-                    message_key=message_key,
+                    key=message_key,
                     lid_jid=contact_jid,
                 )
                 if resolved:
@@ -634,7 +634,7 @@ def save_inbound_message(
                 contacts_index={},
                 instance_name=inst,
                 dsn=app_settings.evolution_database_url,
-                message_key=message_key,
+                key=message_key,
                 lid_jid=contact_jid,
             )
             if resolved:

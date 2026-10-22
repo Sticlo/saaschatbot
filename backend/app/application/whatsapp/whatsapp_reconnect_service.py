@@ -71,7 +71,7 @@ def try_reconnect(db: Session, tenant: Tenant, session: WhatsAppSession) -> bool
                 f"WhatsApp de «{tenant.business_name}» se desvinculó",
                 f"Tenant {tenant.id}. Hay que escanear el QR otra vez desde el panel.",
                 severity="warning",
-                throttle_seconds=6 * 3600,
+                throttle_seconds=24 * 3600,
             )
             return False
         log.info("Reconexión WhatsApp solicitada tenant=%s", tenant.id)

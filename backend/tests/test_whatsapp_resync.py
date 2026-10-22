@@ -374,6 +374,33 @@ def test_message_that_failed_to_save_is_processed_when_evolution_retries(wa_offl
     assert len(wa_offline["ai_jobs"]) == 1
 
 
+@requires_db
+def test_message_is_saved_when_name_lookup_uses_evolution_db(wa_offline, monkeypatch):
+    import inspect
+
+    from app.application.sync import contact_identity_service
+    from app.infrastructure.persistence.database import SessionLocal
+
+    real = contact_identity_service.resolve_contact_identity
+    calls = []
+
+    def fake_resolve(*args, **kwargs):
+        inspect.signature(real).bind(*args, **kwargs)
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr("app.config.settings.evolution_database_url", "postgresql://evolution")
+    monkeypatch.setattr(contact_identity_service, "resolve_contact_identity", fake_resolve)
+
+    with SessionLocal() as db:
+        tenant, wa = make_wa_tenant(db)
+    process_evolution_webhook(tenant.id, upsert_payload(wa.instance_name, msg_id=_msg_id(), text="hola, info"))
+
+    with SessionLocal() as db:
+        assert [m.body for m in _messages(db, tenant.id)] == ["hola, info"]
+    assert calls
+
+
 def test_extract_whatsapp_id_from_wrapped_send_response():
     from app.application.messaging.message_service import extract_whatsapp_message_id
 
