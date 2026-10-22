@@ -158,3 +158,22 @@ def test_flow_steps_go_in_order_before_the_ai_message_and_only_once(monkeypatch,
         None, tenant=tenant, session=None, conversation=conversation, reply=AiGeneratedReply(message="", flow_id="hola")
     )
     assert sent == []
+
+
+def test_photo_or_pdf_uploaded_straight_into_the_flow():
+    tenant = "t1"
+    flows = fs.normalize_flows(
+        [{**PRICES, "steps": [
+            {"type": "image", "path": f"assets/{tenant}/foto.jpg"},
+            {"type": "document", "path": f"assets/{tenant}/lista.pdf", "file_name": "Lista de precios.pdf"},
+            {"type": "image", "path": "assets/otro-negocio/robada.jpg"},
+        ]}],
+        set(),
+        asset_prefix=f"assets/{tenant}/",
+    )
+    assert flows[0]["steps"] == [
+        {"type": "image", "path": "assets/t1/foto.jpg"},
+        {"type": "document", "path": "assets/t1/lista.pdf", "file_name": "Lista de precios.pdf"},
+    ]
+    assert "una foto" in fs.describe_steps(flows[0], []) and "«Lista de precios.pdf»" in fs.describe_steps(flows[0], [])
+    assert fs.step_as_shortcut(flows[0]["steps"][1])["file_path"] == "assets/t1/lista.pdf"

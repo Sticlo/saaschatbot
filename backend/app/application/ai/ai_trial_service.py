@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.application.ai.ai_appointment_service import BookingContext, without_wait_promise
 from app.application.ai.ai_conversation_service import generate_reply
-from app.application.ai.ai_flow_service import get_flows, plan_flows
+from app.application.ai.ai_flow_service import get_flows, plan_flows, step_as_shortcut
 from app.application.ai.ai_knowledge_service import learned_answers_block
 from app.application.ai.ai_qualify_service import payment_methods_of
 from app.application.ai.ai_shortcut_service import attach_promised_media, without_internal_refs
@@ -161,11 +161,12 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[st
     if flow is not None:
         by_id = {str(s.get("id")): s for s in shortcuts}
         result.flow_id = flow["id"]
-        result.flow = [
-            {"type": "text", "text": step["text"]} if step["type"] == "text" else _attachment(by_id[step["shortcut_id"]])
-            for step in flow["steps"]
-            if step["type"] == "text" or step["shortcut_id"] in by_id
-        ]
+        result.flow = []
+        for step in flow["steps"]:
+            if step["type"] == "text":
+                result.flow.append({"type": "text", "text": step["text"]})
+            elif (shortcut := step_as_shortcut(step) or by_id.get(step.get("shortcut_id"))) is not None:
+                result.flow.append(_attachment(shortcut))
         result.notes.insert(0, f"Se envió tu flujo «{flow['name']}».")
     if reply.photo_ref:
         product = find_by_ref(products, reply.photo_ref)

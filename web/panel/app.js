@@ -5973,19 +5973,27 @@
 
   function flowStepHtml(step, j, total) {
     const shortcuts = state.quickShortcuts || [];
-    const body =
-      step.type === "text"
-        ? `<textarea class="flow-step-text" rows="2" maxlength="2000" placeholder="Escribe el mensaje tal como quieres que llegue">${escapeHtml(step.text || "")}</textarea>`
-        : `<select class="flow-step-shortcut">${shortcuts
-            .map((sc) => `<option value="${escapeHtml(sc.id)}"${sc.id === step.shortcut_id ? " selected" : ""}>${escapeHtml(flowShortcutLabel(sc))}</option>`)
-            .join("")}</select>`;
+    let body;
+    if (step.type === "text") {
+      body = `<textarea class="flow-step-text" rows="2" maxlength="2000" placeholder="Escribe el mensaje">${escapeHtml(step.text || "")}</textarea>`;
+    } else if (step.type === "image") {
+      body = `<div class="flow-step-file"><img src="/api/v1/outbound/assets/${escapeHtml(step.path.split("/").pop())}" alt="" loading="lazy" /><span>Foto</span></div>`;
+    } else if (step.type === "document") {
+      body = `<div class="flow-step-file"><span class="flow-step-pdf">PDF</span><span>${escapeHtml(step.file_name)}</span></div>`;
+    } else if (step.uploading) {
+      body = '<div class="flow-step-file muted">Subiendo…</div>';
+    } else {
+      body = `<select class="flow-step-shortcut">${shortcuts
+        .map((sc) => `<option value="${escapeHtml(sc.id)}"${sc.id === step.shortcut_id ? " selected" : ""}>${escapeHtml(flowShortcutLabel(sc))}</option>`)
+        .join("")}</select>`;
+    }
     return `<li class="flow-step" data-step="${j}">
       <span class="flow-step-num">${j + 1}</span>
       <div class="flow-step-body">${body}</div>
       <div class="flow-step-tools">
-        <button type="button" class="icon-btn" data-step-act="up" aria-label="Subir"${j === 0 ? " disabled" : ""}>↑</button>
-        <button type="button" class="icon-btn" data-step-act="down" aria-label="Bajar"${j === total - 1 ? " disabled" : ""}>↓</button>
-        <button type="button" class="icon-btn" data-step-act="remove" aria-label="Quitar paso">×</button>
+        ${total > 1 ? `<button type="button" class="icon-btn" data-step-act="up" aria-label="Subir"${j === 0 ? " disabled" : ""}>↑</button>
+        <button type="button" class="icon-btn" data-step-act="down" aria-label="Bajar"${j === total - 1 ? " disabled" : ""}>↓</button>` : ""}
+        <button type="button" class="icon-btn" data-step-act="remove" aria-label="Quitar">×</button>
       </div>
     </li>`;
   }
@@ -5994,30 +6002,20 @@
     const greeting = flow.trigger === "first_contact";
     const hasShortcuts = (state.quickShortcuts || []).length > 0;
     const steps = flow.steps || [];
+    const full = steps.length >= 8;
     return `<li class="flow-card${flow.active === false ? " is-off" : ""}" data-flow="${i}">
       <div class="flow-card-head">
-        <label class="ai-field flow-trigger"><span>Cuándo</span>
-          <select class="flow-trigger-select">
-            <option value="first_contact"${greeting ? " selected" : ""}>Cuando alguien escribe por primera vez</option>
-            <option value="asks_about"${greeting ? "" : " selected"}>Cuando pregunta por…</option>
-          </select>
-        </label>
-        <label class="flow-active"><input type="checkbox" class="flow-active-input"${flow.active === false ? "" : " checked"} /> Activo</label>
+        <strong class="flow-card-title">${greeting ? "👋 Saludo · cuando alguien escribe por primera vez" : "💬 Cuando pregunten por…"}</strong>
+        <label class="flow-active" title="Apágalo sin borrarlo"><input type="checkbox" class="flow-active-input"${flow.active === false ? "" : " checked"} /> Activo</label>
       </div>
-      ${
-        greeting
-          ? '<p class="muted small flow-hint">Se envía una sola vez, apenas un cliente nuevo te escribe. Después la IA sigue la conversación.</p>'
-          : `<label class="ai-field"><span>Pregunta por</span><input type="text" class="flow-topic" maxlength="200" placeholder="precios, el menú, los planes…" value="${escapeHtml(flow.topic || "")}" /></label>
-             <p class="muted small flow-hint">Escríbelo como lo diría un cliente: la IA entiende otras formas de preguntarlo. Se envía una vez por chat.</p>`
-      }
-      <p class="flow-steps-title">Se envía en este orden:</p>
+      ${greeting ? "" : `<input type="text" class="flow-topic" maxlength="200" placeholder="Ej: precios, paquetes, baby shower" value="${escapeHtml(flow.topic || "")}" aria-label="Por qué pregunta el cliente" />`}
       <ol class="flow-steps">${steps.map((st, j) => flowStepHtml(st, j, steps.length)).join("")}</ol>
       <div class="flow-card-foot">
-        <button type="button" class="btn ghost small" data-flow-add="text"${steps.length >= 8 ? " disabled" : ""}>+ Mensaje</button>
-        <button type="button" class="btn ghost small" data-flow-add="shortcut"${!hasShortcuts || steps.length >= 8 ? " disabled" : ""}>+ Atajo (foto, PDF o texto)</button>
-        <button type="button" class="link-btn flow-remove">Quitar flujo</button>
+        ${full ? "" : `<button type="button" class="btn ghost small" data-flow-add="text">+ Mensaje</button>
+        <button type="button" class="btn ghost small" data-flow-add="file">+ Foto o PDF</button>
+        ${hasShortcuts ? '<button type="button" class="btn ghost small" data-flow-add="shortcut">+ Atajo</button>' : ""}`}
+        <button type="button" class="link-btn flow-remove">Borrar</button>
       </div>
-      ${hasShortcuts ? "" : '<p class="muted small flow-hint">Para enviar fotos o PDF, créalos primero en «Atajos rápidos».</p>'}
     </li>`;
   }
 
@@ -6027,10 +6025,9 @@
     const flows = state.aiFlows || [];
     list.innerHTML = flows.length
       ? flows.map(flowCardHtml).join("")
-      : '<li class="muted small">Aún no tienes flujos. Empieza con tu saludo de bienvenida 👇</li>';
+      : '<li class="muted small">Aún no tienes flujos. Empieza con tu saludo 👇</li>';
     const hasGreeting = flows.some((f) => f.trigger === "first_contact");
-    const welcome = document.querySelector('[data-flow-template="welcome"]');
-    if (welcome) welcome.disabled = hasGreeting;
+    document.querySelector('[data-flow-template="welcome"]')?.classList.toggle("hidden", hasGreeting);
     const canEdit = !!state.canManageGlobal;
     $("flows-templates")?.classList.toggle("hidden", !canEdit || flows.length >= 20);
     $("flows-save")?.closest(".ai-pane-actions")?.classList.toggle("hidden", !canEdit);
@@ -6053,7 +6050,7 @@
         const step = flow.steps[Number(li.dataset.step)];
         if (!step) return;
         if (step.type === "text") step.text = li.querySelector(".flow-step-text").value;
-        else step.shortcut_id = li.querySelector(".flow-step-shortcut").value;
+        else if (step.type === "shortcut") step.shortcut_id = li.querySelector(".flow-step-shortcut").value;
       });
     });
   }
@@ -6089,7 +6086,7 @@
     const card = cards[cards.length - 1];
     card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     (card?.querySelector(".flow-topic:placeholder-shown") || card?.querySelector(".flow-step-text"))?.focus({ preventScroll: true });
-    $("flows-status").textContent = "Revisa el texto y dale Guardar.";
+    $("flows-status").textContent = "";
   }
 
   function onFlowsClick(e) {
@@ -6099,6 +6096,11 @@
     const flow = state.aiFlows[Number(card.dataset.flow)];
     const addKind = e.target.closest("[data-flow-add]")?.dataset.flowAdd;
     const stepAct = e.target.closest("[data-step-act]")?.dataset.stepAct;
+    if (addKind === "file") {
+      state.flowUploadTarget = Number(card.dataset.flow);
+      $("flows-file-input").click();
+      return;
+    }
     if (addKind === "text") flow.steps.push({ type: "text", text: "" });
     else if (addKind === "shortcut") flow.steps.push({ type: "shortcut", shortcut_id: state.quickShortcuts[0]?.id });
     else if (stepAct) {
@@ -6115,16 +6117,28 @@
     }
   }
 
-  function onFlowsChange(e) {
-    if (!e.target.classList.contains("flow-trigger-select")) return;
-    syncFlowsFromDom();
-    const flow = state.aiFlows[Number(e.target.closest(".flow-card").dataset.flow)];
-    if (e.target.value === "first_contact" && state.aiFlows.some((f) => f !== flow && f.trigger === "first_contact")) {
-      e.target.value = "asks_about";
-      $("flows-status").textContent = "Ya tienes un saludo de bienvenida. Solo puede haber uno.";
+  async function uploadFlowFile(file) {
+    const flow = state.aiFlows[state.flowUploadTarget];
+    if (!file || !flow) return;
+    const tooBig = shortcutFileTooBig(file);
+    if (tooBig) {
+      alertWithCompress(tooBig);
       return;
     }
-    flow.trigger = e.target.value;
+    syncFlowsFromDom();
+    const step = { type: "uploading", uploading: true };
+    flow.steps.push(step);
+    renderFlows();
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api("/quick-shortcuts/files", { method: "POST", body: fd }, 90000);
+      Object.assign(step, { type: res.type, path: res.path, file_name: res.file_name || undefined, uploading: false });
+      $("flows-status").textContent = "Listo. Dale Guardar.";
+    } catch (err) {
+      flow.steps.splice(flow.steps.indexOf(step), 1);
+      $("flows-status").textContent = err.message || "No se pudo subir el archivo.";
+    }
     renderFlows();
   }
 
@@ -6134,14 +6148,16 @@
     const flows = (state.aiFlows || []).map((f) => ({
       ...f,
       name: f.name || (f.trigger === "first_contact" ? "Bienvenida" : (f.topic || "").slice(0, 60)),
-      steps: f.steps.filter((st) => (st.type === "text" ? st.text.trim() : st.shortcut_id)),
+      steps: f.steps
+        .filter((st) => (st.type === "text" ? st.text.trim() : st.type === "shortcut" ? st.shortcut_id : st.path))
+        .map(({ uploading, ...st }) => st),
     }));
     if (flows.some((f) => !f.steps.length)) {
-      status.textContent = "Cada flujo necesita al menos un mensaje o atajo.";
+      status.textContent = "Cada flujo necesita al menos un mensaje, foto o PDF.";
       return;
     }
     if (flows.some((f) => f.trigger === "asks_about" && !(f.topic || "").trim())) {
-      status.textContent = "Escribe por qué tiene que preguntar el cliente en cada flujo.";
+      status.textContent = "Escribe por qué pregunta el cliente (ej: precios).";
       return;
     }
     status.textContent = "Guardando…";
@@ -7889,7 +7905,10 @@
   $("availability-save")?.addEventListener("click", saveAvailability);
   $("flows-save")?.addEventListener("click", saveFlows);
   $("flows-list")?.addEventListener("click", onFlowsClick);
-  $("flows-list")?.addEventListener("change", onFlowsChange);
+  $("flows-file-input")?.addEventListener("change", (e) => {
+    uploadFlowFile(e.target.files[0]);
+    e.target.value = "";
+  });
   $("flows-templates")?.addEventListener("click", (e) => {
     const kind = e.target.closest("[data-flow-template]")?.dataset.flowTemplate;
     if (kind) addFlowFromTemplate(kind);

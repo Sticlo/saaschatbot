@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=127" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=128" />
 </head>
 <body>
   <div id="app">
@@ -616,15 +616,14 @@
               <section class="ai-pane" data-ai-pane="flujos" data-ai-group="respuestas">
                 <header class="ai-pane-head">
                   <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-                  <div><h3>Flujos</h3><p>Mensajes que la IA envía solos y en orden: tu saludo, o lo que mandas cuando preguntan por algo.</p></div>
+                  <div><h3>Flujos</h3><p>Lo que la IA envía sola y en orden.</p></div>
                 </header>
                 <ul id="flows-list" class="flows-list"></ul>
                 <div id="flows-templates" class="flows-templates">
-                  <span class="muted small">Agregar:</span>
-                  <button type="button" class="btn ghost small" data-flow-template="welcome">Saludo de bienvenida</button>
-                  <button type="button" class="btn ghost small" data-flow-template="prices">Cuando pregunten por precios</button>
-                  <button type="button" class="btn ghost small" data-flow-template="blank">Otro flujo</button>
+                  <button type="button" class="btn ghost small" data-flow-template="welcome">+ Saludo de bienvenida</button>
+                  <button type="button" class="btn ghost small" data-flow-template="blank">+ Cuando pregunten por…</button>
                 </div>
+                <input type="file" id="flows-file-input" accept="image/*,application/pdf" hidden />
                 <div class="ai-pane-actions"><button type="button" id="flows-save" class="btn primary">Guardar</button></div>
                 <p id="flows-status" class="ai-save-status muted small"></p>
               </section>
@@ -1152,6 +1151,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=201"></script>
+  <script src="/static/panel/app.js?v=202"></script>
 </body>
 </html>

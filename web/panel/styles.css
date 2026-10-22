@@ -6866,3 +6866,36 @@ body.lightbox-open { overflow: hidden; }
 .flow-card-foot .flow-remove { margin-left: auto; }
 .flows-templates { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
 .ai-list-group-note { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.flow-card-head { align-items: center; justify-content: space-between; }
+.flow-card-title { font-size: 0.92rem; }
+.flow-active { padding-bottom: 0; color: var(--muted); }
+.flow-card > .flow-topic {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.flow-step-file {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+.flow-step-file img { width: 3rem; height: 3rem; object-fit: cover; border-radius: 6px; }
+.flow-step-pdf {
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.flow-step-file span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

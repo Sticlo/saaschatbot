@@ -34,7 +34,17 @@ def _clean(text: Any, limit: int) -> str:
     return str(text or "").strip()[:limit]
 
 
-def normalize_flows(raw: list[Any], shortcut_ids: set[str]) -> list[dict]:
+def _file_step(step: dict, asset_prefix: str) -> Optional[dict]:
+    path = str(step.get("path") or "").strip()
+    if not asset_prefix or not path.startswith(asset_prefix) or ".." in path:
+        return None
+    if step["type"] == "image":
+        return {"type": "image", "path": path}
+    name = " ".join(_clean(step.get("file_name"), 120).split()) or "archivo.pdf"
+    return {"type": "document", "path": path, "file_name": name}
+
+
+def normalize_flows(raw: list[Any], shortcut_ids: set[str], asset_prefix: str = "") -> list[dict]:
     out: list[dict] = []
     has_greeting = False
     for item in raw[:MAX_FLOWS]:
@@ -52,6 +62,8 @@ def normalize_flows(raw: list[Any], shortcut_ids: set[str]) -> list[dict]:
                 steps.append({"type": "text", "text": _clean(step.get("text"), MAX_TEXT_CHARS)})
             elif step.get("type") == "shortcut" and str(step.get("shortcut_id") or "") in shortcut_ids:
                 steps.append({"type": "shortcut", "shortcut_id": str(step["shortcut_id"])})
+            elif step.get("type") in ("image", "document") and (file_step := _file_step(step, asset_prefix)):
+                steps.append(file_step)
         name = " ".join(_clean(item.get("name"), 60).split())
         if not steps:
             raise FlowError(f"El flujo «{name or topic or 'sin nombre'}» no tiene nada para enviar.")
@@ -80,7 +92,7 @@ def get_flows(db: Session, tenant_id: uuid.UUID) -> list[dict]:
 
 def save_flows(db: Session, tenant_id: uuid.UUID, flows: list[Any], shortcut_ids: set[str]) -> list[dict]:
     profile = get_or_create_tenant_profile(db, tenant_id)
-    profile.ai_flows = normalize_flows(flows, shortcut_ids)
+    profile.ai_flows = normalize_flows(flows, shortcut_ids, asset_prefix=f"assets/{tenant_id}/")
     db.flush()
     return profile.ai_flows
 
@@ -110,11 +122,24 @@ def describe_steps(flow: dict, shortcuts: list[dict]) -> str:
         if step["type"] == "text":
             text = " ".join(step["text"].split())
             parts.append(f'{index}. mensaje: "{text[:160]}{"…" if len(text) > 160 else ""}"')
+        elif step["type"] == "image":
+            parts.append(f"{index}. una foto")
+        elif step["type"] == "document":
+            parts.append(f"{index}. el PDF «{step['file_name']}»")
         else:
             shortcut = by_id.get(step["shortcut_id"]) or {}
             kind = {"image": "foto", "document": "PDF"}.get(shortcut.get("type"), "texto")
             parts.append(f"{index}. atajo «{shortcut.get('label') or '?'}» ({kind})")
     return " ".join(parts)
+
+
+def step_as_shortcut(step: dict) -> Optional[dict]:
+    """Foto o PDF subido directo al flujo, con la forma de un atajo para enviarlo igual."""
+    if step["type"] == "image":
+        return {"type": "image", "image_path": step["path"], "label": "Foto"}
+    if step["type"] == "document":
+        return {"type": "document", "file_path": step["path"], "file_name": step["file_name"], "label": step["file_name"]}
+    return None
 
 
 @dataclass(frozen=True)
@@ -195,7 +220,7 @@ def send_flow(db: Session, *, tenant, session, conversation, flow_id: str) -> in
                 verbatim=True,
             )
         else:
-            shortcut = shortcuts.get(step["shortcut_id"])
+            shortcut = step_as_shortcut(step) or shortcuts.get(step.get("shortcut_id"))
             if shortcut is None:
                 continue
             send_shortcut_content(
