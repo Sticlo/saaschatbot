@@ -6982,3 +6982,8 @@ body.lightbox-open { overflow: hidden; }
   .flow-card > .flow-topic { font-size: 16px; }
   .flow-bubble { width: min(82%, 22rem); }
 }
+@media (max-width: 768px) {
+  body.keyboard-open { --bottom-nav-space: 0px; }
+  body.keyboard-open .sidebar-mode-tabs { display: none; }
+  body.keyboard-open .morning-card { display: none; }
+}

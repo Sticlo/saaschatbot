@@ -7949,6 +7949,21 @@
     if (e.target.id?.startsWith("biz-")) flushBizAutosave();
   });
   window.addEventListener("beforeunload", flushBizAutosave);
+
+  const TYPING_INPUT = 'textarea, [contenteditable="true"], input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=file], [type=range], [type=color])';
+  const phoneLayout = window.matchMedia("(max-width: 768px)");
+  let keyboardTimer = null;
+  document.addEventListener("focusin", (e) => {
+    if (!phoneLayout.matches || !e.target.matches?.(TYPING_INPUT)) return;
+    clearTimeout(keyboardTimer);
+    document.body.classList.add("keyboard-open");
+  });
+  document.addEventListener("focusout", () => {
+    clearTimeout(keyboardTimer);
+    keyboardTimer = setTimeout(() => {
+      if (!document.activeElement?.matches?.(TYPING_INPUT)) document.body.classList.remove("keyboard-open");
+    }, 150);
+  });
   $("ai-setup-panel").addEventListener("click", (e) => {
     const row = e.target.closest("[data-ai-open]");
     if (row) return openAiPane(row.dataset.aiOpen);
