@@ -48,6 +48,12 @@ RUN node /tmp/patch-baileys-pairing-error.js && \
     node --check node_modules/baileys/lib/Socket/socket.js && \
     node --check node_modules/baileys/lib/Utils/validate-connection.js
 
+COPY patch-baileys-ack.js /tmp/patch-baileys-ack.js
+RUN node /tmp/patch-baileys-ack.js && \
+    grep -q "if (tag === 'message' && authState.creds.me?.id)" node_modules/baileys/lib/Socket/messages-recv.js && \
+    grep -q "if (!countChild)" node_modules/baileys/lib/Socket/messages-recv.js && \
+    node --check node_modules/baileys/lib/Socket/messages-recv.js
+
 RUN cp .env.example .env && chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
 RUN ./Docker/scripts/generate_database.sh
