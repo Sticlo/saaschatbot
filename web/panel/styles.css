@@ -6865,3 +6865,4 @@ body.lightbox-open { overflow: hidden; }
 .flow-card-foot { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .flow-card-foot .flow-remove { margin-left: auto; }
 .flows-templates { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.ai-list-group-note { text-transform: none; letter-spacing: 0; font-weight: 500; }

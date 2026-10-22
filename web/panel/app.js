@@ -4642,7 +4642,7 @@
     const prices = item("prices");
     const invTip = tips.find((t) => t.action === "inventory");
     if (prices && !prices.done && products.mark === "ok") Object.assign(products, { sub: "Faltan los precios en Inventario", mark: "todo" });
-    else if (invTip && products.mark === "ok") Object.assign(products, { sub: invTip.label, mark: "tip" });
+    else if (invTip && products.mark === "ok") Object.assign(products, { sub: `Listo · sugerencia: ${invTip.label}`, mark: "tip" });
     const rows = {
       negocio: {
         sub: [val("biz-name"), val("biz-industry")].filter(Boolean).join(" · ") || "Ponle nombre",
@@ -4652,14 +4652,14 @@
       pagos: required("payments", "biz-payments"),
       envios: required("delivery", "biz-delivery"),
       horario: required("location", "biz-hours"),
-      estilo: { sub: aiRowText(val("biz-tone")) || "Opcional", mark: val("biz-tone") || val("biz-restrictions") ? "ok" : "" },
-      promociones: { sub: aiRowText(val("biz-promotions")) || "Opcional · para negociar mejor", mark: val("biz-promotions") ? "ok" : "" },
-      temporada: { sub: aiRowText(val("biz-seasonal")) || "Opcional · qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
+      estilo: { sub: aiRowText(val("biz-tone")) || "Tono y lo que no debe decir", mark: val("biz-tone") || val("biz-restrictions") ? "ok" : "" },
+      promociones: { sub: aiRowText(val("biz-promotions")) || "Para negociar mejor", mark: val("biz-promotions") ? "ok" : "" },
+      temporada: { sub: aiRowText(val("biz-seasonal")) || "Qué ofrecer según la fecha", mark: val("biz-seasonal") ? "ok" : "" },
       disponibilidad: {
         sub: [
           state.siteConnection?.connected ? "Tu página conectada" : "",
           calendars ? `${calendars} ${calendars === 1 ? "calendario" : "calendarios"}` : "",
-        ].filter(Boolean).join(" · ") || "Opcional · fechas libres y ocupadas",
+        ].filter(Boolean).join(" · ") || "Fechas libres y ocupadas",
         mark: calendars || state.siteConnection?.connected ? "ok" : "",
       },
       probar: { sub: "Escríbele como si fueras un cliente", mark: tips.some((t) => t.action === "try-ai") ? "tip" : "" },
@@ -4675,6 +4675,9 @@
       },
       seguimiento: { sub: hours ? `Después de ${hours} ${hours === 1 ? "hora" : "horas"} sin respuesta` : "Apagado", mark: hours ? "ok" : "" },
     };
+    const deliveryRow = panel.querySelector('[data-ai-open="envios"]');
+    if (r && !item("delivery")) $("ai-optional-group")?.after(deliveryRow);
+    else panel.querySelector('[data-ai-open="horario"]')?.before(deliveryRow);
     for (const [name, row] of Object.entries(rows)) setSplitRow(panel, name, row.sub, row.mark, row.count);
     const ready = !r || r.ready;
     const status = $("ai-list-status");
