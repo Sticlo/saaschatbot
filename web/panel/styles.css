@@ -6899,3 +6899,77 @@ body.lightbox-open { overflow: hidden; }
   font-weight: 700;
 }
 .flow-step-file span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Flujos como vista previa del chat */
+.flow-card.is-off { opacity: 1; }
+.flow-card.is-off .flow-chat { opacity: 0.45; }
+.flow-card { gap: 0.6rem; padding: 0.9rem; }
+.flow-switch { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; }
+.flow-step-label { margin: 0.2rem 0 0; font-size: 0.88rem; font-weight: 600; display: flex; align-items: center; gap: 0.45rem; }
+.flow-num {
+  flex: none;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.flow-chat {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: var(--chat-bg);
+  border: 1px solid var(--field-border);
+}
+.flow-bubble-in {
+  justify-self: start;
+  max-width: 80%;
+  padding: 0.4rem 0.65rem;
+  border-radius: 0 8px 8px 8px;
+  background: var(--inbound);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+.flow-chat .flow-steps { gap: 0.35rem; }
+.flow-chat .flow-step { justify-content: flex-end; align-items: center; gap: 0.35rem; }
+.flow-bubble {
+  width: min(78%, 22rem);
+  padding: 0.3rem 0.45rem;
+  border-radius: 8px 0 8px 8px;
+  background: var(--outbound);
+  color: var(--outbound-text);
+}
+.flow-bubble.is-media { width: auto; padding: 0.25rem; }
+.flow-bubble textarea {
+  display: block;
+  width: 100%;
+  min-height: 1.6rem;
+  padding: 0.15rem 0.2rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  resize: none;
+  overflow: hidden;
+}
+.flow-bubble textarea::placeholder { color: inherit; opacity: 0.6; }
+.flow-bubble textarea:focus { outline: none; }
+.flow-bubble select { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; font-size: 0.88rem; }
+.flow-bubble select option { color: #000; }
+.flow-bubble-img { display: block; max-width: 12rem; max-height: 12rem; border-radius: 6px; }
+.flow-bubble-doc { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.25rem; font-size: 0.88rem; }
+.flow-bubble-doc span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-chat .flow-step-tools { margin: 0; opacity: 0.55; transition: opacity 0.15s; }
+.flow-chat .flow-step:hover .flow-step-tools,
+.flow-chat .flow-step:focus-within .flow-step-tools { opacity: 1; }
+@media (hover: none) { .flow-chat .flow-step-tools { opacity: 1; } }
+.flow-chat-empty { margin: 0.25rem 0; text-align: center; font-size: 0.85rem; color: var(--muted); }
+.flows-example { padding: 0.9rem; border: 1px dashed var(--field-border); border-radius: 12px; font-size: 0.9rem; }
+.flows-example p { margin: 0.35rem 0; }
+.flows-example ol { margin: 0.35rem 0; padding-left: 1.2rem; }

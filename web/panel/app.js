@@ -5975,26 +5975,26 @@
     const shortcuts = state.quickShortcuts || [];
     let body;
     if (step.type === "text") {
-      body = `<textarea class="flow-step-text" rows="2" maxlength="2000" placeholder="Escribe el mensaje">${escapeHtml(step.text || "")}</textarea>`;
+      body = `<textarea class="flow-step-text" rows="1" maxlength="2000" placeholder="Escribe aquí el mensaje…">${escapeHtml(step.text || "")}</textarea>`;
     } else if (step.type === "image") {
-      body = `<div class="flow-step-file"><img src="/api/v1/outbound/assets/${escapeHtml(step.path.split("/").pop())}" alt="" loading="lazy" /><span>Foto</span></div>`;
+      body = `<img class="flow-bubble-img" src="/api/v1/outbound/assets/${escapeHtml(step.path.split("/").pop())}" alt="Foto" loading="lazy" />`;
     } else if (step.type === "document") {
-      body = `<div class="flow-step-file"><span class="flow-step-pdf">PDF</span><span>${escapeHtml(step.file_name)}</span></div>`;
+      body = `<div class="flow-bubble-doc"><span class="flow-step-pdf">PDF</span><span>${escapeHtml(step.file_name)}</span></div>`;
     } else if (step.uploading) {
-      body = '<div class="flow-step-file muted">Subiendo…</div>';
+      body = '<div class="flow-bubble-doc muted">Subiendo…</div>';
     } else {
-      body = `<select class="flow-step-shortcut">${shortcuts
-        .map((sc) => `<option value="${escapeHtml(sc.id)}"${sc.id === step.shortcut_id ? " selected" : ""}>${escapeHtml(flowShortcutLabel(sc))}</option>`)
+      body = `<select class="flow-step-shortcut" aria-label="Atajo">${shortcuts
+        .map((sc) => `<option value="${escapeHtml(sc.id)}"${sc.id === step.shortcut_id ? " selected" : ""}>⚡ ${escapeHtml(flowShortcutLabel(sc))}</option>`)
         .join("")}</select>`;
     }
+    const kind = step.type === "image" ? " is-media" : "";
     return `<li class="flow-step" data-step="${j}">
-      <span class="flow-step-num">${j + 1}</span>
-      <div class="flow-step-body">${body}</div>
       <div class="flow-step-tools">
-        ${total > 1 ? `<button type="button" class="icon-btn" data-step-act="up" aria-label="Subir"${j === 0 ? " disabled" : ""}>↑</button>
-        <button type="button" class="icon-btn" data-step-act="down" aria-label="Bajar"${j === total - 1 ? " disabled" : ""}>↓</button>` : ""}
-        <button type="button" class="icon-btn" data-step-act="remove" aria-label="Quitar">×</button>
+        ${total > 1 ? `<button type="button" class="icon-btn" data-step-act="up" title="Mover arriba" aria-label="Mover arriba"${j === 0 ? " disabled" : ""}>↑</button>
+        <button type="button" class="icon-btn" data-step-act="down" title="Mover abajo" aria-label="Mover abajo"${j === total - 1 ? " disabled" : ""}>↓</button>` : ""}
+        <button type="button" class="icon-btn" data-step-act="remove" title="Quitar" aria-label="Quitar">🗑</button>
       </div>
+      <div class="flow-bubble${kind}">${body}</div>
     </li>`;
   }
 
@@ -6002,21 +6002,51 @@
     const greeting = flow.trigger === "first_contact";
     const hasShortcuts = (state.quickShortcuts || []).length > 0;
     const steps = flow.steps || [];
-    const full = steps.length >= 8;
-    return `<li class="flow-card${flow.active === false ? " is-off" : ""}" data-flow="${i}">
+    const on = flow.active !== false;
+    const customer = greeting
+      ? "Hola, buenas 👋"
+      : `¿${(flow.topic || "").split(",")[0].trim() || "…"}?`;
+    return `<li class="flow-card${on ? "" : " is-off"}" data-flow="${i}">
       <div class="flow-card-head">
-        <strong class="flow-card-title">${greeting ? "👋 Saludo · cuando alguien escribe por primera vez" : "💬 Cuando pregunten por…"}</strong>
-        <label class="flow-active" title="Apágalo sin borrarlo"><input type="checkbox" class="flow-active-input"${flow.active === false ? "" : " checked"} /> Activo</label>
+        <strong class="flow-card-title">${greeting ? "👋 Saludo de bienvenida" : "💬 Cuando pregunten por algo"}</strong>
+        <label class="switch-row flow-switch" title="${on ? "Encendido" : "Apagado: no se envía"}">
+          <span class="muted small">${on ? "Encendido" : "Apagado"}</span>
+          <input type="checkbox" class="flow-active-input" role="switch"${on ? " checked" : ""} />
+          <span class="switch" aria-hidden="true"></span>
+        </label>
       </div>
-      ${greeting ? "" : `<input type="text" class="flow-topic" maxlength="200" placeholder="Ej: precios, paquetes, baby shower" value="${escapeHtml(flow.topic || "")}" aria-label="Por qué pregunta el cliente" />`}
-      <ol class="flow-steps">${steps.map((st, j) => flowStepHtml(st, j, steps.length)).join("")}</ol>
+      ${
+        greeting
+          ? '<p class="flow-step-label"><span class="flow-num">1</span> Se envía cuando un cliente nuevo te escribe por primera vez.</p>'
+          : `<p class="flow-step-label"><span class="flow-num">1</span> ¿Qué pregunta el cliente?</p>
+             <input type="text" class="flow-topic" maxlength="200" placeholder="Ej: precios, paquetes, baby shower" value="${escapeHtml(flow.topic || "")}" />`
+      }
+      <p class="flow-step-label"><span class="flow-num">2</span> ¿Qué le respondes? Así lo verá en WhatsApp:</p>
+      <div class="flow-chat">
+        <div class="flow-bubble-in">${escapeHtml(customer)}</div>
+        <ol class="flow-steps">${steps.map((st, j) => flowStepHtml(st, j, steps.length)).join("")}</ol>
+        ${steps.length ? "" : '<p class="flow-chat-empty">Agrega abajo el primer mensaje, foto o PDF 👇</p>'}
+      </div>
       <div class="flow-card-foot">
-        ${full ? "" : `<button type="button" class="btn ghost small" data-flow-add="text">+ Mensaje</button>
-        <button type="button" class="btn ghost small" data-flow-add="file">+ Foto o PDF</button>
-        ${hasShortcuts ? '<button type="button" class="btn ghost small" data-flow-add="shortcut">+ Atajo</button>' : ""}`}
-        <button type="button" class="link-btn flow-remove">Borrar</button>
+        ${steps.length >= 8 ? "" : `<button type="button" class="btn ghost small" data-flow-add="text">✍️ Mensaje</button>
+        <button type="button" class="btn ghost small" data-flow-add="file">📎 Foto o PDF</button>
+        ${hasShortcuts ? '<button type="button" class="btn ghost small" data-flow-add="shortcut">⚡ Atajo</button>' : ""}`}
+        <button type="button" class="link-btn flow-remove">Borrar flujo</button>
       </div>
     </li>`;
+  }
+
+  function autosizeFlowTexts(root) {
+    root.querySelectorAll(".flow-step-text").forEach((t) => {
+      t.style.height = "auto";
+      t.style.height = `${t.scrollHeight}px`;
+    });
+  }
+
+  function setFlowsDirty(dirty) {
+    state.flowsDirty = dirty;
+    const status = $("flows-status");
+    if (status && dirty) status.textContent = "Tienes cambios sin guardar.";
   }
 
   function renderFlows() {
@@ -6025,7 +6055,12 @@
     const flows = state.aiFlows || [];
     list.innerHTML = flows.length
       ? flows.map(flowCardHtml).join("")
-      : '<li class="muted small">Aún no tienes flujos. Empieza con tu saludo 👇</li>';
+      : `<li class="flows-example">
+          <strong>¿Cómo funciona?</strong>
+          <p>Ejemplo: un cliente pregunta <em>«¿cuánto vale el baby shower?»</em> y la IA le envía sola, en orden:</p>
+          <ol><li>Un mensaje: «¡Claro! Te comparto el paquete 👇»</li><li>La foto del paquete</li><li>El PDF con los precios</li></ol>
+          <p class="muted small">Empieza con tu saludo de bienvenida 👇</p>
+        </li>`;
     const hasGreeting = flows.some((f) => f.trigger === "first_contact");
     document.querySelector('[data-flow-template="welcome"]')?.classList.toggle("hidden", hasGreeting);
     const canEdit = !!state.canManageGlobal;
@@ -6034,6 +6069,7 @@
     list.querySelectorAll("input, textarea, select, button").forEach((el) => {
       if (!canEdit) el.disabled = true;
     });
+    autosizeFlowTexts(list);
     renderAiList();
   }
 
@@ -6082,6 +6118,7 @@
     }
     state.aiFlows = [...(state.aiFlows || []), { ...flow, active: true }];
     renderFlows();
+    setFlowsDirty(true);
     const cards = $("flows-list").querySelectorAll(".flow-card");
     const card = cards[cards.length - 1];
     card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -6108,9 +6145,12 @@
       const to = stepAct === "up" ? j - 1 : j + 1;
       if (stepAct === "remove") flow.steps.splice(j, 1);
       else if (to >= 0 && to < flow.steps.length) [flow.steps[j], flow.steps[to]] = [flow.steps[to], flow.steps[j]];
-    } else if (e.target.closest(".flow-remove")) state.aiFlows.splice(Number(card.dataset.flow), 1);
-    else return;
+    } else if (e.target.closest(".flow-remove")) {
+      if (!confirm("¿Borrar este flujo?")) return;
+      state.aiFlows.splice(Number(card.dataset.flow), 1);
+    } else return;
     renderFlows();
+    setFlowsDirty(true);
     if (addKind === "text") {
       const steps = $("flows-list").querySelector(`[data-flow="${card.dataset.flow}"]`)?.querySelectorAll(".flow-step-text");
       steps?.[steps.length - 1]?.focus();
@@ -6134,7 +6174,7 @@
       fd.append("file", file);
       const res = await api("/quick-shortcuts/files", { method: "POST", body: fd }, 90000);
       Object.assign(step, { type: res.type, path: res.path, file_name: res.file_name || undefined, uploading: false });
-      $("flows-status").textContent = "Listo. Dale Guardar.";
+      setFlowsDirty(true);
     } catch (err) {
       flow.steps.splice(flow.steps.indexOf(step), 1);
       $("flows-status").textContent = err.message || "No se pudo subir el archivo.";
@@ -6163,8 +6203,9 @@
     status.textContent = "Guardando…";
     try {
       state.aiFlows = (await api("/ai-flows", { method: "PUT", body: JSON.stringify({ flows }) })).flows || [];
+      state.flowsDirty = false;
       renderFlows();
-      status.textContent = state.aiFlows.length ? "Guardado. Pruébalo en «Probar mi IA»." : "Guardado.";
+      status.textContent = state.aiFlows.length ? "✅ Guardado. Pruébalo en «Probar mi IA»." : "Guardado.";
     } catch (err) {
       status.textContent = err.message;
     }
@@ -7905,6 +7946,20 @@
   $("availability-save")?.addEventListener("click", saveAvailability);
   $("flows-save")?.addEventListener("click", saveFlows);
   $("flows-list")?.addEventListener("click", onFlowsClick);
+  $("flows-list")?.addEventListener("input", (e) => {
+    if (e.target.classList.contains("flow-step-text")) autosizeFlowTexts(e.target.closest(".flow-step"));
+    if (e.target.classList.contains("flow-topic")) {
+      const first = e.target.value.split(",")[0].trim();
+      e.target.closest(".flow-card").querySelector(".flow-bubble-in").textContent = `¿${first || "…"}?`;
+    }
+    setFlowsDirty(true);
+  });
+  $("flows-list")?.addEventListener("change", (e) => {
+    if (!e.target.classList.contains("flow-active-input")) return;
+    syncFlowsFromDom();
+    renderFlows();
+    setFlowsDirty(true);
+  });
   $("flows-file-input")?.addEventListener("change", (e) => {
     uploadFlowFile(e.target.files[0]);
     e.target.value = "";
