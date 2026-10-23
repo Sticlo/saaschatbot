@@ -58,6 +58,17 @@ def _short(text: str, n: int = 90) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+def _promises(body: str) -> bool:
+    """«Te comparto el portafolio» sí; «¿te lo envío?» es una pregunta, no una promesa."""
+    text = _plain(body)
+    for match in _PROMISE_RE.finditer(text):
+        before = re.split(r"[.!?\n]", text[: match.start()])[-1]
+        after = re.match(r"[^.!?\n]*[.!?]?", text[match.end():]).group(0)
+        if "¿" not in before and not after.endswith("?"):
+            return True
+    return False
+
+
 def _who(conversation: Optional[Conversation]) -> str:
     if conversation is None:
         return "cliente"
@@ -134,7 +145,7 @@ def build_radar(db: Session, now: datetime, tenant_ids: Optional[list] = None) -
         tenant = tenants.get(msgs[0].tenant_id)
         if tenant is None:
             continue
-        for i, m in enumerate(msgs):
+        for m in msgs:
             body = m.body or ""
             if m.direction == MessageDirection.IN.value:
                 radar.inbound += 1
@@ -146,15 +157,17 @@ def build_radar(db: Session, now: datetime, tenant_ids: Optional[list] = None) -
             if m.source != MessageSource.BOT.value:
                 continue
             radar.ai_replies += 1
-            if body.startswith("[Imagen]") or body.startswith("📄") or not _PROMISE_RE.search(_plain(body)):
+            if body.startswith("[Imagen]") or body.startswith("📄") or not _promises(body):
                 continue
-            nxt = msgs[i + 1] if i + 1 < len(msgs) else None
-            followed = (
-                nxt is not None
-                and nxt.direction == MessageDirection.OUT.value
-                and nxt.created_at - m.created_at <= PROMISE_GRACE
+            # El adjunto puede salir antes del texto (flujos, atajos) o en el mismo instante.
+            kept = any(
+                o is not m
+                and o.direction == MessageDirection.OUT.value
+                and abs(o.created_at - m.created_at) <= PROMISE_GRACE
+                and not _promises(o.body or "")
+                for o in msgs
             )
-            if not followed and now - m.created_at > PROMISE_GRACE:
+            if not kept and now - m.created_at > PROMISE_GRACE:
                 radar.tenant(tenant, emails.get(tenant.id, "")).broken_promises.append(
                     f"{_who(conv)}: la IA dijo «{_short(body, 70)}» y no se envió nada"
                 )

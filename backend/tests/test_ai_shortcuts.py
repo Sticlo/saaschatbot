@@ -80,6 +80,18 @@ def test_no_attachment_when_nothing_was_promised_or_it_is_unclear():
     assert infer_promised_shortcut("Te envío el menú", "el menu", both) is None
 
 
+def test_the_portfolio_named_right_after_the_promise_is_attached():
+    from app.application.ai.ai_shortcut_service import infer_promised_shortcut
+
+    shortcuts = [
+        {"id": "bs", "label": "baby shower", "type": "document", "file_path": "x.pdf"},
+        {"id": "ai", "label": "animacion infantil", "type": "document", "file_path": "y.pdf"},
+        {"id": "ad", "label": "adultos", "type": "document", "file_path": "z.pdf"},
+    ]
+    reply = "¡Perfecto! Te comparto nuestro portafolio de baby shower, y si quieres también animación para adultos."
+    assert infer_promised_shortcut(reply, "info para un baby shower con animacion", shortcuts) == "bs"
+
+
 def test_single_catalog_is_attached_when_the_client_asks_for_prices():
     from app.application.ai.ai_shortcut_service import infer_promised_shortcut
 

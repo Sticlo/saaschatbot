@@ -93,6 +93,16 @@ def test_radar_catches_what_happened_to_alfa_store():
             alfa,
             [(20, "contact", "Fotos de la gorra"), (19, "bot", "¡Claro! Mira 👇"), (18.9, "bot", "[Imagen]\nGorra")],
         )
+        _chat(
+            db,
+            alfa,
+            [
+                (15, "contact", "info del baby shower"),
+                (14, "bot", "📄 Baby Shower Portafolio.pdf"),
+                (14, "bot", "¡Claro! Te comparto nuestro portafolio de baby shower 🎉"),
+                (12, "bot", "¿Te comparto también el grupo de WhatsApp?"),
+            ],
+        )
         never = _store(db, name="Nunca Conectó", connected=False, created_days_ago=3)
         fine = _store(db, name="Todo Bien", alerts_to_own=False)
         _chat(db, fine, [(10, "contact", "Hola, ¿cuánto vale?"), (9, "bot", "Vale $60.000. ¿Te la aparto?")])

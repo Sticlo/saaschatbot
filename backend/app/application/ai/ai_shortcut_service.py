@@ -335,17 +335,43 @@ _RESEND_RE = re.compile(
 )
 
 
-def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict]) -> Optional[str]:
-    """La IA a veces dice «te lo envío» y olvida el shortcut_id: el cliente se queda esperando.
-    Si promete un envío, adjuntamos el atajo del que se está hablando (si no hay duda de cuál)."""
-    if not shortcuts or not _PROMISE_RE.search(_plain(message)):
-        return None
-    text = f" {_plain(message)} {_plain(client_text)} "
+def _labeled_shortcuts(shortcuts: list[dict], text: str) -> list[dict]:
+    text = " " + " ".join(re.findall(r"\w+", text)) + " "
     labeled = []
     for shortcut in shortcuts:
         words = [w for w in re.split(r"\W+", _plain(str(shortcut.get("label") or ""))) if len(w) >= 3]
         if shortcut.get("id") and words and any(f" {w} " in text or f" {w}s " in text for w in words):
             labeled.append(shortcut)
+    return labeled
+
+
+def _first_named(shortcuts: list[dict], text: str) -> Optional[dict]:
+    tokens = re.findall(r"\w+", text)
+    best: dict[int, list[dict]] = {}
+    for shortcut in shortcuts:
+        words = {w for w in re.split(r"\W+", _plain(str(shortcut.get("label") or ""))) if len(w) >= 3}
+        hits = [i for i, t in enumerate(tokens) if t in words or (t.endswith("s") and t[:-1] in words)]
+        if shortcut.get("id") and hits:
+            best.setdefault(hits[0], []).append(shortcut)
+    if not best:
+        return None
+    first = best[min(best)]
+    return first[0] if len(first) == 1 else None
+
+
+def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict]) -> Optional[str]:
+    """La IA a veces dice «te lo envío» y olvida el shortcut_id: el cliente se queda esperando.
+    Si promete un envío, adjuntamos el atajo del que se está hablando (si no hay duda de cuál)."""
+    promise = _PROMISE_RE.search(_plain(message)) if shortcuts else None
+    if promise is None:
+        return None
+    # «Te comparto el portafolio de baby shower»: lo que se nombra justo después es lo prometido,
+    # aunque el chat también hable de otros servicios.
+    promised = _first_named(shortcuts, _plain(message)[promise.end(): promise.end() + 80])
+    if promised is not None:
+        return str(promised["id"])
+    text = f"{_plain(message)} {_plain(client_text)}"
+    labeled = _labeled_shortcuts(shortcuts, text)
     if len(labeled) == 1:
         return str(labeled[0]["id"])
     if labeled:
