@@ -393,6 +393,100 @@ def _step_aside_from_personal_chat(db: Session, *, tenant: Tenant, conversation:
     return True
 
 
+def _skip_like_a_person(db: Session, *, tenant: Tenant, conversation: Conversation, message: Message) -> bool:
+    """Lo que una persona no haría: seguirle la charla a otro bot, contestar sin parar en un mismo
+    chat o devolver cada «gracias, igualmente» de una despedida."""
+    from app.application.ai.ai_human_service import (
+        Turn,
+        chat_cap_reason,
+        is_endless_goodbye,
+        other_side_bot_reason,
+    )
+
+    rows = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.desc())
+        .limit(30)
+        .all()
+    )
+    rows.reverse()
+    turns = [
+        Turn(
+            inbound=m.direction == MessageDirection.IN.value,
+            body=text_for_ai(m) if m.direction == MessageDirection.IN.value else (m.body or ""),
+            at=m.created_at,
+        )
+        for m in rows
+        if not (m.direction == MessageDirection.IN.value and _is_ai_noise(m))
+    ]
+    reason = other_side_bot_reason(turns)
+    if reason is None:
+        bot_times = [
+            at
+            for (at,) in db.query(Message.created_at)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.direction == MessageDirection.OUT.value,
+                Message.source == MessageSource.BOT.value,
+                Message.created_at >= datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            .all()
+        ]
+        reason = chat_cap_reason(bot_times)
+    if reason:
+        _step_aside_from_bot(db, tenant=tenant, conversation=conversation, reason=reason)
+        return True
+
+    last_out = next((t for t in reversed(turns) if not t.inbound), None)
+    if last_out is not None and is_endless_goodbye(last_out.body, _turn_text(message)):
+        log.info("IA skip conv=%s: solo devuelve la despedida", conversation.id)
+        return True
+    return False
+
+
+def _step_aside_from_bot(db: Session, *, tenant: Tenant, conversation: Conversation, reason: str) -> None:
+    from app.application.conversations.interest_alert_service import alert_phones, send_alerts
+
+    conversation.ai_active = False
+    conversation.mode = ConversationMode.MANUAL.value
+    clear_awaiting_human(conversation.id)
+    db.flush()
+    publish_conversation_updated(tenant.id, conversation)
+    label = _contact_label(conversation)
+    log.warning("IA se aparta conv=%s: %s", conversation.id, reason)
+    publish_panel_event(
+        tenant.id,
+        {
+            "type": "ai.handoff",
+            "conversation_id": str(conversation.id),
+            "message": f"La IA dejó de responder este chat: {reason}. Revísalo tú.",
+        },
+    )
+    record_incident(
+        tenant.id,
+        "system.ai_stepped_aside",
+        f"La IA dejó de responder el chat de {label}: {reason}",
+        details={"conversation_id": str(conversation.id), "reason": reason},
+        throttle_scope=str(conversation.id),
+    )
+    phones = alert_phones(tenant.profile)
+    session = tenant.whatsapp_session
+    if not phones or session is None:
+        return
+    try:
+        if not get_redis().set(f"ai:stepped_aside_alert:{conversation.id}", "1", nx=True, ex=24 * 3600):
+            return
+    except Exception:
+        return
+    send_alerts(
+        session,
+        phones,
+        f"🤖 *{tenant.business_name}*: la IA dejó de responderle a {label} porque {reason}. "
+        f"Revisa el chat por si es un cliente real:\n\n{_chat_link(conversation)}",
+    )
+
+
 def _awaiting_human_since(conversation_id: uuid.UUID) -> Optional[datetime]:
     try:
         raw = get_redis().get(_awaiting_key(conversation_id))
@@ -2165,6 +2259,8 @@ def process_ai_reply(
     if _owner_took_over(db, tenant=tenant, conversation=conversation):
         return True
     if not classify_mode and _step_aside_from_personal_chat(db, tenant=tenant, conversation=conversation):
+        return True
+    if not classify_mode and _skip_like_a_person(db, tenant=tenant, conversation=conversation, message=message):
         return True
     if not is_target():
         return True

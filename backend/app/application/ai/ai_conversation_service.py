@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from app.application.ai.ai_flow_service import FlowPlan
+from app.application.ai.ai_human_service import HUMAN_STYLE, style_correction, without_robot_phrases
 from app.application.appointments.appointment_service import BOGOTA
 from app.application.availability.availability_service import availability_block
 from app.application.availability.site_connector import UNAVAILABLE_TEXT, ai_tools, run_ai_tool, site_tools_block
@@ -234,7 +235,10 @@ def _complete_reply(
     site_tools: Optional[list[dict]] = None,
     run_site_tool: Optional[Callable[[str, dict], str]] = None,
     flows: Optional[FlowPlan] = None,
+    rewrite: Optional[tuple[str, str]] = None,
 ) -> AiGeneratedReply:
+    """`rewrite`: (respuesta cruda anterior, qué corregir) para el único reintento de estilo."""
+    system_base = system
     flows = flows or FlowPlan()
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
@@ -268,11 +272,13 @@ def _complete_reply(
         has_photos=bool(photo_refs),
     )
     # Al final del prompt: antes del bloque de formato JSON el modelo lo olvidaba.
-    system += SALES_PLAYBOOK
+    system += SALES_PLAYBOOK + HUMAN_STYLE
     messages = [{"role": "system", "content": system + MEDIA_RULES + SAFETY_RULES}, *format_history(history)]
     if correction:
         # Al final pesa más que lo que la IA misma dijo antes en el chat.
         messages.append({"role": "system", "content": correction})
+    if rewrite:
+        messages += [{"role": "assistant", "content": rewrite[0]}, {"role": "system", "content": rewrite[1]}]
     if site_tools and run_site_tool:
         raw = chat_completion_tools(
             messages,
@@ -296,7 +302,36 @@ def _complete_reply(
         valid_flow_ids=flows.valid_ids,
         allow_empty=flows.auto_id is not None,
     )
+    note = "" if rewrite else style_correction(reply.message, _last_reply_text(history))
+    if note:
+        log.info("IA sonó a robot; se le pide reescribir: %s", note[:160])
+        try:
+            reply = _complete_reply(
+                system=system_base,
+                history=history,
+                shortcuts=shortcuts,
+                booking=booking,
+                correction=correction,
+                payment_methods=payment_methods,
+                products=products,
+                knowledge=knowledge,
+                business_rules=business_rules,
+                site_tools=site_tools,
+                run_site_tool=run_site_tool,
+                flows=flows,
+                rewrite=(raw, note),
+            )
+        except DeepSeekError:
+            log.warning("Reescritura de estilo falló; se limpia la respuesta original")
+    reply = replace(reply, message=without_robot_phrases(reply.message))
     return replace(reply, flow_id=flows.auto_id) if flows.auto_id else reply
+
+
+def _last_reply_text(history: list[Message]) -> str:
+    for m in reversed(history):
+        if getattr(m, "direction", None) == MessageDirection.OUT.value:
+            return getattr(m, "body", None) or ""
+    return ""
 
 
 def generate_qualify_reply(
