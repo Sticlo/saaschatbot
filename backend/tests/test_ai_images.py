@@ -160,3 +160,58 @@ def test_photo_is_described_once(monkeypatch, gemini_key):
         assert svc.ensure_transcript(db, tenant=tenant, conversation=conversation, message=photo) == "Habitación doble."
         assert calls == ["image/jpeg"]
         db.rollback()
+
+
+@requires_db
+def test_two_screenshots_then_a_question_describes_both(monkeypatch, gemini_key):
+    """«¿Qué diferencia hay entre estas 2?»: la IA tiene que ver las dos imágenes, no solo la pregunta."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.application.ai import ai_service
+    from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
+    from app.infrastructure.persistence.database import SessionLocal
+
+    described: list[str] = []
+
+    class Stop(Exception):
+        pass
+
+    monkeypatch.setattr(ai_service, "should_ai_respond", lambda *_a: True)
+    monkeypatch.setattr(ai_service, "_owner_took_over", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        ai_service, "ensure_transcript", lambda db, *, tenant, conversation, message: described.append(message.body)
+    )
+    monkeypatch.setattr(ai_service, "get_or_create_tenant_profile", lambda *_a: (_ for _ in ()).throw(Stop()))
+
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        tenant = Tenant(business_name="Fiestas", slug=f"fiestas-{uuid.uuid4().hex[:8]}", ai_global_enabled=True)
+        db.add(tenant)
+        db.flush()
+        db.add(WhatsAppSession(tenant_id=tenant.id, instance_name=f"i_{uuid.uuid4().hex[:8]}"))
+        conversation = Conversation(tenant_id=tenant.id, contact_phone=f"+57300{uuid.uuid4().int % 10_000_000:07d}")
+        db.add(conversation)
+        db.flush()
+        rows = []
+        for seconds, body in ((90, "[image]\nopción 4"), (89, "[image]\nopción 2"), (60, "¿Qué diferencia hay entre estas 2?")):
+            row = Message(
+                tenant_id=tenant.id,
+                conversation_id=conversation.id,
+                direction="in",
+                source="contact",
+                body=body,
+                status="received",
+                evolution_message_id=f"EVO{uuid.uuid4().hex[:10]}",
+                created_at=now - timedelta(seconds=seconds),
+            )
+            db.add(row)
+            rows.append(row)
+        db.flush()
+
+        with pytest.raises(Stop):
+            ai_service.process_ai_reply(
+                db, tenant_id=tenant.id, conversation_id=conversation.id, message_id=rows[-1].id
+            )
+        db.rollback()
+
+    assert described == ["[image]\nopción 4", "[image]\nopción 2"]

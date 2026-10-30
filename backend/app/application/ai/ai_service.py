@@ -2216,8 +2216,11 @@ def process_ai_reply(
     if _owner_took_over(db, tenant=tenant, conversation=conversation):
         return True
 
-    if can_transcribe(message):
-        ensure_transcript(db, tenant=tenant, conversation=conversation, message=message)
+    # «¿Qué diferencia hay?» tras dos pantallazos seguidos: los jobs de las imágenes se saltan
+    # porque ya llegó otro mensaje, así que se describe todo lo que el cliente mandó en este turno.
+    for item in _client_turn(db, message):
+        if can_transcribe(item):
+            ensure_transcript(db, tenant=tenant, conversation=conversation, message=item)
 
     profile = get_or_create_tenant_profile(db, tenant_id)
     classify_mode = is_classify_only(profile)
