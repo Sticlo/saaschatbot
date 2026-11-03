@@ -80,3 +80,65 @@ def test_typing_shows_while_the_ai_thinks(monkeypatch):
     monkeypatch.setattr(wa.settings, "ai_thinking_typing_ms", 0)
     wa.start_typing(None, session=SimpleNamespace(instance_name="t_1"), conversation=_conv())
     assert len(calls) == 1
+
+
+def test_colombian_holidays_follow_the_monday_law():
+    from datetime import date
+
+    from app.shared.core.holidays_co import holiday_name, holidays
+
+    assert holiday_name(date(2026, 11, 2)) == "Todos los Santos"
+    assert holiday_name(date(2026, 4, 2)) == "Jueves Santo"
+    assert holiday_name(date(2026, 4, 3)) == "Viernes Santo"
+    assert holiday_name(date(2026, 5, 18)) == "Ascensión del Señor"
+    assert holiday_name(date(2026, 6, 8)) == "Corpus Christi"
+    assert holiday_name(date(2026, 1, 12)) == "Reyes Magos"
+    assert holiday_name(date(2026, 11, 3)) is None
+    assert len(holidays(2026)) == 18
+
+
+def test_ai_knows_holidays_and_late_night():
+    from datetime import datetime, timezone
+
+    from app.application.ai.ai_conversation_service import date_context
+
+    # 2 nov 2026, 11:30 p. m. en Bogotá
+    night = date_context(datetime(2026, 11, 3, 4, 30, tzinfo=timezone.utc))
+    assert "Hoy es festivo en Colombia (Todos los Santos)" in night
+    assert "Es de noche" in night
+    afternoon = date_context(datetime(2026, 11, 3, 20, 0, tzinfo=timezone.utc))
+    assert "festivo" not in afternoon and "Es de noche" not in afternoon
+    eve = date_context(datetime(2026, 11, 1, 18, 0, tzinfo=timezone.utc))
+    assert "Mañana es festivo en Colombia (Todos los Santos)" in eve
+
+
+def test_a_customer_who_returns_after_weeks_is_greeted_as_returning():
+    from datetime import datetime, timedelta, timezone
+
+    from app.application.ai.ai_memory_service import returning_block
+
+    now = datetime.now(timezone.utc)
+
+    def msg(direction, ago):
+        return SimpleNamespace(direction=direction, created_at=now - ago)
+
+    old = [msg("in", timedelta(days=100)), msg("out", timedelta(days=99)), msg("in", timedelta(minutes=2)), msg("in", timedelta(minutes=1))]
+    assert "hace 3 meses" in returning_block(old)
+    recent = [msg("in", timedelta(days=3)), msg("out", timedelta(days=3)), msg("in", timedelta(minutes=1))]
+    assert returning_block(recent) == ""
+    assert returning_block([msg("in", timedelta(minutes=1))]) == ""
+
+
+def test_ai_stays_on_the_business_and_does_not_assume_facts():
+    from app.application.ai.ai_conversation_service import SAFETY_RULES
+
+    assert "problemas de matemáticas" in SAFETY_RULES
+    assert "con eso no le puedes ayudar" in SAFETY_RULES
+    assert "no lo supongas" in SAFETY_RULES
+
+
+def test_owner_alert_carries_what_the_ai_knows():
+    from app.application.ai.ai_service import _notes_line
+
+    assert _notes_line(_conv("Hija Sofía, cumple 5\nLe encanta Frozen")) == "Lo que sabemos: Hija Sofía, cumple 5 · Le encanta Frozen\n"
+    assert _notes_line(_conv(None)) == ""

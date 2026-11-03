@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional, Sequence
 
-from app.domain.entities import Conversation
+from app.domain.entities import Conversation, Message
+from app.domain.entities.enums import MessageDirection
 
 MAX_NOTES = 12
+RETURNING_AFTER = timedelta(days=30)
 NOTE_MAX_CHARS = 120
 # Teléfonos, cédulas, cuentas o tarjetas: no son detalles para recordar en una charla.
 _SENSITIVE = re.compile(r"\d[\d .-]{6,}\d")
@@ -57,6 +60,29 @@ def notes_prompt_block(conversation: Conversation) -> str:
     if not notes:
         return ""
     return _NOTES_BLOCK.format(lines="\n".join(f"- {note}" for note in notes))
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def returning_block(history: Sequence[Message]) -> str:
+    """Quien vuelve después de semanas merece un «qué bueno saber de ti», no la bienvenida de un desconocido."""
+    start = len(history)
+    while start > 0 and history[start - 1].direction == MessageDirection.IN.value:
+        start -= 1
+    if start == len(history) or start == 0:
+        return ""
+    gap = _aware(history[start].created_at) - _aware(history[start - 1].created_at)
+    if gap < RETURNING_AFTER:
+        return ""
+    months = gap.days // 30
+    ago = f"{months} {'mes' if months == 1 else 'meses'}" if months < 12 else "más de un año"
+    return (
+        f"\n\nEste cliente ya había escrito antes: su último mensaje fue hace {ago}. Salúdalo como a alguien "
+        "que vuelve (ej. «¡qué bueno saber de ti otra vez!»), sin presentarte de nuevo ni recitarle lo que "
+        "hablaron. Pregúntale qué necesita esta vez."
+    )
 
 
 def remember(conversation: Conversation, notes: Optional[tuple[str, ...]]) -> bool:

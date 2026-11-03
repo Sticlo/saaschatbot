@@ -40,7 +40,7 @@ from app.application.ai.ai_appointment_service import (
 from app.application.ai.ai_auto_enable_service import owner_messages, owner_wrote_in_chat
 from app.application.ai.ai_classifier_service import classify_inbound_message, is_personal_chat
 from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
-from app.application.ai.ai_memory_service import notes_prompt_block, remember
+from app.application.ai.ai_memory_service import notes_of, notes_prompt_block, remember, returning_block
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
 from app.application.ai.ai_qualify_service import (
@@ -1055,7 +1055,7 @@ def _notify_owner_of_handoff(tenant: Tenant, conversation: Conversation) -> None
     text = (
         f"🔔 *{tenant.business_name}*: {name} está esperando respuesta. "
         "Te pasamos el chat para que le respondas tú.\n\n"
-        f"{_chat_link(conversation)}"
+        f"{_notes_line(conversation)}{_chat_link(conversation)}"
     )
     if not send_alerts(session, phones, text):
         log.warning("No se pudo avisar al dueño del traspaso tenant=%s", tenant.id)
@@ -1346,6 +1346,11 @@ def _contact_label(conversation: Conversation) -> str:
     )
 
 
+def _notes_line(conversation: Conversation) -> str:
+    notes = notes_of(conversation)
+    return f"Lo que sabemos: {' · '.join(notes)}\n" if notes else ""
+
+
 def _contact_line(conversation: Conversation) -> str:
     from app.shared.core.phone import format_display_phone, is_valid_whatsapp_phone
 
@@ -1477,7 +1482,7 @@ def _apply_stage(
             text=(
                 f"🎯 *{tenant.business_name}*: {_contact_label(conversation)} eligió *{chosen}*. "
                 "La IA le está confirmando los detalles; si quieres cerrar tú, escríbele y ella se aparta.\n\n"
-                f"{_contact_line(conversation)}\n{_chat_link(conversation)}"
+                f"{_contact_line(conversation)}\n{_notes_line(conversation)}{_chat_link(conversation)}"
             ),
         )
         log.info("Cliente eligió producto conv=%s", conversation.id)
@@ -1496,7 +1501,7 @@ def _apply_stage(
             text=(
                 f"🔥 *{tenant.business_name}*: {_contact_label(conversation)} ya quiere comprar. "
                 "La IA lo sigue atendiendo; apenas le escribas, se aparta para que cierres tú la venta.\n\n"
-                f"{_contact_line(conversation)}\n{chosen_line}"
+                f"{_contact_line(conversation)}\n{chosen_line}{_notes_line(conversation)}"
                 f"Último mensaje: «{snippet}»\n\n{_chat_link(conversation)}"
                 + (BOOKING_TIP if booking_tip else "")
             ),
@@ -2044,7 +2049,8 @@ def _process_qualify(
             products=products,
             knowledge=learned_answers_block(db, tenant.id)
             + orders_prompt_block(db, conversation.id)
-            + notes_prompt_block(conversation),
+            + notes_prompt_block(conversation)
+            + returning_block(history),
             flows=flows,
         )
     except DeepSeekError as exc:
@@ -2141,7 +2147,8 @@ def _process_full_reply(
             products=products,
             knowledge=learned_answers_block(db, tenant.id)
             + orders_prompt_block(db, conversation.id)
-            + notes_prompt_block(conversation),
+            + notes_prompt_block(conversation)
+            + returning_block(history),
             flows=flows,
         )
     except DeepSeekError as exc:

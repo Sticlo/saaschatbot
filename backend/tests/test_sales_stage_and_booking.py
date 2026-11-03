@@ -52,7 +52,7 @@ def test_choosing_from_a_catalog_screenshot_alerts_the_owner(monkeypatch):
     monkeypatch.setattr(svc, "_contact_label", lambda _c: "Laura")
     monkeypatch.setattr(svc, "_contact_line", lambda _c: "Cliente: Laura")
     tenant = SimpleNamespace(id=uuid.uuid4(), business_name="Rino Eventos")
-    conversation = SimpleNamespace(id=uuid.uuid4(), interest_status="none")
+    conversation = SimpleNamespace(id=uuid.uuid4(), interest_status="none", client_notes="Es para su hermana\nTemática rosa")
     message = SimpleNamespace(content="me gustó este", transcript="Pantallazo del catálogo: Paquete Baby Shower Rosa $450.000")
 
     svc._apply_stage(
@@ -62,6 +62,7 @@ def test_choosing_from_a_catalog_screenshot_alerts_the_owner(monkeypatch):
 
     assert len(sent) == 1
     assert "eligió *Paquete Baby Shower Rosa*" in sent[0]["text"]
+    assert "Lo que sabemos: Es para su hermana · Temática rosa" in sent[0]["text"]
     assert f"👉 Abrir el chat: " in sent[0]["text"]
     assert f"/panel?chat={conversation.id}" in sent[0]["text"]
     assert conversation.interest_status == "interested"
