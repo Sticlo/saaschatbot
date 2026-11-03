@@ -42,6 +42,14 @@ class ImportedItem(BaseModel):
     exists: bool = False
 
 
+class BusinessInfo(BaseModel):
+    restrictions: Optional[str] = Field(default=None, max_length=3000)
+    delivery_info: Optional[str] = Field(default=None, max_length=3000)
+    location_hours: Optional[str] = Field(default=None, max_length=3000)
+    payment_methods: Optional[str] = Field(default=None, max_length=3000)
+    promotions: Optional[str] = Field(default=None, max_length=3000)
+
+
 class ProductFilePreview(BaseModel):
     items: list[ImportedItem]
     total: int
@@ -50,11 +58,13 @@ class ProductFilePreview(BaseModel):
     existing: int
     room: int
     source: str
+    business: dict[str, str] = Field(default_factory=dict)
 
 
 class ProductItemsImport(BaseModel):
     items: list[ImportedItem] = Field(max_length=2000)
     update_existing: bool = True
+    business: Optional[BusinessInfo] = None
 
 
 class ProductItemsImportResponse(BaseModel):
@@ -63,3 +73,4 @@ class ProductItemsImportResponse(BaseModel):
     skipped: int
     limit_reached: bool
     products: list[ProductResponse]
+    business_saved: list[str] = Field(default_factory=list)

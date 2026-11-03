@@ -206,6 +206,40 @@ def extract_product_list(file_b64: str, mimetype: str, *, timeout: float = 120.0
     return text.strip()
 
 
+_BUSINESS_INFO_PROMPT = (
+    "Este archivo es de un negocio (catálogo, portafolio, carta o lista de precios). Aparte de los productos, "
+    "saca lo que un vendedor necesita saber para atender clientes, copiado fiel de lo que se lee.\n"
+    "Responde solo un objeto JSON con estas claves (texto en español; cadena vacía si no aparece):\n"
+    "- restrictions: condiciones y políticas: reservas, abonos o anticipos, cancelaciones, cambios, garantías, "
+    "lo que no incluye, recargos, requisitos.\n"
+    "- delivery_info: cobertura, zonas, envíos, domicilios, montaje y costos de transporte.\n"
+    "- location_hours: dirección y horarios de atención.\n"
+    "- payment_methods: medios de pago con números de cuenta, llaves y titulares EXACTOS como se leen. "
+    "Si no aparecen completos, cadena vacía.\n"
+    "- promotions: promociones o descuentos vigentes con sus condiciones.\n"
+    "Reglas: no inventes ni completes nada; no repitas los productos ni sus precios; una idea por línea, "
+    "cada línea empieza con «- »."
+)
+
+
+def extract_business_info(file_b64: str, mimetype: str, *, timeout: float = 120.0) -> str:
+    """Condiciones, cobertura, horarios, pagos y promociones de un PDF o foto, como JSON."""
+    if not is_configured():
+        raise GeminiError("GEMINI_API_KEY no configurada — agrégala en .env")
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": _BUSINESS_INFO_PROMPT},
+                    {"inline_data": {"mime_type": _base_mime(mimetype, "application/pdf"), "data": file_b64}},
+                ]
+            }
+        ],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192, "responseMimeType": "application/json"},
+    }
+    return _post_generate(model=settings.gemini_image_model, payload=payload, timeout=timeout)
+
+
 def describe_image(image_b64: str, mimetype: str, *, timeout: float = 60.0) -> str:
     return _generate_from_media(
         model=settings.gemini_image_model,

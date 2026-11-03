@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from sqlalchemy.orm import Session
@@ -19,6 +20,10 @@ from app.application.products.product_service import (
     remove_photo,
     update_product,
 )
+from app.application.billing.tenant_profile_service import get_or_create_tenant_profile
+from app.application.products.business_import_service import BUSINESS_LABELS, merge_business, read_business_info
+from app.application.realtime.realtime_service import publish_tenant_settings
+from app.domain.entities import Tenant
 from app.infrastructure.persistence.database import get_db
 from app.application.products.product_import_service import (
     MAX_IMPORT_BYTES,
@@ -26,6 +31,7 @@ from app.application.products.product_import_service import (
     import_items,
     parse_upload,
     preview,
+    reads_with_ai,
 )
 from app.presentation.schemas.products import (
     ProductCreate,
@@ -152,17 +158,24 @@ def import_file_preview(current: RequireOwner, file: UploadFile = File(...), db:
         message="Subiste muchos archivos seguidos. Intenta de nuevo en un rato.",
     )
     data = file.file.read(MAX_IMPORT_BYTES + 1)
+    filename = file.filename or ""
+    mime = reads_with_ai(filename, data)
+    pool = ThreadPoolExecutor(max_workers=1)
+    business_future = pool.submit(read_business_info, data, mime) if mime else None
     try:
-        items, source = parse_upload(file.filename or "", data)
+        items, source = parse_upload(filename, data)
     except ProductImportError as exc:
+        pool.shutdown(wait=False, cancel_futures=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if not items:
+    business = business_future.result() if business_future else {}
+    pool.shutdown(wait=False)
+    if not items and not business:
         raise HTTPException(
             status_code=422,
             detail="No encontramos productos con nombre y precio. Revisa que el archivo tenga una columna "
             "de producto y otra de precio.",
         )
-    return ProductFilePreview(**preview(db, current.tenant_id, items), source=source)
+    return ProductFilePreview(**preview(db, current.tenant_id, items), source=source, business=business)
 
 
 @router.post("/import-items", response_model=ProductItemsImportResponse)
@@ -173,9 +186,22 @@ def import_items_route(body: ProductItemsImport, current: RequireOwner, db: Sess
         [item.model_dump() for item in body.items],
         update_existing=body.update_existing,
     )
+    business_saved: list[str] = []
+    if body.business:
+        tenant = db.get(Tenant, current.tenant_id)
+        profile = get_or_create_tenant_profile(db, current.tenant_id)
+        business_saved = merge_business(
+            profile, body.business.model_dump(exclude_none=True), business_name=tenant.business_name
+        )
     db.commit()
     autostart_ai_for_tenant_id(db, current.tenant_id)
-    return ProductItemsImportResponse(**result, products=_all(db, current.tenant_id))
+    if business_saved:
+        publish_tenant_settings(tenant)
+    return ProductItemsImportResponse(
+        **result,
+        products=_all(db, current.tenant_id),
+        business_saved=[BUSINESS_LABELS[key] for key in business_saved],
+    )
 
 
 @router.post("/import-catalog", response_model=ProductImportResponse)

@@ -181,6 +181,95 @@ def test_upload_preview_then_import_updates_existing(client: TestClient):
     assert len(r.json()["products"]) == 2
 
 
+def test_business_info_from_the_catalog_is_cleaned():
+    from app.application.products.business_import_service import clean_business
+
+    raw = (
+        '{"restrictions": "- Abono del 50% para reservar\\n-  Cancelación con 8 días   ", '
+        '"delivery_info": "", "payment_methods": "No aparece", "promotions": ["- 10% en semana"], "otro": "x"}'
+    )
+    assert clean_business(raw) == {
+        "restrictions": "- Abono del 50% para reservar\n- Cancelación con 8 días",
+        "promotions": "- 10% en semana",
+    }
+    assert clean_business("no es json") == {} and clean_business(None) == {}
+
+
+def _profile(**fields):
+    from types import SimpleNamespace
+
+    base = {key: None for key in (
+        "industry", "products_services", "target_customer", "price_range", "location_hours", "tone",
+        "restrictions", "payment_methods", "delivery_info", "promotions", "seasonal_rules",
+        "maps_prospect_business", "maps_prospect_city",
+    )}
+    base.update(onboarding_answers=None, ai_system_prompt=None)
+    base.update(fields)
+    return SimpleNamespace(**base)
+
+
+def test_catalog_rules_are_added_without_erasing_what_the_owner_wrote():
+    from app.application.products.business_import_service import merge_business
+
+    profile = _profile(
+        restrictions="- No prometer descuentos",
+        payment_methods="Nequi 300 000 0000 a nombre de Rino",
+        ai_system_prompt="Prompt escrito a mano por el dueño",
+    )
+    found = {
+        "restrictions": "- Abono del 50% para reservar",
+        "payment_methods": "Bancolombia 123",
+        "delivery_info": "- Cobertura en Bogotá y Chía",
+    }
+    changed = merge_business(profile, found, business_name="Rino Eventos")
+
+    assert set(changed) == {"restrictions", "delivery_info"}
+    assert profile.restrictions == "- No prometer descuentos\n\n- Abono del 50% para reservar"
+    assert profile.payment_methods == "Nequi 300 000 0000 a nombre de Rino"
+    assert profile.ai_system_prompt.startswith("Prompt escrito a mano por el dueño")
+    assert "Condiciones y políticas (del catálogo):\n- Abono del 50% para reservar" in profile.ai_system_prompt
+    assert "Cobertura y envíos (del catálogo):" in profile.ai_system_prompt
+
+    assert merge_business(profile, found, business_name="Rino Eventos") == []
+
+
+def test_catalog_rules_rebuild_a_generated_prompt():
+    from app.application.ai.ai_business_profile_service import build_ai_system_prompt_from_answers
+    from app.application.products.business_import_service import merge_business
+
+    profile = _profile(ai_system_prompt=build_ai_system_prompt_from_answers(business_name="Tienda", answers={}))
+    merge_business(profile, {"location_hours": "Calle 10 # 5-20, lunes a sábado 9am-6pm"}, business_name="Tienda")
+    assert profile.ai_system_prompt.count("Calle 10 # 5-20") == 1
+    assert "Ubicación y horario: Calle 10" in profile.ai_system_prompt
+
+
+@requires_db
+def test_a_pdf_teaches_the_ai_the_business_rules(client: TestClient):
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    rules = '{"restrictions": "- Abono del 50% para reservar", "delivery_info": "- Cobertura en Bogotá"}'
+    with patch("app.application.products.product_import_service._ai_items", return_value=[]), patch(
+        "app.infrastructure.ai.gemini_client.extract_business_info", return_value=rules
+    ):
+        r = client.post(
+            "/api/v1/products/import-file",
+            files={"file": ("portafolio.pdf", b"%PDF-1.4 portafolio", "application/pdf")},
+            headers=headers,
+        )
+    assert r.status_code == 200, r.text
+    preview = r.json()
+    assert preview["total"] == 0
+    assert preview["business"]["restrictions"] == "- Abono del 50% para reservar"
+
+    r = client.post(
+        "/api/v1/products/import-items",
+        json={"items": [], "business": preview["business"]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["business_saved"] == ["Condiciones y políticas", "Cobertura y envíos"]
+
+
 def _add_open_questions(tenant_id: uuid.UUID, topics: list[str], *, age: timedelta) -> None:
     from app.domain.entities import AiQuestion
     from app.infrastructure.persistence.database import SessionLocal

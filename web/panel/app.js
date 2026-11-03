@@ -5523,6 +5523,32 @@
     }
   }
 
+  const IMPORT_BUSINESS_LABELS = {
+    restrictions: "Condiciones y políticas",
+    delivery_info: "Cobertura y envíos",
+    location_hours: "Dirección y horario",
+    payment_methods: "Medios de pago",
+    promotions: "Promociones",
+  };
+
+  function importBusinessHtml(business) {
+    const keys = Object.keys(IMPORT_BUSINESS_LABELS).filter((k) => business?.[k]);
+    if (!keys.length) return "";
+    return `
+      <div class="import-business">
+        <h4>También aprendimos esto de tu negocio</h4>
+        ${keys
+          .map(
+            (k) => `<details class="import-business-item">
+              <summary>${IMPORT_BUSINESS_LABELS[k]}</summary>
+              <p>${escapeHtml(business[k])}</p>
+            </details>`,
+          )
+          .join("")}
+        <label class="import-update"><input type="checkbox" id="import-business" checked /> Enseñárselo a mi IA (se suma a lo que ya tienes, no borra nada)</label>
+      </div>`;
+  }
+
   function renderImportPreview() {
     const p = state.importPreview;
     const box = $("products-import-preview");
@@ -5550,7 +5576,7 @@
         </div>
       </header>
       ${overflow}
-      <div class="import-table-wrap">
+      <div class="import-table-wrap${p.total ? "" : " hidden"}">
         <table class="import-table">
           <thead><tr><th>Producto</th><th>Precio</th><th>Unidades</th><th>Detalle</th></tr></thead>
           <tbody>${shown
@@ -5567,9 +5593,12 @@
       </div>
       ${p.total > shown.length ? `<p class="import-more">…y ${p.total - shown.length} más.</p>` : ""}
       ${p.existing ? `<label class="import-update"><input type="checkbox" id="import-update-existing" checked /> Actualizar precio y detalle de los que ya tengo</label>` : ""}
+      ${importBusinessHtml(p.business)}
       <div class="import-actions">
         <button type="button" class="btn ghost" data-import="cancel">Cancelar</button>
-        <button type="button" class="btn primary" data-import="confirm">Importar ${p.total} producto${p.total === 1 ? "" : "s"}</button>
+        <button type="button" class="btn primary" data-import="confirm">${
+          p.total ? `Importar ${p.total} producto${p.total === 1 ? "" : "s"}` : "Enseñárselo a mi IA"
+        }</button>
       </div>`;
     box.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
@@ -5587,6 +5616,7 @@
           body: JSON.stringify({
             items: p.items,
             update_existing: $("import-update-existing")?.checked ?? true,
+            business: $("import-business")?.checked ? p.business : null,
           }),
         },
         60000,
@@ -5598,7 +5628,11 @@
       const parts = [];
       if (res.created) parts.push(`${res.created} nuevo${res.created === 1 ? "" : "s"}`);
       if (res.updated) parts.push(`${res.updated} actualizado${res.updated === 1 ? "" : "s"}`);
-      let msg = parts.length ? `✓ Listo: ${parts.join(" y ")}. La IA ya los conoce.` : "No había cambios para guardar.";
+      let msg = parts.length ? `✓ Listo: ${parts.join(" y ")}. La IA ya los conoce.` : "";
+      if (res.business_saved?.length) {
+        msg += `${msg ? " " : "✓ "}La IA aprendió: ${res.business_saved.join(", ").toLowerCase()}.`;
+      }
+      if (!msg) msg = "No había cambios para guardar.";
       if (res.limit_reached) msg += " Llegaste al máximo de productos; algunos no se agregaron.";
       setProductsStatus(msg);
       refreshReadinessSoon();

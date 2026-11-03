@@ -307,6 +307,14 @@ def text_to_items(text: str) -> list[dict]:
     return items[:MAX_IMPORT_ROWS]
 
 
+def reads_with_ai(filename: str, data: bytes) -> Optional[str]:
+    """El tipo MIME si el archivo lo lee la IA (PDF o foto) y cabe; si no, None."""
+    ext = file_extension(filename)
+    if ext not in AI_EXT or not data or len(data) > MAX_AI_IMPORT_BYTES:
+        return None
+    return _AI_MIME[ext]
+
+
 def _ai_items(data: bytes, ext: str) -> list[dict]:
     from app.infrastructure.ai.gemini_client import GeminiError, extract_product_list
 
