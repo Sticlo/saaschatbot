@@ -174,3 +174,43 @@ def test_marking_interest_from_panel_hands_chat_to_human(client: TestClient):
         assert r.json()["interest_status"] == status
         assert r.json()["ai_active"] is False
         assert r.json()["mode"] == "manual"
+
+
+from app.application.ai import ai_service  # noqa: E402
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.keys = set()
+
+    def set(self, key, _value, nx=False, ex=None):
+        if nx and key in self.keys:
+            return None
+        self.keys.add(key)
+        return True
+
+
+def test_first_no_gets_one_win_back_attempt_and_the_second_is_respected(monkeypatch):
+    fake = _FakeRedis()
+    monkeypatch.setattr(ai_service, "get_redis", lambda: fake)
+    conversation_id = uuid.uuid4()
+    assert ai_service._first_no(conversation_id) is True
+    assert ai_service._first_no(conversation_id) is False
+    assert ai_service._first_no(uuid.uuid4()) is True
+
+
+def test_without_redis_a_no_is_simply_respected(monkeypatch):
+    def broken():
+        raise RuntimeError("redis caído")
+
+    monkeypatch.setattr(ai_service, "get_redis", broken)
+    assert ai_service._first_no(uuid.uuid4()) is False
+
+
+def test_the_ai_negotiates_once_and_never_begs():
+    from app.application.ai.ai_conversation_service import SALES_PLAYBOOK
+
+    assert "no bajes el precio por tu cuenta" in SALES_PLAYBOOK
+    assert "Un solo intento por objeción" in SALES_PLAYBOOK
+    assert "es no" in SALES_PLAYBOOK
+    assert "ÚNICO intento" in ai_service.WIN_BACK_BLOCK

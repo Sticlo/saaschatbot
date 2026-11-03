@@ -129,6 +129,14 @@ OUTAGE_RETRY_DELAYS_SECONDS = (20, 60, 180)
 OUTAGE_STATE_TTL_SECONDS = 3600
 HOLDING_REPLY_COOLDOWN_SECONDS = 15 * 60
 OWNER_HANDOFF_ALERT_COOLDOWN_SECONDS = 30 * 60
+WIN_BACK_TTL_SECONDS = 30 * 24 * 3600
+WIN_BACK_BLOCK = """
+
+El cliente acaba de decir que no (o que no por ahora). Este es tu ÚNICO intento: corto, cálido y sin rogar.
+Valida su decisión en pocas palabras y, con UNA pregunta, descubre qué lo frena (precio, fecha, confianza,
+consultarlo con alguien, otra opción) o hazle caer en cuenta de lo que gana, ofreciéndole la alternativa del
+negocio que más le sirva (opción más económica, apartarlo, pagar por partes si el negocio lo maneja).
+Si su no es claro y definitivo (ya compró, no lo necesita), solo agradécele y déjale la puerta abierta."""
 SEND_RETRY_DELAY_SECONDS = 30
 HANDOFF_MARKER_TTL_SECONDS = 30 * 24 * 3600
 # Chat pasado a una persona: si nadie le contesta al cliente en este tiempo, la IA lo retoma.
@@ -224,6 +232,14 @@ def _mark_handed_off(conversation_id: uuid.UUID) -> None:
         get_redis().set(_handoff_key(conversation_id), "1", ex=HANDOFF_MARKER_TTL_SECONDS)
     except Exception:
         log.warning("No se pudo marcar traspaso conv=%s", conversation_id)
+
+
+def _first_no(conversation_id: uuid.UUID) -> bool:
+    """El primer «no, gracias» merece un intento de la IA; el segundo se respeta y ella se aparta."""
+    try:
+        return bool(get_redis().set(f"ai:win_back:{conversation_id}", "1", nx=True, ex=WIN_BACK_TTL_SECONDS))
+    except Exception:
+        return False
 
 
 def _awaiting_key(conversation_id: uuid.UUID) -> str:
@@ -2012,7 +2028,8 @@ def _process_qualify(
         return True
 
     # El interés de compra lo decide la respuesta de la IA (etapa); aquí solo el «no, gracias».
-    if category == "no_interesado" and _close_on_interest(
+    win_back = category == "no_interesado" and _first_no(conversation.id)
+    if category == "no_interesado" and not win_back and _close_on_interest(
         db,
         tenant=tenant,
         conversation=conversation,
@@ -2050,7 +2067,8 @@ def _process_qualify(
             knowledge=learned_answers_block(db, tenant.id)
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
-            + returning_block(history),
+            + returning_block(history)
+            + (WIN_BACK_BLOCK if win_back else ""),
             flows=flows,
         )
     except DeepSeekError as exc:
@@ -2112,7 +2130,8 @@ def _process_full_reply(
             log.exception("Error enviando opt_out conv=%s", conversation.id)
         return True
 
-    if category == "no_interesado" and _close_on_interest(
+    win_back = category == "no_interesado" and _first_no(conversation.id)
+    if category == "no_interesado" and not win_back and _close_on_interest(
         db,
         tenant=tenant,
         conversation=conversation,
@@ -2148,7 +2167,8 @@ def _process_full_reply(
             knowledge=learned_answers_block(db, tenant.id)
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
-            + returning_block(history),
+            + returning_block(history)
+            + (WIN_BACK_BLOCK if win_back else ""),
             flows=flows,
         )
     except DeepSeekError as exc:
