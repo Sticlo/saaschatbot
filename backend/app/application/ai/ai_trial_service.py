@@ -186,4 +186,6 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[st
         )
     if reply.order is not None and payment_methods_of(profile):
         result.notes.append("En un chat real te llegaría el aviso del pedido y quedaría en Pedidos.")
+    if reply.notes:
+        result.notes.append("La IA recordará de este cliente: " + " · ".join(reply.notes))
     return result

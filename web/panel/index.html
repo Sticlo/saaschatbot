@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/panel/favicon-32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/panel/apple-touch-icon.png">
   <script src="/static/panel/theme.js?v=1"></script>
-  <link rel="stylesheet" href="/static/panel/styles.css?v=131" />
+  <link rel="stylesheet" href="/static/panel/styles.css?v=132" />
 </head>
 <body>
   <div id="app">
@@ -253,6 +253,20 @@
                   <button type="button" id="ai-retry-btn" class="btn ghost small" title="Reintentar respuesta IA">Reintentar IA</button>
                 </div>
               </div>
+            </div>
+
+            <div id="chat-memory" class="chat-memory hidden">
+              <button type="button" id="chat-memory-view" class="chat-memory-view" title="Lo que la IA recuerda de este cliente. Toca para corregirlo.">
+                <span class="chat-memory-label">La IA recuerda</span>
+                <span id="chat-memory-text" class="chat-memory-text"></span>
+              </button>
+              <form id="chat-memory-form" class="chat-memory-form hidden">
+                <textarea id="chat-memory-input" rows="4" maxlength="2000" placeholder="Una nota por línea. Ej.: Su hija Sofía cumple 5 años"></textarea>
+                <div class="chat-memory-actions">
+                  <button type="button" id="chat-memory-cancel" class="btn ghost small">Cancelar</button>
+                  <button type="submit" class="btn primary small">Guardar</button>
+                </div>
+              </form>
             </div>
 
             <div id="messages" class="messages"></div>
@@ -1153,6 +1167,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=205"></script>
+  <script src="/static/panel/app.js?v=206"></script>
 </body>
 </html>

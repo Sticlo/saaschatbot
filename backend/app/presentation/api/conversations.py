@@ -22,6 +22,7 @@ from app.application.conversations.send_once import send_once
 from app.presentation.schemas.whatsapp import (
     ConversationAiUpdate,
     ConversationInterestUpdate,
+    ConversationNotesUpdate,
     ConversationLiveSyncResponse,
     ConversationModeUpdate,
     ConversationResponse,
@@ -40,6 +41,7 @@ from app.application.whatsapp.whatsapp_service import (
     send_text_message,
     send_voice_data_message,
 )
+from app.application.ai.ai_memory_service import MAX_NOTES, NOTE_MAX_CHARS
 from app.application.ai.ai_service import clear_awaiting_human
 from app.application.ai.ai_shortcut_service import send_shortcut_content
 from app.application.outbound.quick_shortcut_service import find_shortcut
@@ -864,6 +866,29 @@ def update_conversation_interest(
         conversation.ai_set_by_agent = True
     db.commit()
     clear_awaiting_human(conversation.id)
+    db.refresh(conversation)
+    publish_conversation_updated(current.tenant_id, conversation)
+    return _conversation_api_response(db, current.tenant_id, conversation)
+
+
+@router.patch("/{conversation_id}/notes", response_model=ConversationResponse)
+def update_conversation_notes(
+    conversation_id: uuid.UUID,
+    body: ConversationNotesUpdate,
+    current: RequireAgent,
+    db: Session = Depends(get_db),
+):
+    """El dueño corrige lo que la IA recuerda del cliente (una nota por línea)."""
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.tenant_id == current.tenant_id)
+        .first()
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    lines = [" ".join(line.split())[:NOTE_MAX_CHARS] for line in body.client_notes.splitlines()]
+    conversation.client_notes = "\n".join([line for line in lines if line][:MAX_NOTES]) or None
+    db.commit()
     db.refresh(conversation)
     publish_conversation_updated(current.tenant_id, conversation)
     return _conversation_api_response(db, current.tenant_id, conversation)

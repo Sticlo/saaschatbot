@@ -217,6 +217,13 @@ class EvolutionClient:
             "POST", f"/message/sendText/{instance_name}", json=payload, timeout=30.0 + typing_ms / 1000
         )
 
+    def send_presence(self, instance_name: str, number: str, *, presence: str = "composing", delay_ms: int) -> dict:
+        """Evolution muestra la presencia durante `delay_ms` y luego la pausa (la llamada espera ese tiempo)."""
+        payload = {"number": number, "presence": presence, "delay": delay_ms}
+        return self._request(
+            "POST", f"/chat/sendPresence/{instance_name}", json=payload, timeout=10.0 + delay_ms / 1000
+        )
+
     def mark_read(self, instance_name: str, remote_jid: str, message_ids: list[str]) -> dict:
         payload = {
             "readMessages": [{"remoteJid": remote_jid, "fromMe": False, "id": mid} for mid in message_ids]

@@ -55,6 +55,8 @@ class Conversation(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     chatwoot_conversation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Lo que la IA recuerda del cliente, una nota por línea; el dueño puede corregirlo en el panel.
+    client_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

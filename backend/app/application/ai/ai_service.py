@@ -40,6 +40,7 @@ from app.application.ai.ai_appointment_service import (
 from app.application.ai.ai_auto_enable_service import owner_messages, owner_wrote_in_chat
 from app.application.ai.ai_classifier_service import classify_inbound_message, is_personal_chat
 from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
+from app.application.ai.ai_memory_service import notes_prompt_block, remember
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
 from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode, resolve_ai_mode
 from app.application.ai.ai_qualify_service import (
@@ -96,7 +97,7 @@ from app.application.outbound.quick_shortcut_service import get_shortcuts
 from app.application.orders.order_service import orders_prompt_block, record_ai_order
 from app.application.products.product_service import StockChange, list_products, reserve_order_stock
 from app.application.realtime.realtime_service import publish_conversation_updated, publish_panel_event
-from app.application.whatsapp.whatsapp_service import send_text_message
+from app.application.whatsapp.whatsapp_service import send_text_message, start_typing
 from app.config import settings
 from app.infrastructure.cache.redis_client import get_redis
 from app.domain.entities import Conversation, Exclusion, Message, Product, Tenant, TenantProfile, WhatsAppSession
@@ -2022,6 +2023,7 @@ def _process_qualify(
         _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
         return True
 
+    start_typing(db, session=session, conversation=conversation)
     history = _load_history(db, conversation.id)
     is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
@@ -2040,7 +2042,9 @@ def _process_qualify(
             shortcuts=shortcuts,
             booking=booking,
             products=products,
-            knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
+            knowledge=learned_answers_block(db, tenant.id)
+            + orders_prompt_block(db, conversation.id)
+            + notes_prompt_block(conversation),
             flows=flows,
         )
     except DeepSeekError as exc:
@@ -2057,6 +2061,8 @@ def _process_qualify(
         )
 
     increment_daily_reply_count(tenant.id)
+    if remember(conversation, generated_reply.notes):
+        db.flush()
     return _deliver_reply(
         db,
         tenant=tenant,
@@ -2116,6 +2122,7 @@ def _process_full_reply(
         _publish_quota_error(tenant, conversation.id, quota_err or "Límite diario IA")
         return True
 
+    start_typing(db, session=session, conversation=conversation)
     history = _load_history(db, conversation.id)
     is_first_contact = not any(m.direction == MessageDirection.OUT.value for m in history)
     shortcuts = annotate_sent_shortcuts(get_shortcuts(db, tenant.id), conversation.id)
@@ -2132,7 +2139,9 @@ def _process_full_reply(
             shortcuts=shortcuts,
             booking=booking,
             products=products,
-            knowledge=learned_answers_block(db, tenant.id) + orders_prompt_block(db, conversation.id),
+            knowledge=learned_answers_block(db, tenant.id)
+            + orders_prompt_block(db, conversation.id)
+            + notes_prompt_block(conversation),
             flows=flows,
         )
     except DeepSeekError as exc:
@@ -2149,6 +2158,8 @@ def _process_full_reply(
         )
 
     increment_daily_reply_count(tenant.id)
+    if remember(conversation, generated_reply.notes):
+        db.flush()
     return _deliver_reply(
         db,
         tenant=tenant,

@@ -6680,6 +6680,7 @@
     $("toggle-mode-manual").disabled = !canEdit;
     $("toggle-ai-chat").disabled = !canEdit;
     syncInterestButtons(conv);
+    syncChatMemory(conv);
     const canRetry = state.canWrite && conv.ai_active && aiAllowedInChat(conv) && conv.mode !== "manual";
     $("ai-retry-btn").classList.toggle("hidden", !canRetry);
     $("ai-retry-btn").disabled = !canRetry;
@@ -6694,6 +6695,55 @@
     } else {
       hintEl.textContent = "";
       hintEl.classList.add("hidden");
+    }
+  }
+
+  function memoryLines(conv) {
+    return String(conv?.client_notes || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function syncChatMemory(conv) {
+    const box = $("chat-memory");
+    const form = $("chat-memory-form");
+    if (!box || !form.classList.contains("hidden")) return;
+    const lines = memoryLines(conv);
+    $("chat-memory-text").textContent = lines.join(" · ");
+    $("chat-memory-view").disabled = !state.canWrite;
+    box.classList.toggle("hidden", !lines.length);
+  }
+
+  function editChatMemory(open) {
+    const conv = state.conversations.find((c) => c.id === state.activeId);
+    $("chat-memory-form").classList.toggle("hidden", !open);
+    $("chat-memory-view").classList.toggle("hidden", open);
+    if (open) {
+      const input = $("chat-memory-input");
+      input.value = memoryLines(conv).join("\n");
+      input.focus();
+    } else {
+      syncChatMemory(conv);
+    }
+  }
+
+  async function saveChatMemory(event) {
+    event.preventDefault();
+    if (!state.activeId || !state.canWrite) return;
+    const submit = $("chat-memory-form").querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const updated = await api(`/conversations/${state.activeId}/notes`, {
+        method: "PATCH",
+        body: JSON.stringify({ client_notes: $("chat-memory-input").value }),
+      });
+      upsertConversation(updated);
+      editChatMemory(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      submit.disabled = false;
     }
   }
 
@@ -6741,6 +6791,8 @@
     if (state.activeId !== id) clearReply();
     if (state.activeId && state.activeId !== id) cacheMessages(state.activeId, state.messages);
     state.activeId = id;
+    $("chat-memory-form").classList.add("hidden");
+    $("chat-memory-view").classList.remove("hidden");
     state.messages = [];
     state._messagesSig = "";
     const conv = state.conversations.find((c) => c.id === id);
@@ -8676,6 +8728,9 @@
 
   $("mark-interested-btn").addEventListener("click", () => setConversationInterest("interested"));
   $("mark-not-interested-btn").addEventListener("click", () => setConversationInterest("not_interested"));
+  $("chat-memory-view").addEventListener("click", () => editChatMemory(true));
+  $("chat-memory-cancel").addEventListener("click", () => editChatMemory(false));
+  $("chat-memory-form").addEventListener("submit", saveChatMemory);
 
   $("toggle-ai-chat").addEventListener("change", async (e) => {
     const enabled = !!e.target.checked;

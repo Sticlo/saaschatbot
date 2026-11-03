@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     ai_classify_delay_seconds: float = 0.3
     # «Escribiendo…» antes de cada mensaje de la IA, según su largo. 0 = sin espera.
     ai_typing_max_ms: int = 4500
+    # «Escribiendo…» desde que la IA empieza a pensar la respuesta (tope por si nunca llega). 0 = apagado.
+    ai_thinking_typing_ms: int = 20000
     # Cuidar el número: la IA marca leído antes de responder, no pasa de N envíos por minuto
     # (los demás esperan en cola) y parte en varios mensajes lo que pase de este largo.
     ai_mark_read_before_reply: bool = True

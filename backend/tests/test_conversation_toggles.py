@@ -47,6 +47,27 @@ def test_manual_mode_and_ai_are_mutually_exclusive(client: TestClient):
     assert ai_off.json()["mode"] == "auto"
 
 
+@requires_db
+def test_owner_corrects_what_the_ai_remembers(client: TestClient):
+    auth = _register(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    conversation_id = _conversation(uuid.UUID(auth["tenant_id"]))
+    url = f"/api/v1/conversations/{conversation_id}/notes"
+
+    saved = client.patch(
+        url,
+        json={"client_notes": "  Hija Sofía, cumple 5\n\nLe encanta Frozen  \n" + "x" * 200},
+        headers=headers,
+    )
+    assert saved.status_code == 200, saved.text
+    lines = saved.json()["client_notes"].split("\n")
+    assert lines[:2] == ["Hija Sofía, cumple 5", "Le encanta Frozen"]
+    assert len(lines[2]) == 120
+
+    cleared = client.patch(url, json={"client_notes": ""}, headers=headers)
+    assert cleared.json()["client_notes"] is None
+
+
 def _override(conversation_id: uuid.UUID) -> bool:
     from app.domain.entities import Conversation
     from app.infrastructure.persistence.database import SessionLocal

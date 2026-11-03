@@ -262,6 +262,17 @@ def send_text(
         raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
 
 
+def send_typing(session_name: str, remote_jid: str, *, delay_ms: int) -> None:
+    if uses_waha():
+        return
+    from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
+
+    try:
+        evolution_client.send_presence(session_name, remote_jid, delay_ms=delay_ms)
+    except EvolutionAPIError as exc:
+        raise WhatsAppGatewayError(str(exc), exc.status_code) from exc
+
+
 def mark_read(session_name: str, remote_jid: str, message_ids: list[str]) -> None:
     if uses_waha() or not message_ids:
         return

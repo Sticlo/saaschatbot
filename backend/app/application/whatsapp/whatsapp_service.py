@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -51,6 +52,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     restart_instance as gateway_restart_instance,
     refresh_qr as gateway_refresh_qr,
     send_text as gateway_send_text,
+    send_typing as gateway_send_typing,
     send_image as gateway_send_image,
     send_document as gateway_send_document,
     send_voice as gateway_send_voice,
@@ -1028,6 +1030,43 @@ def wait_for_bot_send_slot(instance_name: str, *, sleep=time.sleep) -> None:
         log.debug("Sin control de ritmo de envío instance=%s", instance_name, exc_info=True)
 
 
+def _contact_jid(conversation: Conversation) -> str:
+    jid = conversation.contact_jid or ""
+    return jid if "@" in jid else f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
+
+
+# conversación → cuándo empezó a verse «escribiendo…» (la respuesta se piensa y se envía en el mismo job).
+_typing_since: dict[uuid.UUID, float] = {}
+
+
+def start_typing(db: Session, *, session: WhatsAppSession, conversation: Conversation) -> None:
+    """Leído y «escribiendo…» mientras la IA piensa: un silencio de varios segundos se siente a bot."""
+    budget = settings.ai_thinking_typing_ms
+    if budget <= 0 or uses_waha():
+        return
+    mark_customer_messages_read(db, session=session, conversation=conversation)
+    _typing_since[conversation.id] = time.monotonic()
+    instance, jid = session.instance_name, _contact_jid(conversation)
+
+    def show() -> None:
+        try:
+            gateway_send_typing(instance, jid, delay_ms=budget)
+        except Exception:
+            log.debug("No se pudo mostrar escribiendo… instance=%s", instance, exc_info=True)
+
+    threading.Thread(target=show, daemon=True, name="ai-typing").start()
+
+
+def remaining_typing_ms(conversation_id: uuid.UUID, typing_ms: int) -> int:
+    """Lo que ya se vio «escribiendo…» mientras pensaba se descuenta de la pausa antes de enviar."""
+    since = _typing_since.pop(conversation_id, None)
+    elapsed_ms = int((time.monotonic() - since) * 1000) if since is not None else 0
+    # Más que el tope: ese «escribiendo…» ya se apagó (o era de una respuesta que nunca salió).
+    if since is None or elapsed_ms > settings.ai_thinking_typing_ms:
+        return typing_ms
+    return max(0, typing_ms - elapsed_ms)
+
+
 def mark_customer_messages_read(
     db: Session, *, session: WhatsAppSession, conversation: Conversation
 ) -> None:
@@ -1051,11 +1090,8 @@ def mark_customer_messages_read(
     ids = [row[0].split(":", 1)[0] for row in query.order_by(Message.created_at.desc()).limit(20) if row[0]]
     if not ids:
         return
-    jid = conversation.contact_jid or ""
-    if "@" not in jid:
-        jid = f"{phone_to_evolution_number(conversation.contact_phone)}@s.whatsapp.net"
     try:
-        gateway_mark_read(session.instance_name, jid, ids)
+        gateway_mark_read(session.instance_name, _contact_jid(conversation), ids)
     except Exception:
         log.debug("No se pudo marcar leído conv=%s", conversation.id, exc_info=True)
 
@@ -1108,13 +1144,17 @@ def send_text_message(
     message: Optional[Message] = None
     for index, part in enumerate(parts):
         first = index == 0
+        typing_ms = 0
         if is_bot:
             wait_for_bot_send_slot(session.instance_name)
+            typing_ms = typing_delay_ms(part)
+            if first:
+                typing_ms = remaining_typing_ms(conversation.id, typing_ms)
         result = gateway_send_text(
             session.instance_name,
             recipient,
             part,
-            typing_ms=typing_delay_ms(part) if is_bot else 0,
+            typing_ms=typing_ms,
             quoted=quoted if first else None,
         )
         evolution_id = extract_whatsapp_message_id(result)

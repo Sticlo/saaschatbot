@@ -1386,6 +1386,58 @@ a.btn#confirm-link { display: inline-flex; align-items: center; justify-content:
 
 .chat-header h3 { margin: 0; font-size: 1rem; }
 
+.chat-memory {
+  padding: 0.4rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-memory-view {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-memory-view:disabled { cursor: default; }
+
+.chat-memory-label {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chat-memory-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.chat-memory-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.chat-memory-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
 .chat-header-main { min-width: 0; flex: 1; }
 
 .chat-contact-phone {

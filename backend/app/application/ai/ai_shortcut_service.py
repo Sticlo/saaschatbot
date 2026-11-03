@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.application.ai.ai_knowledge_service import clean_topic
+from app.application.ai.ai_memory_service import NOTES_RULE, parse_notes
 from app.application.outbound.quick_shortcut_service import find_shortcut
 from app.application.products.product_service import find_by_ref, list_products, photo_caption, product_ref
 from app.application.whatsapp.whatsapp_service import (
@@ -58,7 +59,7 @@ STAGE_RANK = {STAGE_CHATTING: 0, STAGE_INTERESTED: 1, STAGE_CLOSING: 2}
 _REPLY_FORMAT = """
 
 Responde SOLO con JSON válido (sin markdown), exactamente con estas claves:
-{{"message":"tu respuesta al cliente","shortcut_id":null,{photo_key}"book_slot":null,"stage":"conversando","missing":"","chosen":""{order_key}}}
+{{"message":"tu respuesta al cliente","shortcut_id":null,{photo_key}"book_slot":null,"stage":"conversando","missing":"","chosen":"","notes":null{order_key}}}
 {key_rules}missing = si el cliente preguntó algo que NO está en la información del negocio y por eso no pudiste
 responderlo, escribe en pocas palabras qué dato te faltó (ej. "costo del envío a Cali", "si hay talla 42").
 Si pudiste responder todo, "". No lo uses para cosas que el cliente debe decirte (su dirección, su talla).
@@ -69,7 +70,7 @@ un pantallazo o foto del catálogo y dice «me gustó este», «quiero este»), 
 Cuando elige así: confírmale cuál es y su precio, solo si está en la información del negocio, y pídele el
 siguiente dato para dejarlo listo (ej. fecha y ciudad del evento, talla, cantidad). Si en la imagen se ven
 varios y no está claro cuál le gustó, chosen = "" y pregúntale cuál fue, nombrando las opciones que se ven.
-
+{notes_rule}
 stage = en qué punto está el cliente, mirando toda la conversación:
 - "conversando": saluda, charla o pregunta en general; aún no muestra intención de compra.
 - "interesado": muestra interés real: pide el catálogo, la carta o fotos; pregunta precio, talla,
@@ -127,6 +128,7 @@ def reply_format_instruction(
         key_rules=key_rules,
         photo_key='"photo_ref":null,' if has_photos else "",
         order_key=',"order":null' if selling else "",
+        notes_rule=NOTES_RULE,
         closing_rules=_SELLING_CLOSING if selling else _HANDOFF_CLOSING,
     )
 
@@ -155,6 +157,8 @@ class AiGeneratedReply:
     chosen: str = ""
     # Flujo del negocio que se envía antes del mensaje (ver ai_flow_service).
     flow_id: Optional[str] = None
+    # Lista completa de lo que se recuerda del cliente; None = nada nuevo (ver ai_memory_service).
+    notes: Optional[tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -563,6 +567,7 @@ def parse_ai_reply(
         photo_ref=_photo_ref(data.get("photo_ref"), valid_photo_refs),
         chosen=_chosen(data.get("chosen")),
         flow_id=flow_id,
+        notes=parse_notes(data.get("notes")),
     )
 
 

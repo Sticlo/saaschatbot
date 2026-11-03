@@ -60,6 +60,7 @@ class ConversationResponse(BaseModel):
     imported_legacy: bool = False
     status: str
     interest_status: Optional[str] = None
+    client_notes: Optional[str] = None
     is_archived: bool = False
     unread_count: int
     last_message_at: Optional[datetime]
@@ -132,6 +133,10 @@ class ConversationAiUpdate(BaseModel):
 
 class ConversationInterestUpdate(BaseModel):
     interest_status: Optional[Literal["interested", "not_interested"]] = None
+
+
+class ConversationNotesUpdate(BaseModel):
+    client_notes: str = Field(default="", max_length=2000)
 
 
 class WhatsAppSyncResponse(BaseModel):
