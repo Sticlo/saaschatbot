@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.application.ai.ai_answer_relay_service import relay_answer_soon, relay_target
 from app.application.ai.ai_knowledge_service import (
     ANSWER_MAX_CHARS,
+    STATUS_OPEN,
     answer_question,
     get_question,
     list_questions,
@@ -32,6 +34,7 @@ class AiQuestionResponse(BaseModel):
     times_asked: int
     conversation_id: Optional[str] = None
     last_asked_at: Optional[str] = None
+    client_notified: bool = False
 
 
 class AiQuestionAnswer(BaseModel):
@@ -48,14 +51,19 @@ def put_ai_question_answer(
     question_id: uuid.UUID, body: AiQuestionAnswer, current: RequireOwner, db: Session = Depends(get_db)
 ):
     try:
-        row = answer_question(get_question(db, current.tenant_id, question_id), body.answer)
+        row = get_question(db, current.tenant_id, question_id)
+        was_open = row.status == STATUS_OPEN
+        answer_question(row, body.answer)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
     publish_panel_event(current.tenant_id, {"type": "ai_questions.updated"})
-    return AiQuestionResponse(**question_to_dict(row))
+    notify = was_open and relay_target(db, row) is not None
+    if notify:
+        relay_answer_soon(row.id)
+    return AiQuestionResponse(**question_to_dict(row), client_notified=notify)
 
 
 @router.post("/{question_id}/photo", response_model=AiQuestionResponse)

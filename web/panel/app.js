@@ -4779,6 +4779,9 @@
         <div class="ai-question-actions">
           <button type="button" class="btn primary small ai-question-save" ${ro ? "disabled" : ""}>${learned ? "Actualizar" : "Enseñar a la IA"}</button>
           <button type="button" class="btn ghost small ai-question-delete" ${ro ? "disabled" : ""}>${learned ? "Olvidar" : "Descartar"}</button>
+          ${!learned && q.conversation_id
+            ? `<button type="button" class="btn-link ai-question-chat" data-chat-id="${escapeHtml(q.conversation_id)}">Ver el chat</button>`
+            : ""}
         </div>
       </li>`;
   }
@@ -4822,8 +4825,12 @@
     item.querySelectorAll("button").forEach((b) => { b.disabled = true; });
     setAiQuestionsStatus("Guardando…");
     try {
-      await api(`/ai-questions/${item.dataset.id}`, { method: "PUT", body: JSON.stringify({ answer }) });
-      setAiQuestionsStatus("✓ Listo — la IA ya lo sabe y lo usará en todos tus chats");
+      const res = await api(`/ai-questions/${item.dataset.id}`, { method: "PUT", body: JSON.stringify({ answer }) });
+      setAiQuestionsStatus(
+        res.client_notified
+          ? "✓ Listo — la IA ya lo sabe y le está confirmando al cliente que preguntó"
+          : "✓ Listo — la IA ya lo sabe y lo usará en todos tus chats",
+      );
       await loadAiQuestions();
     } catch (err) {
       setAiQuestionsStatus(err.message);
@@ -6311,9 +6318,11 @@
     } else {
       list.innerHTML = items.map((s) => {
         const kind = s.type === "image" ? "Foto" : s.type === "document" ? "PDF" : "Texto";
-        const when = s.send_when
+        const when = (s.send_when
           ? `<span class="muted small ai-shortcut-when">La IA lo envía: ${escapeHtml(s.send_when)}</span>`
-          : "";
+          : "") + (s.ai_notes
+          ? `<span class="muted small ai-shortcut-when">Reglas: ${escapeHtml(s.ai_notes)}</span>`
+          : "");
         return `<li><strong>${escapeHtml(s.label)}</strong> <span class="muted small">· ${kind}</span>${when}</li>`;
       }).join("");
     }
@@ -6449,6 +6458,11 @@
             <label class="small muted">¿Cuándo lo envía la IA? (opcional)</label>
             <textarea class="shortcut-when" rows="2" maxlength="1000" placeholder="Ej: cuando pregunten por baby shower o decoración para baby shower">${escapeHtml(s.send_when || "")}</textarea>
           </div>
+          <div class="shortcut-when-wrap">
+            <label class="small muted">Lo que la IA debe saber de ${isFile ? "este archivo" : "esto"} (opcional)</label>
+            <textarea class="shortcut-notes" rows="3" maxlength="2000" placeholder="Ej: El personaje de Pan (Dragon Ball) solo está en la Opción 3; en la 1 y la 2 no, porque tiene costo adicional.">${escapeHtml(s.ai_notes || "")}</textarea>
+            <p class="small muted">Las letras pequeñas: qué incluye cada opción y qué no. La IA lo cumple siempre; si le preguntan algo que no está aquí, te lo pregunta antes de responder.</p>
+          </div>
           <div class="shortcut-content-wrap ${type === "image" && hasFile ? "" : "hidden"}">
             <label class="small muted">Lo que la IA sabe de este archivo</label>
             <textarea class="shortcut-content" rows="4" maxlength="4000" placeholder="Ej: Tenis blancos $120.000 (tallas 36-42)…">${escapeHtml(s.content || "")}</textarea>
@@ -6477,6 +6491,9 @@
       });
       row.querySelector(".shortcut-when")?.addEventListener("input", (e) => {
         state.shortcutsDraft[idx].send_when = e.target.value;
+      });
+      row.querySelector(".shortcut-notes")?.addEventListener("input", (e) => {
+        state.shortcutsDraft[idx].ai_notes = e.target.value;
       });
       row.querySelector(".shortcut-file-input")?.addEventListener("change", async (e) => {
         const file = e.target.files?.[0];
@@ -6538,6 +6555,7 @@
           file_name: type === "document" ? s.file_name : null,
           content: type !== "text" ? (s.content || "").trim() || null : null,
           send_when: (s.send_when || "").trim() || null,
+          ai_notes: (s.ai_notes || "").trim() || null,
         };
       })
       .filter((s) => (s.type === "text" ? s.text : s.type === "image" ? s.image_path : s.file_path));
@@ -8087,6 +8105,11 @@
   });
   $("ai-questions-card").addEventListener("click", (e) => {
     const item = e.target.closest(".ai-question");
+    const chat = e.target.closest(".ai-question-chat");
+    if (item && chat) {
+      openChatById(chat.dataset.chatId);
+      return;
+    }
     if (!item || !state.canManageGlobal) return;
     if (e.target.closest(".ai-question-save")) saveAiQuestion(item);
     else if (e.target.closest(".ai-question-delete")) deleteAiQuestion(item);
@@ -8903,7 +8926,11 @@
     params.delete("chat");
     const rest = params.toString();
     history.replaceState(history.state, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+    await openChatById(id);
+  }
+
+  async function openChatById(id) {
+    if (!/^[0-9a-f-]{36}$/i.test(id || "")) return;
     try {
       switchPanelMode("chats");
       if (!state.conversations.some((c) => c.id === id)) await switchChatTab("all");

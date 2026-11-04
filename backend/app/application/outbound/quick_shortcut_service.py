@@ -10,6 +10,7 @@ from app.application.billing.tenant_profile_service import get_or_create_tenant_
 _MAX_SHORTCUTS = 12
 MAX_CONTENT_CHARS = 4000
 MAX_SEND_WHEN_CHARS = 1000
+MAX_AI_NOTES_CHARS = 2000
 MAX_TEXT_CHARS = 10000
 
 
@@ -29,6 +30,8 @@ def _normalize(raw: list[dict]) -> list[dict]:
         content = str(item.get("content") or "").strip()[:MAX_CONTENT_CHARS]
         # Cuándo lo envía la IA (ej. «cuando pregunten por baby shower»).
         send_when = " ".join(str(item.get("send_when") or "").split())[:MAX_SEND_WHEN_CHARS]
+        # Letras pequeñas del archivo que el dueño le explica a la IA (qué aplica a cada opción).
+        ai_notes = str(item.get("ai_notes") or "").strip()[:MAX_AI_NOTES_CHARS]
         if kind == "image":
             path = str(item.get("image_path") or "").strip() or None
             if not path:
@@ -56,6 +59,8 @@ def _normalize(raw: list[dict]) -> list[dict]:
             row = {"id": sid, "label": label[:20], "type": "text", "text": text[:MAX_TEXT_CHARS]}
         if send_when:
             row["send_when"] = send_when
+        if ai_notes:
+            row["ai_notes"] = ai_notes
         out.append(row)
     return out
 

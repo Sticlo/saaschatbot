@@ -139,6 +139,10 @@ Lo que sabes de los productos (sacado del catálogo/carta del negocio):
 Usa esta información para responder preguntas concretas (precios, tallas, sabores,
 disponibilidad). No inventes productos ni precios que no estén aquí. Si un producto también está en
 «Productos del negocio», su precio y disponibilidad mandan sobre lo que diga el catálogo.
+Si un archivo trae «Reglas de este archivo», cúmplelas siempre: dicen qué incluye cada opción y qué no.
+Si el cliente pide algo especial para una opción (un personaje, una temática, un adicional) y ni el
+archivo ni sus reglas dicen que ESA opción lo incluye, no le digas que sí ni lo supongas: dile que se lo
+confirmas, ponlo en missing y, si las reglas dicen en qué opción sí está, ofrécele esa opción.
 """
 
 
@@ -252,15 +256,22 @@ def _catalog_text(shortcuts: list[dict]) -> str:
     parts: list[str] = []
     remaining = _CATALOG_KNOWLEDGE_CHARS
     for shortcut in shortcuts:
-        if shortcut.get("type") not in ("image", "document"):
-            continue
-        content = str(shortcut.get("content") or "").strip()
-        if not content or remaining <= 0:
+        notes = str(shortcut.get("ai_notes") or "").strip()
+        is_file = shortcut.get("type") in ("image", "document")
+        content = str(shortcut.get("content") or "").strip() if is_file else ""
+        if remaining <= 0:
+            content = ""
+        if not content and not notes:
             continue
         label = str(shortcut.get("label") or "").strip() or "Catálogo"
-        chunk = f"[{label}]\n{content[:remaining]}"
+        chunk = f"[{label}]"
+        # Las reglas del dueño no entran al recorte: pesan más que el texto leído del archivo.
+        if notes:
+            chunk += f"\nReglas de este archivo (dadas por el dueño, mandan sobre lo demás):\n{notes}"
+        if content:
+            chunk += f"\n{content[:remaining]}"
+            remaining -= len(content[:remaining])
         parts.append(chunk)
-        remaining -= len(chunk)
     return "\n\n".join(parts)
 
 
@@ -329,10 +340,17 @@ def _plain(text: str) -> str:
 _PROMISE_RE = re.compile(
     r"\b(?:te\s+(?:lo|la|los|las)\s+(?:envio|mando|comparto|paso|dejo|adjunto)"
     r"|te\s+(?:envio|mando|comparto|paso|dejo|adjunto)\s+(?:el|la|los|las|nuestr[oa]s?|mi|una|un)\b"
+    r"|te\s+(?:envio|mando|comparto|adjunto)(?=\s*(?:$|[.!,]|por\s+aqui|ahora|ya\b|enseguida|de\s+una))"
     r"|aqui\s+(?:tienes|te\s+va|va|esta)"
     r"|ahi\s+(?:te\s+va|va|tienes))"
 )
-_FILE_WORDS = ("menu", "carta", "catalogo", "precio", "servicio", "lista", "foto", "portafolio", "tarifa")
+_FILE_WORDS = (
+    "menu", "carta", "catalogo", "precio", "servicio", "lista", "foto", "portafolio", "tarifa",
+    "pdf", "archivo", "documento", "brochure",
+)
+# Sin estas palabras, «aquí tienes» o «te paso» puede ser un precio escrito y no un archivo.
+_STRICT_FILE_WORDS = ("pdf", "archivo", "documento", "catalogo", "portafolio", "brochure", "carta", "menu")
+_SEND_VERB_RE = re.compile(r"envio|mando|comparto|paso|adjunto|dejo")
 _RESEND_RE = re.compile(
     r"no\s+(?:me\s+)?(?:ha\s+)?(?:lleg|aparec|veo|carg|abr|sale)|de\s+nuevo|otra\s+vez|reenv|nuevamente"
     r"|^[\s?¿!.]*\?[\s?¿!.]*$"
@@ -384,6 +402,29 @@ def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict
     if len(files) == 1 and any(w in text for w in _FILE_WORDS):
         return str(files[0]["id"])
     return None
+
+
+def unfulfilled_file_choices(message: str, client_text: str, shortcuts: list[dict]) -> list[dict]:
+    """Prometió «te envío el PDF» y hay varios archivos sin saber cuál: entre cuáles preguntar."""
+    plain = _plain(message)
+    promise = _PROMISE_RE.search(plain)
+    if promise is None or not _SEND_VERB_RE.search(promise.group(0)):
+        return []
+    if not any(w in f"{plain} {_plain(client_text)}" for w in _STRICT_FILE_WORDS):
+        return []
+    files = [s for s in shortcuts if s.get("id") and s.get("type") in ("image", "document")]
+    if len(files) < 2:
+        return []
+    labeled = _labeled_shortcuts(files, f"{plain} {_plain(client_text)}")
+    return labeled if len(labeled) >= 2 else files
+
+
+def file_choice_message(message: str, choices: list[dict]) -> str:
+    """Se quita la promesa y se pregunta cuál: mejor una pregunta que un «te lo envío» que nunca llega."""
+    names = [str(s.get("label") or "").strip() for s in choices if str(s.get("label") or "").strip()][:6]
+    listed = ", ".join(names[:-1]) + f" o {names[-1]}" if len(names) > 1 else names[0]
+    kept = [s for s in re.split(r"(?<=[.!?…])\s+", message.strip()) if s and not _PROMISE_RE.search(_plain(s))]
+    return " ".join([*kept, f"¿Cuál te envío: {listed}?"]).strip()
 
 
 _ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\b")
@@ -491,6 +532,10 @@ def attach_promised_media(
         if promised:
             log.info("IA prometió un atajo sin adjuntarlo; se adjunta")
             return replace(reply, shortcut_id=promised)
+        choices = unfulfilled_file_choices(reply.message, client_text, shortcuts)
+        if choices:
+            log.info("IA prometió un archivo sin decir cuál; se pregunta")
+            return replace(reply, message=file_choice_message(reply.message, choices))
     return reply
 
 
