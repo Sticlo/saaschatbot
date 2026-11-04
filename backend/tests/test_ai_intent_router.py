@@ -80,3 +80,19 @@ def test_a_flow_already_sent_is_still_known_word_for_word():
     assert plan.valid_ids == frozenset() and plan.topics == ()
     assert "Para separar se abona el 50% por Nequi y se envía el formulario." in plan.prompt
     assert "no los reenvíes" in plan.prompt
+
+
+def test_pdf_inside_the_flow_is_not_sent_twice(monkeypatch):
+    from app.application.ai import ai_conversation_service as conv
+
+    flows = [{"id": "rev", "trigger": "asks_about", "topic": "revelacion de genero",
+              "steps": [{"type": "text", "text": "Te compartimos el portafolio"}, {"type": "shortcut", "shortcut_id": "pdf-rev"}]}]
+    shortcuts = [{"id": "pdf-rev", "label": "revelacion de genero", "type": "document", "content": ""}]
+    plan = plan_flows(flows, shortcuts, is_first_contact=False, sent=set())
+    monkeypatch.setattr(conv, "route_flow", lambda topics, history: None)
+    monkeypatch.setattr(conv, "chat_completion", lambda *_a, **_kw: '{"message":"","flow_id":"rev","shortcut_id":"pdf-rev"}')
+    reply = conv._complete_reply(system="Base", history=[_msg("in", "revelacion")], shortcuts=shortcuts, flows=plan)
+    assert reply.flow_id == "rev" and reply.shortcut_id is None and reply.message == ""
+
+    done = plan_flows(flows, shortcuts, is_first_contact=False, sent={"rev"})
+    assert "ya incluyó el archivo «revelacion de genero»" in done.prompt

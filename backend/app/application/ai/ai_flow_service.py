@@ -152,6 +152,15 @@ class FlowPlan:
     # (id, tema) de los flujos que aún se pueden enviar: el enrutador elige por intención.
     topics: tuple[tuple[str, str], ...] = ()
     routed_id: Optional[str] = None
+    # (id, atajos) de cada flujo: el archivo que ya va en el flujo no se manda otra vez como atajo.
+    flow_files: tuple[tuple[str, frozenset], ...] = ()
+
+    def files_of(self, flow_id: Optional[str]) -> frozenset:
+        return next((files for fid, files in self.flow_files if fid == flow_id), frozenset())
+
+
+def _flow_shortcut_ids(flow: dict) -> frozenset:
+    return frozenset(str(step.get("shortcut_id")) for step in flow.get("steps") or [] if step.get("shortcut_id"))
 
 
 def _full_text(flow: dict) -> str:
@@ -195,17 +204,26 @@ def plan_flows(
             '- Si ningún flujo encaja, no pongas "flow_id".'
         )
     if already:
-        lines = "\n".join(f"- {f['topic']}: «{_full_text(f)}»" for f in already if _full_text(f))
+        labels = {str(s.get("id")): str(s.get("label") or "").strip() for s in shortcuts}
+
+        def sent_line(flow: dict) -> str:
+            files = [labels[i] for i in _flow_shortcut_ids(flow) if labels.get(i)]
+            attached = f" (ya incluyó el archivo {', '.join(f'«{n}»' for n in files)})" if files else ""
+            return f"- {flow['topic']}{attached}: «{_full_text(flow)}»"
+
+        lines = "\n".join(sent_line(f) for f in already if _full_text(f))
         if lines:
             blocks.append(
-                "\n\nFlujos que ya se le enviaron en este chat (no los reenvíes). Si vuelve a preguntar por eso, "
-                f"respóndele con esta misma información, sin cambiarla ni agregar pasos:\n{lines}"
+                "\n\nFlujos que ya se le enviaron en este chat (no los reenvíes, ni sus archivos como atajo, salvo "
+                "que el cliente diga que no le llegó). Si vuelve a preguntar por eso, respóndele con esta misma "
+                f"información, sin cambiarla ni agregar pasos:\n{lines}"
             )
     return FlowPlan(
         prompt="".join(blocks),
         valid_ids=frozenset(f["id"] for f in topics),
         auto_id=greeting["id"] if greeting else None,
         topics=tuple((f["id"], f["topic"]) for f in topics),
+        flow_files=tuple((f["id"], _flow_shortcut_ids(f)) for f in active),
     )
 
 

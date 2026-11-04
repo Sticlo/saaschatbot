@@ -22,6 +22,7 @@ from app.application.ai.ai_qualify_service import (
     payment_methods_of,
 )
 from app.application.ai.ai_shortcut_service import (
+    ATTACHMENT_ONLY_TEXT,
     AiGeneratedReply,
     append_shortcuts_instructions,
     parse_ai_reply,
@@ -362,7 +363,12 @@ def _complete_reply(
         except DeepSeekError:
             log.warning("Reescritura de estilo falló; se limpia la respuesta original")
     reply = replace(reply, message=without_robot_phrases(reply.message))
-    return replace(reply, flow_id=flows.auto_id) if flows.auto_id else reply
+    if flows.auto_id:
+        reply = replace(reply, flow_id=flows.auto_id)
+    if reply.shortcut_id and reply.shortcut_id in flows.files_of(reply.flow_id):
+        message = "" if reply.message == ATTACHMENT_ONLY_TEXT else reply.message
+        reply = replace(reply, shortcut_id=None, message=message)
+    return reply
 
 
 def _last_reply_text(history: list[Message]) -> str:
