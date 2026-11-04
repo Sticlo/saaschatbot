@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from app.application.ai.ai_flow_service import FlowPlan
+from app.application.ai.ai_intent_router import route_flow
 from app.application.ai.ai_human_service import HUMAN_STYLE, style_correction, without_robot_phrases
 from app.application.appointments.appointment_service import BOGOTA
 from app.application.availability.availability_service import availability_block
@@ -264,6 +265,17 @@ def _complete_reply(
     """`rewrite`: (respuesta cruda anterior, qué corregir) para el único reintento de estilo."""
     system_base = system
     flows = flows or FlowPlan()
+    if flows.topics and flows.routed_id is None and not rewrite:
+        routed = route_flow(flows.topics, history)
+        if routed:
+            log.info("Enrutador: el cliente pide el flujo %s", routed)
+            flows = replace(
+                flows,
+                routed_id=routed,
+                prompt=flows.prompt
+                + f'\n- Lo que el cliente pide ahora es el flujo flow_id="{routed}": ponlo en "flow_id" y que tu '
+                '"message" solo complemente en una frase, o vaya vacío.',
+            )
     ids = shortcut_ids(shortcuts)
     book_keys: frozenset = frozenset()
     photo_refs = frozenset(product_ref(p) for p in products or [] if p.photos)
@@ -324,8 +336,10 @@ def _complete_reply(
         valid_book_keys=book_keys,
         valid_photo_refs=photo_refs,
         valid_flow_ids=flows.valid_ids,
-        allow_empty=flows.auto_id is not None,
+        allow_empty=flows.auto_id is not None or flows.routed_id is not None,
     )
+    if flows.routed_id and reply.flow_id is None:
+        reply = replace(reply, flow_id=flows.routed_id)
     note = "" if rewrite else style_correction(reply.message, _last_reply_text(history))
     if note:
         log.info("IA sonó a robot; se le pide reescribir: %s", note[:160])

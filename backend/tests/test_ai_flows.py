@@ -97,7 +97,8 @@ def test_greeting_goes_only_on_first_contact():
     assert 'flow_id="precios-flow"' in later.prompt and "precios, cuánto cuesta" in later.prompt
 
     done = fs.plan_flows(flows, SHORTCUTS, is_first_contact=False, sent={"precios-flow"})
-    assert done.prompt == "" and not done.valid_ids
+    assert not done.valid_ids and 'flow_id="precios-flow"' not in done.prompt
+    assert "ya se le enviaron" in done.prompt
 
 
 def test_parse_accepts_flow_with_empty_message():

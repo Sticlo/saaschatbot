@@ -184,3 +184,25 @@ def test_a_written_price_is_not_mistaken_for_a_file():
 
     reply = _reply("Aquí tienes: la opción 2 vale $450.000 e incluye 2 recreadores.")
     assert attach_promised_media(reply, client_text="cuanto vale la 2", products=[], shortcuts=FILES) == reply
+
+
+def test_file_without_text_never_shows_json_to_the_client():
+    from app.application.ai.ai_shortcut_service import ATTACHMENT_ONLY_TEXT, parse_ai_reply
+
+    raw = '{"message":"","shortcut_id":"b3c6","book_slot":null,"stage":"interesado","missing":"","chosen":"","notes":null,"order":null}'
+    reply = parse_ai_reply(raw, valid_ids=frozenset({"b3c6"}))
+    assert reply.shortcut_id == "b3c6" and reply.message == ATTACHMENT_ONLY_TEXT
+    assert "{" not in reply.message
+
+
+def test_empty_json_counts_as_no_reply_not_as_text():
+    from app.application.ai.ai_shortcut_service import parse_ai_reply
+
+    reply = parse_ai_reply('{"message":"","shortcut_id":"inventado","stage":"interesado"}', valid_ids=frozenset())
+    assert reply.message == ""
+
+
+def test_free_theme_is_not_a_free_pass_for_special_requests():
+    from app.application.ai.ai_shortcut_service import _CATALOG_BLOCK
+
+    assert "temática libre" in _CATALOG_BLOCK and "costo adicional" in _CATALOG_BLOCK

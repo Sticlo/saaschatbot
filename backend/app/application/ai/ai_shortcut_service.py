@@ -143,6 +143,10 @@ Si un archivo trae «Reglas de este archivo», cúmplelas siempre: dicen qué in
 Si el cliente pide algo especial para una opción (un personaje, una temática, un adicional) y ni el
 archivo ni sus reglas dicen que ESA opción lo incluye, no le digas que sí ni lo supongas: dile que se lo
 confirmas, ponlo en missing y, si las reglas dicen en qué opción sí está, ofrécele esa opción.
+Que el archivo diga «temática libre», «a tu gusto» o «personalizable» no quiere decir que cualquier
+personaje, figura o decoración especial vaya sin costo extra: si pide uno concreto (ej. safari, un
+personaje) o cambiar lo que muestra la imagen, dile que sí se puede revisar y que le confirmas si tiene
+costo adicional, y ponlo en missing; salvo que las reglas del archivo ya digan que va incluido.
 """
 
 
@@ -555,6 +559,9 @@ def wants_photos_again(client_text: str, reply: "AiGeneratedReply", *, conversat
     return sent_at is not None and sent_at < asked_at
 
 
+ATTACHMENT_ONLY_TEXT = "Aquí te lo comparto."
+
+
 def _strip_json_fence(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -587,8 +594,6 @@ def parse_ai_reply(
     message = str(data.get("message") or data.get("reply") or "").strip()
     flow_id = str(data.get("flow_id") or "").strip()
     flow_id = flow_id if flow_id in valid_flow_ids else None
-    if not message and not (flow_id or allow_empty):
-        return AiGeneratedReply(message=text)
 
     raw_sid = data.get("shortcut_id")
     shortcut_id: Optional[str] = None
@@ -596,6 +601,12 @@ def parse_ai_reply(
         sid = str(raw_sid).strip()
         if sid and sid.lower() not in {"null", "none"} and sid in valid_ids:
             shortcut_id = sid
+    if not message and shortcut_id and not flow_id:
+        # Sin texto el adjunto no sale: el envío arranca por el mensaje.
+        message = ATTACHMENT_ONLY_TEXT
+    if not message and not (flow_id or allow_empty):
+        # Nunca mandarle el JSON al cliente: vacío cuenta como «no respondió» y se reintenta.
+        return AiGeneratedReply(message="")
 
     book_slot = parse_book_slot(data.get("book_slot"), valid_keys=book_keys)
     stage = str(data.get("stage") or "").strip().lower()

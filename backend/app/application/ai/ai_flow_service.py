@@ -24,6 +24,7 @@ MAX_STEPS = 8
 MAX_TEXT_CHARS = 2000
 MAX_TOPIC_CHARS = 200
 FLOW_SENT_TTL_SECONDS = 90 * 24 * 3600
+SENT_FLOW_CHARS = 1200
 
 
 class FlowError(ValueError):
@@ -148,11 +149,20 @@ class FlowPlan:
     valid_ids: frozenset = frozenset()
     # El saludo: se envía solo, sin que la IA lo elija.
     auto_id: Optional[str] = None
+    # (id, tema) de los flujos que aún se pueden enviar: el enrutador elige por intención.
+    topics: tuple[tuple[str, str], ...] = ()
+    routed_id: Optional[str] = None
+
+
+def _full_text(flow: dict) -> str:
+    texts = [" ".join(step["text"].split()) for step in flow.get("steps") or [] if step["type"] == "text"]
+    return " / ".join(texts)[:SENT_FLOW_CHARS]
 
 
 def plan_flows(
     flows: list[dict], shortcuts: list[dict], *, is_first_contact: bool, sent: set[str]
 ) -> FlowPlan:
+    already = [f for f in flows if f.get("active", True) and f["id"] in sent and f["trigger"] == TRIGGER_ASKS_ABOUT]
     active = [f for f in flows if f.get("active", True) and f["id"] not in sent]
     greeting = next((f for f in active if f["trigger"] == TRIGGER_FIRST_CONTACT), None) if is_first_contact else None
     topics = [f for f in active if f["trigger"] == TRIGGER_ASKS_ABOUT]
@@ -173,17 +183,29 @@ def plan_flows(
         blocks.append(
             "\n\nFlujos del negocio (mensajes ya preparados que se envían exactos y en orden):\n"
             f"{lines}\n"
-            '- Si lo que el cliente escribe ahora encaja con un flujo (aunque lo diga con otras palabras), agrega al '
-            'JSON la clave "flow_id" con su id. Se envía antes de tu "message".\n'
+            '- Decide por la INTENCIÓN del cliente, no por las palabras exactas: «¿cómo se separa?», «¿cómo '
+            'contratamos?», «¿qué hago para apartarlo?» y «quiero reservar» piden lo mismo. Si encaja con un flujo, '
+            'agrega al JSON la clave "flow_id" con su id. Se envía antes de tu "message".\n'
+            '- Si encaja con varios flujos parecidos (ej. reservar paquetes distintos), escoge por lo que han venido '
+            "hablando o el paquete que eligió. Si aun así no se sabe cuál, no pongas flow_id: pregúntale en una "
+            "frase corta cuál de esas opciones le interesa.\n"
             '- Con flow_id, tu "message" solo complementa en una frase corta, o va vacío (""). No repitas lo que '
             "dice el flujo, no prometas enviar lo que el flujo ya envía y no pongas shortcut_id de un atajo que ya "
             "va en el flujo.\n"
             '- Si ningún flujo encaja, no pongas "flow_id".'
         )
+    if already:
+        lines = "\n".join(f"- {f['topic']}: «{_full_text(f)}»" for f in already if _full_text(f))
+        if lines:
+            blocks.append(
+                "\n\nFlujos que ya se le enviaron en este chat (no los reenvíes). Si vuelve a preguntar por eso, "
+                f"respóndele con esta misma información, sin cambiarla ni agregar pasos:\n{lines}"
+            )
     return FlowPlan(
         prompt="".join(blocks),
         valid_ids=frozenset(f["id"] for f in topics),
         auto_id=greeting["id"] if greeting else None,
+        topics=tuple((f["id"], f["topic"]) for f in topics),
     )
 
 

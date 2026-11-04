@@ -209,6 +209,14 @@ def connection_payload(instance: str, state: str, owner_phone: str = "5731500000
 
 
 @pytest.fixture(autouse=True)
+def _neutral_flow_router(monkeypatch):
+    """El enrutador de flujos no debe llamar a la IA real; cada test que lo use lo reemplaza."""
+    from app.application.ai import ai_intent_router
+
+    monkeypatch.setattr(ai_intent_router, "chat_completion", lambda *_a, **_kw: '{"flow_id": null}')
+
+
+@pytest.fixture(autouse=True)
 def _disable_rate_limits_in_tests(monkeypatch):
     """El límite por IP de 30 auth/min tumba la suite (todos los tests salen de testclient)."""
     from app.config import settings
