@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.application.ai.ai_appointment_service import BookingContext, without_wait_promise
-from app.application.ai.ai_conversation_service import generate_reply
+from app.application.ai.ai_conversation_service import generate_reply, without_repeated_file
 from app.application.ai.ai_flow_service import get_flows, plan_flows, step_as_shortcut
 from app.application.ai.ai_knowledge_service import learned_answers_block
 from app.application.ai.ai_qualify_service import payment_methods_of
@@ -107,7 +107,7 @@ def _booking(db: Session, tenant: Tenant, profile) -> Optional[BookingContext]:
 
 def _attachment(shortcut: dict) -> dict:
     kind = shortcut.get("type")
-    row = {"label": shortcut.get("label") or "", "type": kind}
+    row = {"id": str(shortcut.get("id") or ""), "label": shortcut.get("label") or "", "type": kind}
     if kind == "text":
         row["text"] = shortcut.get("text") or ""
     elif kind == "image":
@@ -117,7 +117,13 @@ def _attachment(shortcut: dict) -> dict:
     return row
 
 
-def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[str] | None = None) -> TrialReply:
+def try_reply(
+    db: Session,
+    tenant: Tenant,
+    turns: list[dict],
+    sent_flows: set[str] | None = None,
+    sent_files: set[str] | None = None,
+) -> TrialReply:
     history = _history(turns)
     client_text = _client_turn(history)
     if not client_text.strip():
@@ -137,6 +143,7 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[st
         shortcuts,
         is_first_contact=not any(t.get("from") == "ai" for t in turns),
         sent=sent_flows or set(),
+        sent_files=frozenset(sent_files or ()),
     )
     reply = generate_reply(
         tenant=tenant,
@@ -155,6 +162,7 @@ def try_reply(db: Session, tenant: Tenant, turns: list[dict], sent_flows: set[st
     reply = attach_promised_media(
         reply, client_text=client_text, products=products, shortcuts=shortcuts, recent=recent
     )
+    reply = without_repeated_file(reply, plan, client_text)
 
     result = TrialReply(reply=without_internal_refs(without_wait_promise(reply.message), products))
     flow = next((f for f in flows if f["id"] == reply.flow_id), None)

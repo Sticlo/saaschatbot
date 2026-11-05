@@ -154,6 +154,8 @@ class FlowPlan:
     routed_id: Optional[str] = None
     # (id, atajos) de cada flujo: el archivo que ya va en el flujo no se manda otra vez como atajo.
     flow_files: tuple[tuple[str, frozenset], ...] = ()
+    # Atajos con archivo que el cliente ya recibió en este chat.
+    sent_files: frozenset = frozenset()
 
     def files_of(self, flow_id: Optional[str]) -> frozenset:
         return next((files for fid, files in self.flow_files if fid == flow_id), frozenset())
@@ -168,8 +170,26 @@ def _full_text(flow: dict) -> str:
     return " / ".join(texts)[:SENT_FLOW_CHARS]
 
 
+def _sent_files_block(shortcuts: list[dict], sent_files: frozenset) -> str:
+    names = [str(s.get("label") or "").strip() for s in shortcuts if str(s.get("id")) in sent_files]
+    names = [n for n in names if n]
+    if not names:
+        return ""
+    return (
+        "\n\nArchivos que el cliente YA recibió en este chat: "
+        + ", ".join(f"«{n}»" for n in names)
+        + ". No se los vuelvas a enviar ni pongas su shortcut_id, tampoco al cerrar la venta: ya los tiene. "
+        "Solo reenvíalos si dice que no le llegó o pide que se lo mandes otra vez."
+    )
+
+
 def plan_flows(
-    flows: list[dict], shortcuts: list[dict], *, is_first_contact: bool, sent: set[str]
+    flows: list[dict],
+    shortcuts: list[dict],
+    *,
+    is_first_contact: bool,
+    sent: set[str],
+    sent_files: frozenset = frozenset(),
 ) -> FlowPlan:
     already = [f for f in flows if f.get("active", True) and f["id"] in sent and f["trigger"] == TRIGGER_ASKS_ABOUT]
     active = [f for f in flows if f.get("active", True) and f["id"] not in sent]
@@ -221,21 +241,29 @@ def plan_flows(
                 "que el cliente diga que no le llegó). Si vuelve a preguntar por eso, respóndele con esta misma "
                 f"información, sin cambiarla ni agregar pasos:\n{lines}"
             )
+    sent_ids = frozenset(sent_files)
+    for f in flows:
+        if f["id"] in sent:
+            sent_ids |= _flow_shortcut_ids(f)
+    blocks.append(_sent_files_block(shortcuts, sent_ids))
     return FlowPlan(
         prompt="".join(blocks),
         valid_ids=frozenset(f["id"] for f in topics),
         auto_id=greeting["id"] if greeting else None,
         topics=tuple((f["id"], f["topic"]) for f in topics),
         flow_files=tuple((f["id"], _flow_shortcut_ids(f)) for f in active),
+        sent_files=sent_ids,
     )
 
 
 def plan_for_conversation(db: Session, tenant_id: uuid.UUID, conversation_id, shortcuts: list[dict], *, is_first_contact: bool) -> FlowPlan:
+    from app.application.ai.ai_shortcut_service import shortcut_sent_at
+
     flows = get_flows(db, tenant_id)
-    if not flows:
-        return FlowPlan()
+    files = [str(s["id"]) for s in shortcuts if s.get("id") and s.get("type") in ("image", "document")]
+    sent_files = frozenset(i for i in files if shortcut_sent_at(conversation_id, i) is not None)
     sent = {f["id"] for f in flows if flow_sent(conversation_id, f["id"])}
-    return plan_flows(flows, shortcuts, is_first_contact=is_first_contact, sent=sent)
+    return plan_flows(flows, shortcuts, is_first_contact=is_first_contact, sent=sent, sent_files=sent_files)
 
 
 def send_flow(db: Session, *, tenant, session, conversation, flow_id: str) -> int:

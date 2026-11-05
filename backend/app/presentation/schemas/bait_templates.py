@@ -138,6 +138,7 @@ class TryAiTurn(BaseModel):
 class TryAiRequest(BaseModel):
     turns: list[TryAiTurn] = Field(min_length=1, max_length=20)
     sent_flows: list[str] = Field(default_factory=list, max_length=20)
+    sent_files: list[str] = Field(default_factory=list, max_length=40)
 
 
 class TryAiResponse(BaseModel):

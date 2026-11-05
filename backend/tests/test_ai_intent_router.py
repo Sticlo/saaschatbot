@@ -99,3 +99,26 @@ def test_pdf_inside_the_flow_is_not_sent_twice(monkeypatch):
 
     done = plan_flows(flows, shortcuts, is_first_contact=False, sent={"rev"})
     assert "ya incluyó el archivo «revelacion de genero»" in done.prompt
+
+
+def test_a_file_the_client_already_has_is_not_sent_again_when_closing():
+    from app.application.ai.ai_conversation_service import ALREADY_SENT_TEXT, without_repeated_file
+    from app.application.ai.ai_shortcut_service import AiGeneratedReply
+
+    flows = [{"id": "rev", "trigger": "asks_about", "topic": "revelacion de genero",
+              "steps": [{"type": "text", "text": "Portafolio"}, {"type": "shortcut", "shortcut_id": "pdf-rev"}]}]
+    shortcuts = [{"id": "pdf-rev", "label": "revelacion de genero", "type": "document"},
+                 {"id": "pdf-baby", "label": "baby shower", "type": "document"}]
+    plan = plan_flows(flows, shortcuts, is_first_contact=False, sent={"rev"}, sent_files=frozenset({"pdf-baby"}))
+    assert plan.sent_files == {"pdf-rev", "pdf-baby"}
+    assert "YA recibió" in plan.prompt and "«revelacion de genero»" in plan.prompt and "«baby shower»" in plan.prompt
+
+    closing = AiGeneratedReply(message="¡Perfecto! Te separo la fecha.", shortcut_id="pdf-rev")
+    kept = without_repeated_file(closing, plan, "listo, la quiero")
+    assert kept.shortcut_id is None and kept.message == "¡Perfecto! Te separo la fecha."
+
+    only_file = AiGeneratedReply(message="", shortcut_id="pdf-baby")
+    assert without_repeated_file(only_file, plan, "ok").message == ALREADY_SENT_TEXT
+
+    again = without_repeated_file(closing, plan, "no me llegó el pdf, me lo mandas de nuevo?")
+    assert again.shortcut_id == "pdf-rev"

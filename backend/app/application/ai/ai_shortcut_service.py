@@ -848,7 +848,9 @@ def _send_reply_shortcut(
         return
 
     sent_at = shortcut_sent_at(conversation.id, reply.shortcut_id)
-    if not allow_resend and sent_at is not None and time.time() - sent_at < SHORTCUT_RESEND_GUARD_SECONDS:
+    # Un PDF o foto repetido al cerrar la venta confunde: ya lo tiene, salvo que pida que se lo reenvíen.
+    guard = SHORTCUT_SENT_TTL_SECONDS if shortcut.get("type") in ("image", "document") else SHORTCUT_RESEND_GUARD_SECONDS
+    if not allow_resend and sent_at is not None and time.time() - sent_at < guard:
         log.info(
             "Atajo ya enviado hace poco, no se reenvía conv=%s shortcut=%s",
             conversation.id,

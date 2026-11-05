@@ -4486,6 +4486,7 @@
           body: JSON.stringify({
             turns: tryAi.turns.slice(-20).map((t) => ({ from: t.from, text: tryAiTurnText(t) })),
             sent_flows: tryAi.turns.map((t) => t.flowId).filter(Boolean).slice(0, 20),
+            sent_files: [...new Set(tryAi.turns.flatMap((t) => [t.attachment, ...(t.flow || [])]).map((a) => a?.id).filter(Boolean))].slice(0, 40),
           }),
         },
         60000

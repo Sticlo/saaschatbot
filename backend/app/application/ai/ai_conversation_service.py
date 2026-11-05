@@ -25,6 +25,7 @@ from app.application.ai.ai_shortcut_service import (
     ATTACHMENT_ONLY_TEXT,
     AiGeneratedReply,
     append_shortcuts_instructions,
+    asks_to_resend,
     parse_ai_reply,
     reply_format_instruction,
     shortcut_ids,
@@ -365,10 +366,33 @@ def _complete_reply(
     reply = replace(reply, message=without_robot_phrases(reply.message))
     if flows.auto_id:
         reply = replace(reply, flow_id=flows.auto_id)
-    if reply.shortcut_id and reply.shortcut_id in flows.files_of(reply.flow_id):
-        message = "" if reply.message == ATTACHMENT_ONLY_TEXT else reply.message
-        reply = replace(reply, shortcut_id=None, message=message)
-    return reply
+    return without_repeated_file(reply, flows, _last_client_text(history))
+
+
+ALREADY_SENT_TEXT = "Te lo envié más arriba en este chat. ¿Lo pudiste revisar?"
+
+
+def _last_client_text(history: list[Message]) -> str:
+    texts = []
+    for msg in reversed(history):
+        if msg.direction != MessageDirection.IN.value:
+            break
+        texts.append(msg.body or "")
+    return "\n".join(reversed(texts))
+
+
+def without_repeated_file(reply: AiGeneratedReply, flows: FlowPlan, client_text: str) -> AiGeneratedReply:
+    """El PDF que ya va en el flujo, o que el cliente ya recibió, no sale otra vez salvo que lo pida."""
+    sid = reply.shortcut_id
+    if not sid:
+        return reply
+    in_flow = sid in flows.files_of(reply.flow_id)
+    if not in_flow and not (sid in flows.sent_files and not asks_to_resend(client_text)):
+        return reply
+    message = "" if reply.message == ATTACHMENT_ONLY_TEXT else reply.message
+    if not message and not reply.flow_id:
+        message = ALREADY_SENT_TEXT
+    return replace(reply, shortcut_id=None, message=message)
 
 
 def _last_reply_text(history: list[Message]) -> str:
