@@ -19,9 +19,11 @@ def _msg(direction: str, body: str):
 
 def test_router_returns_only_known_flows():
     valid = frozenset(t[0] for t in TOPICS)
-    assert router.parse_route('{"flow_id": "res_deco"}', valid) == "res_deco"
-    assert router.parse_route('```json\n{"flow_id": "baby"}\n```', valid) == "baby"
-    assert router.parse_route('{"flow_id": "inventado"}', valid) is None
+    assert router.parse_route('{"pide": "cómo reservar", "flow_id": "res_deco", "seguro": true}', valid) == "res_deco"
+    assert router.parse_route('```json\n{"flow_id": "baby", "seguro": true}\n```', valid) == "baby"
+    assert router.parse_route('{"flow_id": "inventado", "seguro": true}', valid) is None
+    assert router.parse_route('{"pide": "le interesa la opción 1", "flow_id": "res_deco", "seguro": false}', valid) is None
+    assert router.parse_route('{"flow_id": "res_deco"}', valid) is None
     assert router.parse_route('{"flow_id": null}', valid) is None
     assert router.parse_route("no sé", valid) is None
 
@@ -32,7 +34,7 @@ def test_router_sees_the_conversation_and_every_topic(monkeypatch):
     def fake(messages, **kw):
         seen["messages"] = messages
         seen["kw"] = kw
-        return '{"flow_id": "res_deco"}'
+        return '{"pide": "cómo contratar el de decoración", "flow_id": "res_deco", "seguro": true}'
 
     monkeypatch.setattr(router, "chat_completion", fake)
     history = [
@@ -44,6 +46,7 @@ def test_router_sees_the_conversation_and_every_topic(monkeypatch):
     assert all(topic in seen["messages"][0]["content"] for _, topic in TOPICS)
     assert "Cliente: listo, ¿cómo contratamos?" in seen["messages"][1]["content"]
     assert seen["kw"]["temperature"] == 0.0
+    assert "le interesa o que eligió una opción NO es preguntar cómo reservar" in seen["messages"][0]["content"]
 
 
 def test_router_stays_quiet_when_it_cannot_help(monkeypatch):

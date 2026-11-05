@@ -23,11 +23,17 @@ precios = cuánto vale = qué cuesta = tarifas).
 Temas:
 {topics}
 Reglas:
+- Primero piensa qué está pidiendo de verdad el cliente en su último mensaje, con tus palabras.
 - Solo escoge un tema si el cliente claramente lo está pidiendo ahora.
+- No confundas etapas: decir que le interesa o que eligió una opción NO es preguntar cómo reservar o
+  pagar. Un tema de reservar, separar, abonar o pagar solo aplica si pregunta cómo hacerlo o dice que
+  quiere hacerlo ya.
 - Si encaja con varios temas parecidos, usa la conversación (el paquete o servicio del que venían hablando)
-  para escoger. Si aun así no se sabe cuál, responde null.
-- Saludos, gracias, «ok», charla o preguntas de otra cosa: null.
-Responde solo JSON: {{"flow_id": "<id>"}} o {{"flow_id": null}}"""
+  para escoger. Si aun así no se sabe cuál, flow_id null.
+- Saludos, gracias, «ok», charla o preguntas de otra cosa: flow_id null.
+- "seguro" es true solo si no hay ninguna duda razonable de que ese tema es lo que pide.
+Responde solo JSON, en este orden:
+{{"pide": "<qué pide el cliente, en pocas palabras>", "flow_id": "<id>" o null, "seguro": true o false}}"""
 
 
 def _context(history: Sequence[Message]) -> str:
@@ -43,11 +49,17 @@ def _context(history: Sequence[Message]) -> str:
 def parse_route(raw: str, valid_ids: frozenset[str]) -> Optional[str]:
     text = (raw or "").strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
-        flow_id = json.loads(text).get("flow_id")
+        data = json.loads(text)
+        flow_id = data.get("flow_id")
     except (ValueError, AttributeError):
         return None
+    if data.get("seguro") is not True:
+        return None
     flow_id = str(flow_id or "").strip()
-    return flow_id if flow_id in valid_ids else None
+    if flow_id in valid_ids:
+        log.info("Enrutador: «%s» -> %s", str(data.get("pide") or "")[:120], flow_id)
+        return flow_id
+    return None
 
 
 def route_flow(topics: Sequence[tuple[str, str]], history: Sequence[Message]) -> Optional[str]:
@@ -60,7 +72,7 @@ def route_flow(topics: Sequence[tuple[str, str]], history: Sequence[Message]) ->
         {"role": "user", "content": _context(history)},
     ]
     try:
-        raw = chat_completion(messages, temperature=0.0, max_tokens=40)
+        raw = chat_completion(messages, temperature=0.0, max_tokens=160)
     except Exception as exc:
         log.warning("Enrutador de flujos sin respuesta: %s", exc)
         return None

@@ -195,6 +195,9 @@ def plan_flows(
             '- Decide por la INTENCIÓN del cliente, no por las palabras exactas: «¿cómo se separa?», «¿cómo '
             'contratamos?», «¿qué hago para apartarlo?» y «quiero reservar» piden lo mismo. Si encaja con un flujo, '
             'agrega al JSON la clave "flow_id" con su id. Se envía antes de tu "message".\n'
+            "- No confundas etapas: que diga que le interesa o que eligió una opción NO es preguntar cómo "
+            "reservar o pagar. Un flujo de reservar, separar o pagar solo va si pregunta cómo hacerlo o dice que "
+            "quiere hacerlo ya; antes resuelve sus dudas de la opción.\n"
             '- Si encaja con varios flujos parecidos (ej. reservar paquetes distintos), escoge por lo que han venido '
             "hablando o el paquete que eligió. Si aun así no se sabe cuál, no pongas flow_id: pregúntale en una "
             "frase corta cuál de esas opciones le interesa.\n"
