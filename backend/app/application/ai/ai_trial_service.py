@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.application.ai.ai_appointment_service import BookingContext, without_wait_promise
 from app.application.ai.ai_conversation_service import generate_reply, without_repeated_file
 from app.application.ai.ai_flow_service import get_flows, plan_flows, step_as_shortcut
+from app.application.ai.ai_answer_rules_service import answer_rules_block
 from app.application.ai.ai_knowledge_service import learned_answers_block
 from app.application.ai.ai_qualify_service import payment_methods_of
 from app.application.ai.ai_shortcut_service import attach_promised_media, without_internal_refs
@@ -153,7 +154,7 @@ def try_reply(
         shortcuts=shortcuts,
         booking=booking,
         products=products,
-        knowledge=learned_answers_block(db, tenant.id),
+        knowledge=learned_answers_block(db, tenant.id) + answer_rules_block(profile.ai_answer_rules, history),
         flows=plan,
     )
     if not reply.message.strip() and not reply.flow_id:

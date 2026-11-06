@@ -431,6 +431,11 @@
                 <span class="ai-row-body"><strong>Atajos</strong><span class="ai-row-sub" data-ai-sub="atajos"></span></span>
                 <span class="ai-row-mark" data-ai-mark="atajos"></span>
               </button>
+              <button type="button" class="ai-row" data-ai-open="oficiales">
+                <span class="ai-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5zM9 10h6M9 14h6M9 18h3"/></svg></span>
+                <span class="ai-row-body"><strong>Respuestas oficiales</strong><span class="ai-row-sub" data-ai-sub="oficiales"></span></span>
+                <span class="ai-row-mark" data-ai-mark="oficiales"></span>
+              </button>
             </nav>
 
             <div class="ai-detail">
@@ -642,6 +647,22 @@
                 <input type="file" id="flows-file-input" accept="image/*,application/pdf" hidden />
                 <div class="ai-pane-actions"><button type="button" id="flows-save" class="btn primary">Guardar</button></div>
                 <p id="flows-status" class="ai-save-status muted small"></p>
+              </section>
+
+              <section class="ai-pane" data-ai-pane="oficiales" data-ai-group="respuestas">
+                <header class="ai-pane-head">
+                  <button type="button" class="ai-pane-back" aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                  <div><h3>Respuestas oficiales</h3><p>Sube tu archivo de preguntas y respuestas (JSON). En cada mensaje la IA usa <strong>solo las que tienen que ver</strong> con lo que pregunta el cliente, aunque lo diga con otras palabras.</p></div>
+                </header>
+                <p id="answer-rules-count" class="ai-field-hint"></p>
+                <ul id="answer-rules-preview" class="ai-questions-list"></ul>
+                <input type="file" id="answer-rules-file" accept="application/json,.json" hidden />
+                <div class="ai-pane-actions">
+                  <button type="button" id="answer-rules-upload" class="btn primary">Subir archivo</button>
+                  <button type="button" id="answer-rules-delete" class="btn ghost hidden">Borrar todas</button>
+                </div>
+                <p class="ai-field-hint">Cada regla: <code>name</code> (la pregunta), <code>triggers</code> (otras formas de preguntarla), <code>response</code> y, si quieres que el asesor confirme, <code>"mode": "review"</code>. Subir un archivo reemplaza las anteriores.</p>
+                <p id="answer-rules-status" class="ai-save-status muted small"></p>
               </section>
 
               <section class="ai-pane" data-ai-pane="avisos" data-ai-group="avisos">
@@ -1167,6 +1188,6 @@
     </div>
   </div>
 
-  <script src="/static/panel/app.js?v=209"></script>
+  <script src="/static/panel/app.js?v=210"></script>
 </body>
 </html>

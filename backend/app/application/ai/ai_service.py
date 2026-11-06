@@ -39,6 +39,7 @@ from app.application.ai.ai_appointment_service import (
 )
 from app.application.ai.ai_auto_enable_service import owner_messages, owner_wrote_in_chat
 from app.application.ai.ai_classifier_service import classify_inbound_message, is_personal_chat
+from app.application.ai.ai_answer_rules_service import answer_rules_block
 from app.application.ai.ai_knowledge_service import learned_answers_block, record_missing_info
 from app.application.ai.ai_memory_service import notes_of, notes_prompt_block, remember, returning_block
 from app.application.ai.ai_conversation_service import generate_qualify_reply, generate_reply
@@ -2065,6 +2066,7 @@ def _process_qualify(
             booking=booking,
             products=products,
             knowledge=learned_answers_block(db, tenant.id)
+            + answer_rules_block(profile.ai_answer_rules, history)
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
             + returning_block(history)
@@ -2165,6 +2167,7 @@ def _process_full_reply(
             booking=booking,
             products=products,
             knowledge=learned_answers_block(db, tenant.id)
+            + answer_rules_block(profile.ai_answer_rules, history)
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
             + returning_block(history)

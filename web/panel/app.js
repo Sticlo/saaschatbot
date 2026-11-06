@@ -4684,6 +4684,10 @@
         mark: activeFlows ? "ok" : "",
       },
       atajos: { sub: shortcuts ? `Los envías tú con un clic · ${shortcuts}` : "Los envías tú con un clic", mark: "" },
+      oficiales: {
+        sub: state.answerRules?.count ? `${state.answerRules.count} preguntas con su respuesta` : "Sube tus preguntas y respuestas",
+        mark: state.answerRules?.count ? "ok" : "",
+      },
       avisos: {
         sub: alertCount ? `${alertCount} ${alertCount === 1 ? "número recibe" : "números reciben"} los avisos` : "Nadie recibe los avisos",
         mark: tips.some((t) => t.action === "alerts") || alertCount === 0 ? "tip" : alertCount ? "ok" : "",
@@ -5105,7 +5109,7 @@
     if (!isPhoneLayout() && !$("ai-setup-panel").classList.contains("is-open")) {
       openAiPane(defaultAiPane(), { animate: false });
     }
-    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability(), loadSiteConnection(), loadFlows()]);
+    await Promise.all([loadQuickShortcuts(), loadInterestAlert(), loadFollowup(), loadAiQuestions(), loadAvailability(), loadSiteConnection(), loadFlows(), loadAnswerRules()]);
     renderAiShortcutsSummary();
     renderFlows();
   }
@@ -6052,6 +6056,64 @@
         : "Guardado.";
     } catch (err) {
       status.textContent = err.message;
+    }
+  }
+
+  async function loadAnswerRules() {
+    try {
+      state.answerRules = await api("/ai-answer-rules");
+    } catch {
+      state.answerRules = { count: 0, review: 0, preview: [] };
+    }
+    renderAnswerRules();
+  }
+
+  function renderAnswerRules() {
+    const data = state.answerRules || { count: 0, review: 0, preview: [] };
+    const count = $("answer-rules-count");
+    if (!count) return;
+    count.textContent = data.count
+      ? `${data.count} preguntas cargadas${data.review ? ` · ${data.review} las confirma un asesor` : ""}. Algunas:`
+      : "Aún no hay respuestas oficiales.";
+    $("answer-rules-preview").innerHTML = (data.preview || [])
+      .map((r) => `<li><strong>${escapeHtml(r.name)}</strong><p class="small muted">${escapeHtml(aiRowText(r.response, 140))}</p></li>`)
+      .join("");
+    $("answer-rules-delete").classList.toggle("hidden", !data.count);
+    $("answer-rules-upload").closest(".ai-pane-actions").classList.toggle("hidden", !state.canManageGlobal);
+    renderAiList();
+  }
+
+  async function uploadAnswerRules(file) {
+    const status = $("answer-rules-status");
+    status.textContent = "Leyendo archivo…";
+    try {
+      const parsed = JSON.parse(await file.text());
+      const list = Array.isArray(parsed) ? parsed : parsed.rules || parsed.reglas || [];
+      const rules = list.map((r) => ({
+        name: r.name ?? r.nombre ?? r.pregunta,
+        triggers: r.triggers ?? r.disparadores,
+        response: r.response ?? r.respuesta,
+        mode: r.mode,
+        review: r.review,
+        enabled: r.enabled,
+        materialId: r.materialId ?? r.material ?? r.portafolio,
+      }));
+      state.answerRules = await api("/ai-answer-rules", { method: "PUT", body: JSON.stringify({ rules }) });
+      status.textContent = `Listo: la IA ya conoce ${state.answerRules.count} respuestas oficiales.`;
+      renderAnswerRules();
+    } catch (err) {
+      status.textContent = err instanceof SyntaxError ? "El archivo no es un JSON válido." : err.message || "No se pudo subir el archivo.";
+    }
+  }
+
+  async function deleteAnswerRules() {
+    if (!confirm("¿Borrar todas las respuestas oficiales? La IA dejará de usarlas.")) return;
+    try {
+      state.answerRules = await api("/ai-answer-rules", { method: "DELETE" });
+      $("answer-rules-status").textContent = "Respuestas oficiales borradas.";
+      renderAnswerRules();
+    } catch (err) {
+      $("answer-rules-status").textContent = err.message || "No se pudo borrar.";
     }
   }
 
@@ -8140,6 +8202,13 @@
   $("site-disconnect")?.addEventListener("click", disconnectSite);
   $("availability-save")?.addEventListener("click", saveAvailability);
   $("flows-save")?.addEventListener("click", saveFlows);
+  $("answer-rules-upload")?.addEventListener("click", () => $("answer-rules-file").click());
+  $("answer-rules-file")?.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) uploadAnswerRules(file);
+  });
+  $("answer-rules-delete")?.addEventListener("click", deleteAnswerRules);
   $("flows-list")?.addEventListener("click", onFlowsClick);
   $("flows-list")?.addEventListener("input", (e) => {
     if (e.target.classList.contains("flow-step-text")) autosizeFlowTexts(e.target.closest(".flow-step"));
