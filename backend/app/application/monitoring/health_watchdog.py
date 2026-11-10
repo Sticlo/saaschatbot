@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import text
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 
 from app.application.monitoring.dev_alerts import alert_dev
 from app.config import settings
@@ -29,6 +30,15 @@ def _check_postgres() -> None:
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
+    except SATimeoutError as exc:
+        alert_dev(
+            "watchdog:db_pool",
+            "La API se quedó sin conexiones a Postgres",
+            f"{str(exc)[:300]}\nPostgres puede estar bien: algún endpoint retiene conexiones "
+            "(normalmente esperando a Evolution). El panel y las respuestas IA están fallando.",
+            severity="critical",
+            throttle_seconds=INFRA_ALERT_THROTTLE_SECONDS,
+        )
     except Exception as exc:
         alert_dev(
             "watchdog:postgres",

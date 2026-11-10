@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -37,10 +37,42 @@ def build_sync_debug_report(
     errors: list[str] = []
     timing_ms: dict[str, int] = {}
 
-    webhook_url = f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant.id}"
+    tenant_id = tenant.id
+    instance_name = session.instance_name
+    session_status = session.status
+    active_connection_id = session.active_connection_id
+    phone_number = session.phone_number
+    chatwoot_ready = chatwoot_sync_ready(session) if chatwoot_sync_mode() else False
+    webhook_url = f"{settings.evolution_webhook_base_url()}/webhooks/evolution/{tenant_id}"
+
+    since = datetime.now(timezone.utc) - timedelta(minutes=15)
+    messages_15m = (
+        db.query(func.count(Message.id))
+        .filter(Message.tenant_id == tenant_id, Message.created_at >= since)
+        .scalar()
+        or 0
+    )
+    last_message = (
+        db.query(Message.created_at, Message.body)
+        .filter(Message.tenant_id == tenant_id)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    conv_count = (
+        db.query(func.count(Conversation.id))
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.whatsapp_connection_id == active_connection_id,
+        )
+        .scalar()
+        or 0
+    )
+    # El panel pide este reporte cada 20 s por pestaña: soltar la conexión antes de hablar con
+    # Evolution y con la propia API evita agotar el pool cuando alguno de los dos se pone lento.
+    db.close()
+
     webhook_reachable: bool | None = None
     webhook_reachable_detail = ""
-
     t0 = time.perf_counter()
     try:
         with httpx.Client(timeout=3.0) as client:
@@ -57,7 +89,7 @@ def build_sync_debug_report(
     try:
         found = evolution_client._request(
             "GET",
-            f"/webhook/find/{session.instance_name}",
+            f"/webhook/find/{instance_name}",
             timeout=10.0,
         )
         if isinstance(found, dict):
@@ -76,37 +108,14 @@ def build_sync_debug_report(
     except Exception as exc:
         errors.append(f"redis queue: {exc}")
 
-    since = datetime.now(timezone.utc) - timedelta(minutes=15)
-    messages_15m = (
-        db.query(func.count(Message.id))
-        .filter(Message.tenant_id == tenant.id, Message.created_at >= since)
-        .scalar()
-        or 0
-    )
-    last_message = (
-        db.query(Message)
-        .filter(Message.tenant_id == tenant.id)
-        .order_by(Message.created_at.desc())
-        .first()
-    )
-    conv_count = (
-        db.query(func.count(Conversation.id))
-        .filter(
-            Conversation.tenant_id == tenant.id,
-            Conversation.whatsapp_connection_id == session.active_connection_id,
-        )
-        .scalar()
-        or 0
-    )
-
-    trace = list_webhook_trace(tenant.id, limit=15)
-    last_wh = last_webhook_at(tenant.id)
+    trace = list_webhook_trace(tenant_id, limit=15)
+    last_wh = last_webhook_at(tenant_id)
 
     evolution_db_counts: dict[str, int] = {}
     if settings.evolution_database_url:
         try:
             evolution_db_counts = fetch_stored_counts(
-                settings.evolution_database_url, session.instance_name
+                settings.evolution_database_url, instance_name
             )
         except Exception as exc:
             errors.append(f"evolution_db: {exc}")
@@ -150,7 +159,7 @@ def build_sync_debug_report(
                 "Solo webhooks de prueba (TEST*) — Evolution no está enviando eventos reales. "
                 "Reinicia Evolution (./scripts/evolution-mac.sh start) y escribe un mensaje desde el celular."
             )
-        elif evolution_db_counts.get("messages", 0) == 0 and session.status == "connected":
+        elif evolution_db_counts.get("messages", 0) == 0 and session_status == "connected":
             hints.append(
                 "Evolution conectado pero sin chats/mensajes en su BD — WhatsApp aún no sincronizó. "
                 "Envía o recibe un mensaje desde el celular para arrancar."
@@ -171,19 +180,12 @@ def build_sync_debug_report(
     if webhook_reachable is False:
         hints.append(f"La API no responde en {settings.app_public_url}: {webhook_reachable_detail}")
 
-    # ── Diagnóstico de chats: fantasmas, confusión de identidad, @lid ──────
-    conv_diagnostics = _build_conv_diagnostics(
-        db,
-        tenant_id=tenant.id,
-        connection_id=session.active_connection_id,
-    )
-
     if settings.chatwoot_enabled and not chatwoot_token_configured():
         hints.append(
             "CHATWOOT_ENABLED sin CHATWOOT_API_TOKEN — usando Evolution como fallback. "
             "Configure CHATWOOT_API_TOKEN para sync vía Chatwoot."
         )
-    elif chatwoot_sync_mode() and session and not chatwoot_sync_ready(session):
+    elif chatwoot_sync_mode() and not chatwoot_ready:
         hints.append(
             "Modo Chatwoot activo pero sin inbox — escanea QR de nuevo o revisa Chatwoot en :3000."
         )
@@ -198,12 +200,12 @@ def build_sync_debug_report(
         "errors": errors,
         "hints": hints,
         "session": {
-            "instance_name": session.instance_name,
-            "status": session.status,
-            "active_connection_id": str(session.active_connection_id)
-            if session.active_connection_id
+            "instance_name": instance_name,
+            "status": session_status,
+            "active_connection_id": str(active_connection_id)
+            if active_connection_id
             else None,
-            "phone_number": session.phone_number,
+            "phone_number": phone_number,
         },
         "urls": {
             "app_public_url": settings.app_public_url,
@@ -226,105 +228,7 @@ def build_sync_debug_report(
         "messages": {
             "last_15_minutes": messages_15m,
             "last_message_at": last_message.created_at.isoformat() if last_message else None,
-            "last_message_preview": (last_message.body[:80] if last_message else ""),
+            "last_message_preview": ((last_message.body or "")[:80] if last_message else ""),
             "conversations_active": conv_count,
         },
-        "conversations": conv_diagnostics,
-    }
-
-
-def _build_conv_diagnostics(
-    db: Session,
-    *,
-    tenant_id,
-    connection_id,
-) -> dict[str, Any]:
-    """Diagnóstico profundo de chats: fantasmas, nombres placeholders, conflictos @lid."""
-    from app.shared.core.phone import is_placeholder_contact_name
-
-    if connection_id is None:
-        return {"error": "Sin active_connection_id"}
-
-    tid = str(tenant_id)
-    cid = str(connection_id)
-
-    # Totales
-    total = db.execute(text(
-        "SELECT COUNT(*) FROM conversations WHERE tenant_id=:tid AND whatsapp_connection_id=:cid"
-    ), {"tid": tid, "cid": cid}).scalar() or 0
-
-    ghost = db.execute(text("""
-        SELECT COUNT(*) FROM conversations c
-        WHERE c.tenant_id=:tid AND c.whatsapp_connection_id=:cid
-        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id)
-    """), {"tid": tid, "cid": cid}).scalar() or 0
-
-    with_msgs = total - ghost
-
-    # Nombres placeholder (mostrando número en lugar de nombre)
-    all_convs = (
-        db.query(Conversation)
-        .filter(
-            Conversation.tenant_id == tenant_id,
-            Conversation.whatsapp_connection_id == connection_id,
-        )
-        .all()
-    )
-    placeholder_convs = [
-        c for c in all_convs
-        if is_placeholder_contact_name(c.contact_name, c.contact_phone)
-        and c.id in {
-            row[0] for row in db.execute(text(
-                "SELECT conversation_id FROM messages WHERE conversation_id IN "
-                "(SELECT id FROM conversations WHERE tenant_id=:tid AND whatsapp_connection_id=:cid)"
-            ), {"tid": tid, "cid": cid}).fetchall()
-        }
-    ]
-
-    # Conversaciones @lid sin teléfono real
-    lid_only = [
-        c for c in all_convs
-        if (c.contact_jid or "").endswith("@lid")
-        and not (c.contact_phone or "").startswith("+")
-        and not (c.contact_phone or "").startswith("lid:")
-    ]
-
-    # Detectar posibles duplicados: mismo nombre, distinto teléfono
-    name_count: dict[str, list] = {}
-    for c in all_convs:
-        name = (c.contact_name or "").strip()
-        if name and not is_placeholder_contact_name(name, c.contact_phone) and len(name) > 3:
-            name_count.setdefault(name, []).append(c)
-    potential_dups = {
-        name: [
-            {"id": str(c.id), "phone": c.contact_phone, "jid": c.contact_jid}
-            for c in convs
-        ]
-        for name, convs in name_count.items()
-        if len(convs) > 1
-    }
-
-    # Top 10 convs con nombre placeholder (para debug)
-    placeholder_sample = [
-        {
-            "name": c.contact_name,
-            "phone": c.contact_phone,
-            "jid": c.contact_jid,
-        }
-        for c in sorted(
-            placeholder_convs,
-            key=lambda x: x.last_message_at or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )[:10]
-    ]
-
-    return {
-        "total": total,
-        "with_messages": with_msgs,
-        "ghost_0_messages": ghost,
-        "placeholder_names": len(placeholder_convs),
-        "placeholder_sample": placeholder_sample,
-        "lid_only_no_phone": len(lid_only),
-        "potential_duplicates": potential_dups,
-        "duplicate_count": len(potential_dups),
     }

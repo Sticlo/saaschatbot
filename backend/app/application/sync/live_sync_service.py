@@ -107,11 +107,18 @@ def pull_live_conversation_messages(
     if not jids:
         return 0, []
 
+    instance_name = session.instance_name
+    # Evolution puede tardar hasta un minuto: sin transacción abierta la conexión vuelve al pool
+    # mientras tanto (el panel llama esto cada 4 s por pestaña).
+    db.commit()
+    records_by_jid = [
+        (jid, _load_message_records(instance_name, jid, limit=limit)) for jid in jids
+    ]
+
     imported = 0
     seen_ids: set[str] = set()
     try:
-        for jid in jids:
-            records = _load_message_records(session.instance_name, jid, limit=limit)
+        for jid, records in records_by_jid:
             if not records:
                 continue
             imported += _import_messages(

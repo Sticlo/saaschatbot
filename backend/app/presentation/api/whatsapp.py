@@ -28,6 +28,7 @@ from app.application.billing.tenant_service import log_audit
 from app.application.whatsapp.whatsapp_service import (
     EvolutionAPIError,
     disconnect_session,
+    fetch_gateway_snapshot,
     get_or_create_session,
     link_error_for,
     pairing_code_for,
@@ -235,10 +236,16 @@ def whatsapp_status(current: RequireViewer, db: Session = Depends(get_db)):
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
+    instance_name = get_or_create_session(db, tenant).instance_name
+    # El panel consulta esto cada 15 s: la conexión vuelve al pool mientras Evolution contesta.
+    db.commit()
+    snapshot = fetch_gateway_snapshot(instance_name)
+
+    tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     session = get_or_create_session(db, tenant)
     binding_repaired = False
     try:
-        refresh = refresh_session_status(db, tenant, session)
+        refresh = refresh_session_status(db, tenant, session, snapshot=snapshot)
         session = refresh.session
         if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value and session.active_connection_id is None:
             from app.application.conversations.whatsapp_conversation_service import (
@@ -284,12 +291,15 @@ def whatsapp_status(current: RequireViewer, db: Session = Depends(get_db)):
         ):
             ensure_whatsapp_sync_after_connect(tenant.id, force=True)
 
+    response = _session_response(session)
     if tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
         from app.application.whatsapp.whatsapp_service import ensure_evolution_webhook
 
-        ensure_evolution_webhook(session, tenant.id, force=False)
+        tenant_id = tenant.id
+        db.close()
+        ensure_evolution_webhook(session, tenant_id, force=False)
 
-    return _session_response(session)
+    return response
 
 
 @router.get("/diagnostic")

@@ -766,16 +766,41 @@ def start_connection(db: Session, tenant: Tenant, *, pairing_phone: Optional[str
     return session
 
 
+@dataclass
+class GatewaySnapshot:
+    state_payload: Any = None
+    instance_meta: Optional[dict] = None
+    reachable: bool = True
+
+
+def fetch_gateway_snapshot(instance_name: str) -> GatewaySnapshot:
+    """Lo que refresh_session_status pregunta a Evolution, para pedirlo sin tener la BD tomada."""
+    try:
+        state_payload = gateway_connection_state(instance_name)
+    except WhatsAppGatewayError:
+        return GatewaySnapshot(reachable=False)
+    try:
+        instance_meta = gateway_fetch_instance(instance_name)
+    except WhatsAppGatewayError:
+        instance_meta = None
+    return GatewaySnapshot(state_payload=state_payload, instance_meta=instance_meta)
+
+
 def refresh_session_status(
-    db: Session, tenant: Tenant, session: WhatsAppSession
+    db: Session,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    *,
+    snapshot: Optional[GatewaySnapshot] = None,
 ) -> SessionRefreshResult:
     previous_status = session.status
     phone_before = session.phone_number
     bound_before = session.bound_owner_jid
     binding_reset = False
-    try:
-        state_payload = gateway_connection_state(session.instance_name)
-    except WhatsAppGatewayError:
+    if snapshot is None:
+        snapshot = fetch_gateway_snapshot(session.instance_name)
+    state_payload = snapshot.state_payload
+    if not snapshot.reachable:
         # Evolution no respondió: se marca caído pero se conserva la vinculación para reconectar.
         session.status = WhatsAppStatus.DISCONNECTED.value
         tenant.whatsapp_status = WhatsAppStatus.DISCONNECTED.value
@@ -803,11 +828,7 @@ def refresh_session_status(
             owner = instance_data.get("owner") or instance_data.get("wuid")
         owner = owner or state_payload.get("owner") or state_payload.get("wuid")
 
-    try:
-        instance_meta = gateway_fetch_instance(session.instance_name)
-    except WhatsAppGatewayError:
-        instance_meta = None
-
+    instance_meta = snapshot.instance_meta
     if instance_meta:
         meta_status = str(
             instance_meta.get("connectionStatus") or instance_meta.get("status") or ""
