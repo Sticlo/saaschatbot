@@ -262,6 +262,9 @@ def auth_providers():
 
 def _is_safe_next_path(path: str) -> bool:
     cleaned = (path or "").strip()
+    # Los navegadores leen «/\evil.com» como «//evil.com»: solo rutas internas sin trucos.
+    if "\\" in cleaned or any(ord(ch) < 32 for ch in cleaned):
+        return False
     return cleaned.startswith("/") and not cleaned.startswith("//")
 
 
