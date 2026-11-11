@@ -123,6 +123,50 @@ def test_followup_is_sent_once_and_skipped_when_the_chat_already_ended(monkeypat
             get_redis().delete(f"ai:followup:{quiet.id}", f"ai:followup:{ended.id}")
 
 
+@requires_db
+def test_followups_pause_when_almost_nobody_answers(monkeypatch):
+    from app.application.ai import ai_followup_service as svc
+    from app.config import settings
+    from app.domain.entities import Message
+    from app.infrastructure.persistence.database import SessionLocal
+
+    monkeypatch.setattr(settings, "followup_min_sample", 10)
+    monkeypatch.setattr(settings, "followup_min_reply_rate", 0.15)
+    with SessionLocal() as db:
+        tenant = _setup(db)
+        chats = [
+            _chat(db, tenant, f"Cliente {i}", history=("contact", "bot"), silent_hours=30,
+                  followup_sent_at=NOW - timedelta(days=1))
+            for i in range(10)
+        ]
+        assert svc.reply_rate(db, tenant.id, NOW) == (10, 0)
+        assert svc.followups_paused_for_low_replies(db, tenant, NOW) is True
+
+        for chat in chats[:2]:
+            db.add(Message(tenant_id=tenant.id, conversation_id=chat.id, direction="in", source="contact",
+                           body="Sí, me interesa", status="received", created_at=NOW - timedelta(hours=20)))
+        db.flush()
+        assert svc.reply_rate(db, tenant.id, NOW) == (10, 2)
+        assert svc.followups_paused_for_low_replies(db, tenant, NOW) is False
+        db.rollback()
+
+
+def test_daily_followup_count_is_per_business_and_per_day():
+    from app.application.ai import ai_followup_service as svc
+    from app.infrastructure.cache.redis_client import get_redis
+
+    tenant_id = uuid.uuid4()
+    try:
+        assert svc.sent_today(tenant_id, NOW) == 0
+        svc._count_sent(tenant_id, NOW)
+        svc._count_sent(tenant_id, NOW)
+        assert svc.sent_today(tenant_id, NOW) == 2
+        assert svc.sent_today(tenant_id, NOW + timedelta(days=1)) == 0
+        assert svc.sent_today(uuid.uuid4(), NOW) == 0
+    finally:
+        get_redis().delete(svc._daily_key(tenant_id, NOW))
+
+
 def test_never_writes_at_night_or_outside_business_hours():
     from types import SimpleNamespace
 

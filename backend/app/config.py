@@ -122,6 +122,11 @@ class Settings(BaseSettings):
     ai_mark_read_before_reply: bool = True
     ai_max_sends_per_minute: int = 15
     ai_send_queue_max_wait_seconds: int = 90
+    # Seguimientos a quien dejó de responder: escribirle a quien no contesta es lo que más restringe
+    # números. Tope diario por negocio y pausa si en 7 días casi nadie responde.
+    followup_daily_cap: int = 20
+    followup_min_reply_rate: float = 0.15
+    followup_min_sample: int = 40
     ai_max_message_chars: int = 600
     ai_maps_plans_per_day: int = 5
 

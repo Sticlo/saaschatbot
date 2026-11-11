@@ -14,6 +14,7 @@ from typing import Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.application.ai.ai_conversation_service import (
     SALES_PLAYBOOK,
     SAFETY_RULES,
@@ -47,7 +48,10 @@ FOLLOWUP_WINDOW = timedelta(hours=20)
 # Nunca de madrugada ni de noche, aunque el horario del negocio diga otra cosa.
 EARLIEST = time(8, 0)
 LATEST = time(20, 0)
-MAX_PER_TENANT_PER_SWEEP = 10
+MAX_PER_TENANT_PER_SWEEP = 3
+REPLY_RATE_WINDOW = timedelta(days=7)
+SWEEP_LOCK_KEY = "ai:followup:sweep"
+LOW_REPLY_ALERT_THROTTLE_SECONDS = 24 * 3600
 # Varios mensajes salidos en el mismo segundo delatan al bot.
 SEND_GAP_SECONDS = (8, 20)
 LOCK_TTL_SECONDS = 15 * 60
@@ -141,6 +145,65 @@ def due_followups(db: Session, tenant: Tenant, now: datetime) -> list[Conversati
     return due
 
 
+def _daily_key(tenant_id, now: datetime) -> str:
+    return f"ai:followup:sent:{tenant_id}:{now.astimezone(BOGOTA):%Y%m%d}"
+
+
+def sent_today(tenant_id, now: datetime) -> int:
+    try:
+        return int(get_redis().get(_daily_key(tenant_id, now)) or 0)
+    except Exception:
+        return 0
+
+
+def _count_sent(tenant_id, now: datetime) -> None:
+    key = _daily_key(tenant_id, now)
+    client = get_redis()
+    client.incr(key)
+    client.expire(key, 2 * 24 * 3600)
+
+
+def reply_rate(db: Session, tenant_id, now: datetime) -> tuple[int, int]:
+    """(seguimientos, cuántos respondieron) de los últimos 7 días."""
+    replied = (
+        db.query(Message.id)
+        .filter(
+            Message.conversation_id == Conversation.id,
+            Message.direction == MessageDirection.IN.value,
+            Message.created_at > Conversation.followup_sent_at,
+        )
+        .exists()
+    )
+    rows = (
+        db.query(Conversation.id, replied)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Conversation.followup_sent_at >= now - REPLY_RATE_WINDOW,
+        )
+        .all()
+    )
+    return len(rows), sum(1 for _, answered in rows if answered)
+
+
+def followups_paused_for_low_replies(db: Session, tenant: Tenant, now: datetime) -> bool:
+    """Si casi nadie contesta los seguimientos, WhatsApp los lee como spam: se pausan solos."""
+    sent, answered = reply_rate(db, tenant.id, now)
+    if sent < settings.followup_min_sample or answered / sent >= settings.followup_min_reply_rate:
+        return False
+    from app.application.monitoring.dev_alerts import alert_dev
+
+    alert_dev(
+        f"followup:low_reply:{tenant.id}",
+        f"Seguimientos pausados: {tenant.business_name} casi no recibe respuesta",
+        f"En 7 días respondieron {answered} de {sent} seguimientos ({answered / sent:.0%}). "
+        "Seguir escribiendo a quien no contesta puede hacer que WhatsApp restrinja el número. "
+        "Vuelven a salir solos cuando esos 7 días queden atrás.",
+        severity="warning",
+        throttle_seconds=LOW_REPLY_ALERT_THROTTLE_SECONDS,
+    )
+    return True
+
+
 def _clean(raw: str) -> Optional[str]:
     text = (raw or "").strip()
     if text.startswith("{"):
@@ -201,6 +264,10 @@ def send_followup(db: Session, tenant: Tenant, conversation: Conversation, now: 
         source=MessageSource.BOT.value,
     )
     db.commit()
+    try:
+        _count_sent(tenant.id, now)
+    except Exception:
+        log.debug("No se pudo contar el seguimiento tenant=%s", tenant.id, exc_info=True)
     log.info("Seguimiento enviado conv=%s", conversation.id)
     return True
 
@@ -231,7 +298,10 @@ def sweep_once(now: Optional[datetime] = None, *, gap=SEND_GAP_SECONDS) -> int:
                 continue
             if not within_sending_hours(profile, now):
                 continue
-            for conversation in due_followups(db, tenant, now)[:MAX_PER_TENANT_PER_SWEEP]:
+            room = min(MAX_PER_TENANT_PER_SWEEP, settings.followup_daily_cap - sent_today(tenant.id, now))
+            if room <= 0 or followups_paused_for_low_replies(db, tenant, now):
+                continue
+            for conversation in due_followups(db, tenant, now)[:room]:
                 try:
                     if send_followup(db, tenant, conversation, now):
                         sent += 1
@@ -249,6 +319,9 @@ def _sweeper_loop() -> None:
     log.info("Follow-up sweeper started")
     while not _sweeper_stop.wait(SWEEP_INTERVAL_SECONDS):
         try:
+            # Cada worker de IA arranca este hilo: sin el candado, cada réplica sumaría su propio cupo.
+            if not get_redis().set(SWEEP_LOCK_KEY, "1", nx=True, ex=SWEEP_INTERVAL_SECONDS - 30):
+                continue
             sweep_once()
         except Exception:
             log.exception("Follow-up sweeper error")

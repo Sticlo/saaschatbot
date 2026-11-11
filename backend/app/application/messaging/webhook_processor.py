@@ -497,6 +497,21 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                 health.note_outage_start(
                     tenant_id, {"reason": reason, "code": code, "status": tenant.whatsapp_status}
                 )
+                if reason == "banned" or tenant.whatsapp_status in (
+                    WhatsAppStatus.BANNED.value,
+                    WhatsAppStatus.RESTRICTED.value,
+                ):
+                    from app.application.monitoring.dev_alerts import alert_dev
+
+                    alert_dev(
+                        f"whatsapp:banned:{tenant_id}",
+                        f"WhatsApp restringió el número de {tenant.business_name}",
+                        f"Código {code}, estado {tenant.whatsapp_status}. No reconectes a la fuerza: "
+                        "espera a que se levante la restricción y revisa los seguimientos y el volumen "
+                        "de envíos del negocio.",
+                        severity="critical",
+                        throttle_seconds=6 * 3600,
+                    )
                 if reason == "replaced":
                     health.warn_owner_session_replaced(db, tenant)
             elif not was_connected and tenant.whatsapp_status == WhatsAppStatus.CONNECTED.value:
