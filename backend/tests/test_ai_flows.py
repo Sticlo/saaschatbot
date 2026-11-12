@@ -136,8 +136,8 @@ def test_flow_steps_go_in_order_before_the_ai_message_and_only_once(monkeypatch,
     def fake_text(db, *, text, verbatim=False, **kwargs):
         sent.append(("texto", text, verbatim))
 
-    def fake_shortcut(db, *, shortcut, **kwargs):
-        sent.append(("atajo", shortcut["id"]))
+    def fake_shortcut(db, *, shortcut, caption="", **kwargs):
+        sent.append(("atajo", shortcut["id"], caption) if caption else ("atajo", shortcut["id"]))
 
     monkeypatch.setattr(whatsapp_service, "send_text_message", fake_text)
     monkeypatch.setattr(ss, "send_text_message", fake_text)
@@ -148,8 +148,8 @@ def test_flow_steps_go_in_order_before_the_ai_message_and_only_once(monkeypatch,
     reply = AiGeneratedReply(message="¿Para cuántas personas?", flow_id="hola")
     ss.send_reply_with_shortcut(None, tenant=tenant, session=None, conversation=conversation, reply=reply)
     assert sent == [
-        ("texto", "¡Hola! Bienvenido a Café Luna ☕", True),
-        ("atajo", "menu"),
+        # El texto que va justo antes de una foto o PDF sale como su descripción, en un solo mensaje.
+        ("atajo", "menu", "¡Hola! Bienvenido a Café Luna ☕"),
         ("atajo", "precios"),
         ("texto", "¿Para cuántas personas?", False),
     ]

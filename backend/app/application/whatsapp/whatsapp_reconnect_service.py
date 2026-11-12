@@ -75,6 +75,8 @@ def try_reconnect(db: Session, tenant: Tenant, session: WhatsAppSession) -> bool
             )
             return False
         log.info("Reconexión WhatsApp solicitada tenant=%s", tenant.id)
+        # Pedir conexión cada minuto a un número que WhatsApp tiene frenado se ve como un bot insistiendo.
+        cache_set(_backoff_key(tenant), "1", ttl_seconds=CONNECT_RETRY_SECONDS)
         return False
 
     if state != "open":

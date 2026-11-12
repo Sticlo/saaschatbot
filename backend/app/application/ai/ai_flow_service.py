@@ -268,7 +268,7 @@ def plan_for_conversation(db: Session, tenant_id: uuid.UUID, conversation_id, sh
 
 def send_flow(db: Session, *, tenant, session, conversation, flow_id: str) -> int:
     """Envía los pasos en orden. Se marca antes de enviar: un reintento nunca lo repite."""
-    from app.application.ai.ai_shortcut_service import send_shortcut_content
+    from app.application.ai.ai_shortcut_service import ATTACHMENT_TYPES, CAPTION_MAX_CHARS, send_shortcut_content
     from app.application.outbound.quick_shortcut_service import get_shortcuts
     from app.application.whatsapp.whatsapp_service import send_text_message
     from app.domain.entities.enums import MessageSource
@@ -278,9 +278,38 @@ def send_flow(db: Session, *, tenant, session, conversation, flow_id: str) -> in
         return 0
     mark_flow_sent(conversation.id, flow_id)
     shortcuts = {str(s.get("id")): s for s in get_shortcuts(db, tenant.id)}
-    sent = 0
-    for step in flow["steps"]:
+
+    def as_shortcut(step: dict) -> Optional[dict]:
         if step["type"] == "text":
+            return None
+        return step_as_shortcut(step) or shortcuts.get(step.get("shortcut_id"))
+
+    steps = flow["steps"]
+    sent = 0
+    index = 0
+    while index < len(steps):
+        step = steps[index]
+        index += 1
+        if step["type"] == "text":
+            following = as_shortcut(steps[index]) if index < len(steps) else None
+            if (
+                following is not None
+                and following.get("type") in ATTACHMENT_TYPES
+                and len(step["text"]) <= CAPTION_MAX_CHARS
+            ):
+                # Texto y archivo en un solo mensaje, como lo haría una persona.
+                send_shortcut_content(
+                    db,
+                    tenant=tenant,
+                    session=session,
+                    conversation=conversation,
+                    shortcut=following,
+                    source=MessageSource.BOT.value,
+                    caption=step["text"],
+                )
+                index += 1
+                sent += 2
+                continue
             send_text_message(
                 db,
                 tenant=tenant,
@@ -291,7 +320,7 @@ def send_flow(db: Session, *, tenant, session, conversation, flow_id: str) -> in
                 verbatim=True,
             )
         else:
-            shortcut = step_as_shortcut(step) or shortcuts.get(step.get("shortcut_id"))
+            shortcut = as_shortcut(step)
             if shortcut is None:
                 continue
             send_shortcut_content(
