@@ -26,6 +26,7 @@ from app.application.ai.ai_mode_service import is_classify_only, is_qualify_mode
 from app.application.ai.ai_qualify_service import CLOSING_HOLD_REPLIES, build_qualify_system_prompt
 from app.application.appointments.appointment_service import BOGOTA
 from app.application.orders.order_service import has_recent_purchase
+from app.application.whatsapp.messaging_policy import CUSTOMER_SERVICE_WINDOW, as_utc
 from app.domain.entities import Conversation, Message, Tenant, TenantProfile
 from app.domain.entities.enums import (
     ConversationInterest,
@@ -58,6 +59,8 @@ LOCK_TTL_SECONDS = 15 * 60
 HISTORY_TURNS = 12
 SKIP = "NO"
 PURCHASE_QUIET = timedelta(days=3)
+# Lo que tarda en salir (la IA lo escribe, espera turno): que no llegue con la ventana de 24 h ya cerrada.
+WINDOW_MARGIN = timedelta(minutes=30)
 
 _ENDED_REPLIES = frozenset(CLOSING_HOLD_REPLIES)
 
@@ -128,7 +131,7 @@ def due_followups(db: Session, tenant: Tenant, now: datetime) -> list[Conversati
         if last.created_at > latest or last.created_at < latest - FOLLOWUP_WINDOW:
             continue
         last_in = _last_message(db, conversation.id, MessageDirection.IN.value)
-        if last_in is None:
+        if last_in is None or now - as_utc(last_in.created_at) > CUSTOMER_SERVICE_WINDOW - WINDOW_MARGIN:
             continue
         if conversation.followup_sent_at and conversation.followup_sent_at >= last_in.created_at:
             continue

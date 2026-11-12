@@ -58,6 +58,7 @@ from app.application.whatsapp.whatsapp_gateway import (
     send_voice as gateway_send_voice,
     uses_waha,
 )
+from app.application.whatsapp.messaging_policy import KIND_REPLY, ensure_can_message
 from app.application.whatsapp.whatsapp_status import apply_session_status, can_send_whatsapp, resolve_whatsapp_status
 from app.infrastructure.cache.redis_client import get_redis
 
@@ -1127,11 +1128,15 @@ def send_text_message(
     source: str,
     reply_to: Optional[Message] = None,
     verbatim: bool = False,
+    kind: str = KIND_REPLY,
 ) -> Message:
-    """`verbatim`: lo escribió el dueño (un atajo) y sale en un solo mensaje aunque sea largo."""
+    """`verbatim`: lo escribió el dueño (un atajo) y sale en un solo mensaje aunque sea largo.
+    `kind`: KIND_UTILITY para avisos de algo que el cliente pidió (cita, pedido), que pueden salir
+    pasadas las 24 horas."""
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
+    ensure_can_message(db, conversation, kind=kind)
 
     if not conversation.contact_jid and not is_valid_whatsapp_phone(conversation.contact_phone):
         raise EvolutionAPIError(
@@ -1239,6 +1244,7 @@ def send_image_data_message(
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
+    ensure_can_message(db, conversation)
 
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation
@@ -1279,6 +1285,7 @@ def send_voice_data_message(
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
+    ensure_can_message(db, conversation)
 
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation
@@ -1315,6 +1322,7 @@ def send_document_data_message(
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
+    ensure_can_message(db, conversation)
 
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation
@@ -1356,6 +1364,7 @@ def send_document_message(
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
         raise EvolutionAPIError(reason)
+    ensure_can_message(db, conversation)
 
     conversation, recipient = _prepare_outbound_recipient(
         db, tenant=tenant, session=session, conversation=conversation

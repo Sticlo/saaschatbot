@@ -146,6 +146,7 @@ def set_status(
 
 
 def _notify_dispatched(db: Session, tenant: Tenant, order: Order) -> bool:
+    from app.application.whatsapp.messaging_policy import KIND_UTILITY
     from app.application.whatsapp.whatsapp_service import send_text_message
     from app.domain.entities.enums import MessageSource
 
@@ -162,6 +163,7 @@ def _notify_dispatched(db: Session, tenant: Tenant, order: Order) -> bool:
             conversation=conversation,
             text=dispatch_message(order),
             source=MessageSource.BOT.value,
+            kind=KIND_UTILITY,
         )
     except Exception:
         log.warning("No se pudo avisar el despacho order=%s", order.id, exc_info=True)

@@ -30,8 +30,8 @@ def _register(client) -> dict:
 
 @pytest.fixture()
 def chat(client):
-    from app.domain.entities import Conversation, Tenant, WhatsAppSession
-    from app.domain.entities.enums import WhatsAppStatus
+    from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
+    from app.domain.entities.enums import MessageDirection, MessageSource, MessageStatus, WhatsAppStatus
     from app.infrastructure.persistence.database import SessionLocal
 
     owner = _register(client)
@@ -51,6 +51,18 @@ def chat(client):
             whatsapp_connection_id=uuid.uuid4(),
         )
         db.add(conversation)
+        db.flush()
+        # WhatsApp solo deja responder a quien escribió en las últimas 24 horas.
+        db.add(
+            Message(
+                tenant_id=tenant_id,
+                conversation_id=conversation.id,
+                direction=MessageDirection.IN.value,
+                source=MessageSource.CONTACT.value,
+                body="Hola, ¿tienen disponible?",
+                status=MessageStatus.RECEIVED.value,
+            )
+        )
         db.commit()
         conversation_id = conversation.id
     return conversation_id, {"Authorization": f"Bearer {owner['access_token']}"}

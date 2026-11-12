@@ -34,6 +34,7 @@ from app.presentation.schemas.whatsapp import (
 from app.application.realtime.realtime_service import publish_conversation_updated
 from app.infrastructure.evolution.evolution_client import EvolutionAPIError, evolution_client
 from app.application.billing.tenant_service import log_audit
+from app.application.whatsapp.messaging_policy import MessagingPolicyError
 from app.application.whatsapp.whatsapp_gateway import WhatsAppGatewayError
 from app.application.whatsapp.whatsapp_service import (
     send_document_data_message,
@@ -50,6 +51,12 @@ from app.shared.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 log = logging.getLogger(__name__)
+
+
+def _send_failed(exc: Exception) -> HTTPException:
+    if isinstance(exc, MessagingPolicyError):
+        return HTTPException(status_code=403, detail=str(exc))
+    return HTTPException(status_code=502, detail=str(exc))
 
 
 def _to_conversation_response(
@@ -514,7 +521,7 @@ def send_message(
             db.refresh(message)
         except (EvolutionAPIError, WhatsAppGatewayError) as exc:
             db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise _send_failed(exc) from exc
         return message
 
     return send_once(db, request, current.tenant_id, _send)
@@ -584,7 +591,7 @@ def send_image(
             db.refresh(message)
         except (EvolutionAPIError, WhatsAppGatewayError) as exc:
             db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise _send_failed(exc) from exc
         return message
 
     return send_once(db, request, current.tenant_id, _send)
@@ -646,7 +653,7 @@ def send_voice_note(
             db.refresh(message)
         except (EvolutionAPIError, WhatsAppGatewayError) as exc:
             db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise _send_failed(exc) from exc
         return message
 
     return send_once(db, request, current.tenant_id, _send)
@@ -695,7 +702,7 @@ def send_chat_file(
             db.refresh(message)
         except (EvolutionAPIError, WhatsAppGatewayError) as exc:
             db.rollback()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise _send_failed(exc) from exc
         return message
 
     return send_once(db, request, current.tenant_id, _send)
@@ -759,7 +766,7 @@ def send_shortcut_message(
         db.refresh(message)
     except (EvolutionAPIError, WhatsAppGatewayError) as exc:
         db.rollback()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise _send_failed(exc) from exc
 
     return message
 

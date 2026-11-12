@@ -8591,7 +8591,9 @@
     } catch (err) {
       tmp.status = "failed";
       if (tmp.conversation_id === state.activeId) renderMessages();
-      toast(`${err.message || "No se pudo enviar."} Toca el mensaje para reintentar.`, { tone: "error" });
+      // 403: lo impiden las reglas de WhatsApp (ventana de 24 h); reintentar no cambia nada.
+      const hint = err.status === 403 ? "" : " Toca el mensaje para reintentar.";
+      toast(`${err.message || "No se pudo enviar."}${hint}`, { tone: "error" });
     }
   }
 

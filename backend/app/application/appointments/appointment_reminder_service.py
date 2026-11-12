@@ -104,6 +104,7 @@ def due_reminders(db: Session, tenant: Tenant, now: datetime) -> list[Appointmen
 
 
 def send_reminder(db: Session, tenant: Tenant, appointment: Appointment, now: datetime) -> bool:
+    from app.application.whatsapp.messaging_policy import KIND_UTILITY
     from app.application.whatsapp.whatsapp_service import send_text_message
 
     conversation = _client_chat(db, tenant, appointment)
@@ -122,6 +123,7 @@ def send_reminder(db: Session, tenant: Tenant, appointment: Appointment, now: da
         conversation=conversation,
         text=reminder_text(tenant, appointment, now),
         source=MessageSource.BOT.value,
+        kind=KIND_UTILITY,
     )
     db.commit()
     log.info("Recordatorio de cita enviado appt=%s conv=%s", appointment.id, conversation.id)
