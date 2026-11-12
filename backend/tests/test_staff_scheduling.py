@@ -249,12 +249,13 @@ def _tomorrow() -> date:
 
 
 @requires_db
+@patch("app.application.whatsapp.messaging_policy.phone_has_written", return_value=True)
 @patch("app.application.whatsapp.whatsapp_gateway.send_text")
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")
 @patch("app.application.ai.ai_service.time.sleep", return_value=None)
 def test_ai_books_with_whoever_is_free_tells_the_client_and_notifies_them(
-    _sleep, mock_generate, mock_send, mock_wa
+    _sleep, mock_generate, mock_send, mock_wa, _wrote
 ):
     from app.domain.entities import Appointment
     from app.infrastructure.persistence.database import SessionLocal

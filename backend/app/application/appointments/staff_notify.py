@@ -22,6 +22,7 @@ class StaffNotice:
     instance_name: str
     phone: str
     text: str
+    tenant_id: object = None
 
 
 def build_staff_notice(
@@ -46,17 +47,24 @@ def build_staff_notice(
     ]
     if row.notes and kind != "cancelled":
         lines.append(f"Notas: {row.notes[:300]}")
-    return StaffNotice(instance_name=session.instance_name, phone=staff.phone, text="\n".join(lines))
+    return StaffNotice(
+        instance_name=session.instance_name, phone=staff.phone, text="\n".join(lines), tenant_id=tenant.id
+    )
 
 
 def send_staff_notice(notice: Optional[StaffNotice]) -> bool:
     if notice is None:
         return False
+    from app.application.whatsapp.messaging_policy import MessagingPolicyError, ensure_can_alert
     from app.application.whatsapp.whatsapp_gateway import send_text
 
     try:
+        ensure_can_alert(notice.tenant_id, notice.phone)
         send_text(notice.instance_name, phone_to_evolution_number(notice.phone), notice.text)
         return True
+    except MessagingPolicyError:
+        log.info("Aviso omitido: el empleado %s nunca le ha escrito al negocio", notice.phone[-4:])
+        return False
     except Exception:
         log.warning("No se pudo avisar al empleado %s", notice.phone[-4:], exc_info=True)
         return False

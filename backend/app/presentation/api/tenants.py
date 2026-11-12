@@ -237,6 +237,7 @@ def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
         alert_recipients,
         send_alert,
     )
+    from app.application.whatsapp.messaging_policy import MessagingPolicyError
     from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
@@ -251,6 +252,7 @@ def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=reason or "Conecta tu WhatsApp primero")
 
     failed: list[str] = []
+    never_wrote: list[str] = []
     for recipient in recipients:
         if recipient.get("scope") == SCOPE_SALES:
             what = "cuando un cliente ya quiera comprar o la IA agende una cita, con sus datos para atenderlo"
@@ -266,8 +268,19 @@ def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
                 recipient["phone"],
                 f"✅ {greeting}Prueba de alertas de *{tenant.business_name}*: por aquí te avisaremos {what}.",
             )
+        except MessagingPolicyError:
+            never_wrote.append(recipient.get("name") or recipient["phone"])
         except Exception:
             failed.append(recipient.get("name") or recipient["phone"])
+    if never_wrote:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{', '.join(never_wrote)}: nunca le ha escrito al WhatsApp del negocio y escribirle primero "
+                "puede hacer que lo bloqueen. Desde ese teléfono, mándale un «hola» al WhatsApp del negocio "
+                "y vuelve a probar."
+            ),
+        )
     if failed:
         raise HTTPException(status_code=502, detail=f"No se pudo enviar la prueba a: {', '.join(failed)}")
 

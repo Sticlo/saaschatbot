@@ -168,18 +168,24 @@ def build_alert_text(business_name: str, pending: list[Conversation]) -> str:
 
 
 def send_alert(session: WhatsAppSession, alert_phone: str, text: str) -> None:
+    from app.application.whatsapp.messaging_policy import ensure_can_alert
     from app.application.whatsapp.whatsapp_gateway import send_text
 
+    ensure_can_alert(session.tenant_id, alert_phone)
     send_text(session.instance_name, phone_to_evolution_number(alert_phone), text)
 
 
 def send_alerts(session: WhatsAppSession, phones: list[str], text: str) -> int:
     """Un número que falle no impide avisar a los demás. Devuelve cuántos se enviaron."""
+    from app.application.whatsapp.messaging_policy import MessagingPolicyError
+
     sent = 0
     for phone in phones:
         try:
             send_alert(session, phone, text)
             sent += 1
+        except MessagingPolicyError:
+            log.info("Alerta omitida: %s nunca le ha escrito al negocio", phone[-4:])
         except Exception:
             log.warning("No se pudo enviar alerta a %s", phone[-4:], exc_info=True)
     return sent

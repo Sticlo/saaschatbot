@@ -6,14 +6,16 @@ restringirlo.
 - Mensaje libre (IA, dueño desde el panel, atajos, seguimientos) solo dentro de las 24 horas desde
   el último mensaje del cliente.
 - Pasadas las 24 horas solo salen avisos de algo que el cliente pidió (su cita, su pedido), que en la
-  API oficial serían plantillas de utilidad."""
+  API oficial serían plantillas de utilidad.
+- Los avisos al dueño y al equipo también salen del número del negocio: solo a quien ya le escribió."""
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -33,6 +35,12 @@ NEVER_WROTE = (
 WINDOW_CLOSED = (
     "Pasaron más de 24 horas desde el último mensaje del cliente. WhatsApp solo permite responder "
     "dentro de esas 24 horas: cuando te vuelva a escribir, podrás contestarle."
+)
+
+
+TEAM_NEVER_WROTE = (
+    "Ese número nunca le ha escrito al WhatsApp del negocio y escribirle primero puede hacer que "
+    "bloqueen el número. Desde ese teléfono, mándale un «hola» al WhatsApp del negocio y vuelve a probar."
 )
 
 
@@ -58,6 +66,43 @@ def last_customer_message_at(db: Session, conversation_id) -> Optional[datetime]
 def reply_window_closes_at(db: Session, conversation_id) -> Optional[datetime]:
     last_in = last_customer_message_at(db, conversation_id)
     return last_in + CUSTOMER_SERVICE_WINDOW if last_in is not None else None
+
+
+def _tail10(column):
+    return func.right(func.regexp_replace(func.coalesce(column, ""), r"\D", "", "g"), 10)
+
+
+def phone_has_written(db: Session, tenant_id, phone: str) -> bool:
+    tail = re.sub(r"\D", "", phone or "")[-10:]
+    if len(tail) < 10:
+        return False
+    return db.query(
+        db.query(Message.id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(
+            Conversation.tenant_id == tenant_id,
+            Message.direction == MessageDirection.IN.value,
+            or_(
+                _tail10(Conversation.contact_phone) == tail,
+                _tail10(func.split_part(Conversation.contact_jid, "@", 1)) == tail,
+            ),
+        )
+        .exists()
+    ).scalar()
+
+
+def ensure_can_alert(tenant_id, phone: str) -> None:
+    """Avisos al dueño/equipo: no tienen conversación propia, así que se busca por número."""
+    if not settings.whatsapp_official_rules:
+        return
+    from app.infrastructure.persistence.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if not phone_has_written(db, tenant_id, phone):
+            raise MessagingPolicyError(TEAM_NEVER_WROTE)
+    finally:
+        db.close()
 
 
 def ensure_can_message(

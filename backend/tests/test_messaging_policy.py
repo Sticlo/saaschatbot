@@ -96,6 +96,38 @@ def test_blocked_message_never_reaches_whatsapp(monkeypatch):
 
 
 @requires_db
+def test_team_phone_counts_as_written_only_after_it_writes():
+    from app.application.whatsapp.messaging_policy import phone_has_written
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant = _setup(db)
+        wrote = _chat(db, tenant, "Dueño que saludó", history=("contact",), silent_hours=500)
+        silent = _chat(db, tenant, "Solo recibió", history=("bait",), silent_hours=1)
+        local = wrote.contact_phone[-10:]
+        assert phone_has_written(db, tenant.id, f"+57 {local[:3]} {local[3:]}")
+        assert not phone_has_written(db, tenant.id, silent.contact_phone)
+        assert not phone_has_written(db, tenant.id, "+573001112233")
+        db.rollback()
+
+
+@requires_db
+def test_alert_to_a_phone_that_never_wrote_never_reaches_whatsapp(monkeypatch):
+    from app.application.conversations import interest_alert_service
+    from app.application.whatsapp import whatsapp_gateway
+    from app.infrastructure.persistence.database import SessionLocal
+
+    def fail(*_a, **_k):
+        raise AssertionError("no debía salir")
+
+    monkeypatch.setattr(whatsapp_gateway, "send_text", fail)
+    with SessionLocal() as db:
+        tenant = _setup(db)
+        assert interest_alert_service.send_alerts(tenant.whatsapp_session, ["+573001112233"], "🔔 aviso") == 0
+        db.rollback()
+
+
+@requires_db
 def test_followup_is_not_due_when_the_window_is_about_to_close():
     from app.application.ai.ai_followup_service import due_followups
     from app.infrastructure.persistence.database import SessionLocal
