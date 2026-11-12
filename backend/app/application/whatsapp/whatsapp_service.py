@@ -1360,6 +1360,7 @@ def send_document_message(
     file_path: str,
     file_name: str,
     source: str,
+    caption: str = "",
 ) -> Message:
     ok, reason = can_send_whatsapp(tenant.whatsapp_status)
     if not ok:
@@ -1380,13 +1381,14 @@ def send_document_message(
         data_b64=b64,
         mimetype=mime,
         filename=file_name,
+        caption=caption[:1024],
     )
     return _record_outbound_message(
         db,
         tenant=tenant,
         conversation=conversation,
         # Sin «[document]»: ese prefijo haría que el panel intente descargarlo de WhatsApp.
-        body=f"📄 {file_name}"[:4096],
+        body="\n".join(p for p in (f"📄 {file_name}", caption.strip()) if p)[:4096],
         source=source,
         evolution_id=_extract_evolution_id(result),
     )

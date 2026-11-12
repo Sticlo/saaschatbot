@@ -15,6 +15,7 @@ from app.application.ai.ai_memory_service import NOTES_RULE, parse_notes
 from app.application.outbound.quick_shortcut_service import find_shortcut
 from app.application.products.product_service import find_by_ref, list_products, photo_caption, product_ref
 from app.application.whatsapp.whatsapp_service import (
+    mark_customer_messages_read,
     send_document_message,
     send_image_message,
     send_text_message,
@@ -32,6 +33,9 @@ _SHORTCUT_PREVIEW_LEN = 120
 _CATALOG_KNOWLEDGE_CHARS = 6000
 SHORTCUT_SENT_TTL_SECONDS = 7 * 24 * 3600
 SHORTCUT_RESEND_GUARD_SECONDS = 30 * 60
+ATTACHMENT_TYPES = ("image", "document")
+# Lo máximo que WhatsApp muestra como texto de una foto o un archivo.
+CAPTION_MAX_CHARS = 1024
 
 _JSON_REPLY_INSTRUCTION = """
 Atajos rápidos que puedes enviar al cliente (botones con contenido listo):
@@ -672,6 +676,7 @@ def send_shortcut_content(
     conversation: Conversation,
     shortcut: dict,
     source: str,
+    caption: str = "",
 ) -> Message:
     kind = shortcut.get("type")
     if kind == "image":
@@ -681,7 +686,7 @@ def send_shortcut_content(
             session=session,
             conversation=conversation,
             image_path=str(shortcut["image_path"]),
-            caption="",
+            caption=caption,
             source=source,
         )
     elif kind == "document":
@@ -693,6 +698,7 @@ def send_shortcut_content(
             file_path=str(shortcut["file_path"]),
             file_name=str(shortcut.get("file_name") or "catalogo.pdf"),
             source=source,
+            caption=caption,
         )
     else:
         message = send_text_message(
@@ -716,6 +722,7 @@ def send_bot_shortcut(
     session: WhatsAppSession,
     conversation: Conversation,
     shortcut: dict,
+    caption: str = "",
 ) -> None:
     from app.domain.entities.enums import MessageSource
 
@@ -726,6 +733,7 @@ def send_bot_shortcut(
         conversation=conversation,
         shortcut=shortcut,
         source=MessageSource.BOT.value,
+        caption=caption,
     )
 
 
@@ -744,21 +752,34 @@ def send_reply_with_shortcut(
 
     if reply.flow_id:
         send_flow(db, tenant=tenant, session=session, conversation=conversation, flow_id=reply.flow_id)
-    if not reply.message.strip():
+    text = reply.message.strip()
+    if not text:
         return
 
-    send_text_message(
-        db,
-        tenant=tenant,
-        session=session,
-        conversation=conversation,
-        text=reply.message.strip(),
-        source=MessageSource.BOT.value,
+    shortcut = (
+        _shortcut_to_send(db, tenant=tenant, conversation=conversation, reply=reply, allow_resend=allow_resend)
+        if reply.shortcut_id
+        else None
     )
-    if reply.shortcut_id:
-        _send_reply_shortcut(
-            db, tenant=tenant, session=session, conversation=conversation, reply=reply, allow_resend=allow_resend
+    if shortcut is not None and shortcut.get("type") in ATTACHMENT_TYPES and len(text) <= CAPTION_MAX_CHARS:
+        # Texto y archivo en un solo mensaje: la mitad de envíos, y el mismo PDF tras el mismo texto
+        # cientos de veces al día es lo que WhatsApp marca como envío automático.
+        mark_customer_messages_read(db, session=session, conversation=conversation)
+        send_bot_shortcut(
+            db, tenant=tenant, session=session, conversation=conversation, shortcut=shortcut, caption=text
         )
+        log.info("IA envió atajo con su texto tenant=%s conv=%s label=%s", tenant.id, conversation.id, shortcut.get("label"))
+    else:
+        send_text_message(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            text=text,
+            source=MessageSource.BOT.value,
+        )
+        if shortcut is not None:
+            _send_reply_shortcut(db, tenant=tenant, session=session, conversation=conversation, shortcut=shortcut)
     if reply.photo_ref:
         send_product_photos(
             db,
@@ -829,15 +850,14 @@ def send_product_photos(
     return sent
 
 
-def _send_reply_shortcut(
+def _shortcut_to_send(
     db: Session,
     *,
     tenant: Tenant,
-    session: WhatsAppSession,
     conversation: Conversation,
     reply: AiGeneratedReply,
     allow_resend: bool,
-) -> None:
+) -> Optional[dict]:
     shortcut = find_shortcut(db, tenant.id, reply.shortcut_id)
     if shortcut is None:
         log.warning(
@@ -845,19 +865,29 @@ def _send_reply_shortcut(
             tenant.id,
             reply.shortcut_id,
         )
-        return
+        return None
 
     sent_at = shortcut_sent_at(conversation.id, reply.shortcut_id)
     # Un PDF o foto repetido al cerrar la venta confunde: ya lo tiene, salvo que pida que se lo reenvíen.
-    guard = SHORTCUT_SENT_TTL_SECONDS if shortcut.get("type") in ("image", "document") else SHORTCUT_RESEND_GUARD_SECONDS
+    guard = SHORTCUT_SENT_TTL_SECONDS if shortcut.get("type") in ATTACHMENT_TYPES else SHORTCUT_RESEND_GUARD_SECONDS
     if not allow_resend and sent_at is not None and time.time() - sent_at < guard:
         log.info(
             "Atajo ya enviado hace poco, no se reenvía conv=%s shortcut=%s",
             conversation.id,
             reply.shortcut_id,
         )
-        return
+        return None
+    return shortcut
 
+
+def _send_reply_shortcut(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    shortcut: dict,
+) -> None:
     try:
         send_bot_shortcut(
             db,
@@ -876,5 +906,5 @@ def _send_reply_shortcut(
         log.exception(
             "Error enviando atajo IA conv=%s shortcut=%s",
             conversation.id,
-            reply.shortcut_id,
+            shortcut.get("id"),
         )

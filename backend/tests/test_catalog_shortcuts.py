@@ -105,14 +105,18 @@ def test_annotate_marks_only_sent_shortcuts():
 
 
 def _fake_reply_env(monkeypatch):
-    sent = {"text": [], "shortcut": []}
+    sent = {"text": [], "shortcut": [], "caption": []}
+
+    def fake_shortcut(db, **kw):
+        sent["shortcut"].append(kw["shortcut"]["id"])
+        sent["caption"].append(kw.get("caption", ""))
+
     monkeypatch.setattr(
         ai_shortcut_service, "send_text_message", lambda db, **kw: sent["text"].append(kw["text"])
     )
     monkeypatch.setattr(ai_shortcut_service, "find_shortcut", lambda db, tid, sid: dict(CATALOG_SHORTCUT))
-    monkeypatch.setattr(
-        ai_shortcut_service, "send_bot_shortcut", lambda db, **kw: sent["shortcut"].append(kw["shortcut"]["id"])
-    )
+    monkeypatch.setattr(ai_shortcut_service, "send_bot_shortcut", fake_shortcut)
+    monkeypatch.setattr(ai_shortcut_service, "mark_customer_messages_read", lambda db, **kw: None)
     return sent
 
 
@@ -132,7 +136,32 @@ def test_recently_sent_catalog_is_not_resent(monkeypatch):
         None, tenant=tenant, session=None, conversation=conv, reply=reply
     )
     assert sent["shortcut"] == ["cat-1"]
-    assert len(sent["text"]) == 2
+    assert sent["text"] == ["Te lo comparto 👇"]
+
+
+def test_pdf_goes_out_with_the_reply_as_its_caption(monkeypatch):
+    sent = _fake_reply_env(monkeypatch)
+    conv = SimpleNamespace(id=uuid.uuid4())
+    reply = AiGeneratedReply(message="Te comparto el catálogo 👇", shortcut_id="cat-1")
+
+    ai_shortcut_service.send_reply_with_shortcut(
+        None, tenant=SimpleNamespace(id=uuid.uuid4()), session=None, conversation=conv, reply=reply
+    )
+    assert sent["text"] == []
+    assert sent["caption"] == ["Te comparto el catálogo 👇"]
+
+
+def test_reply_too_long_for_a_caption_goes_first_as_text(monkeypatch):
+    sent = _fake_reply_env(monkeypatch)
+    conv = SimpleNamespace(id=uuid.uuid4())
+    long_reply = "Tenemos tenis y botas en todas las tallas. " * 40
+    reply = AiGeneratedReply(message=long_reply, shortcut_id="cat-1")
+
+    ai_shortcut_service.send_reply_with_shortcut(
+        None, tenant=SimpleNamespace(id=uuid.uuid4()), session=None, conversation=conv, reply=reply
+    )
+    assert sent["text"] == [long_reply.strip()]
+    assert sent["caption"] == [""]
 
 
 def test_catalog_can_be_resent_after_guard_window(monkeypatch):

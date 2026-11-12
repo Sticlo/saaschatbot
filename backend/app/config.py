@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # Cuidar el número: la IA marca leído antes de responder, no pasa de N envíos por minuto
     # (los demás esperan en cola) y parte en varios mensajes lo que pase de este largo.
     ai_mark_read_before_reply: bool = True
-    ai_max_sends_per_minute: int = 15
+    ai_max_sends_per_minute: int = 8
     ai_send_queue_max_wait_seconds: int = 90
     # Seguimientos a quien dejó de responder: escribirle a quien no contesta es lo que más restringe
     # números. Tope diario por negocio y pausa si en 7 días casi nadie responde.
@@ -128,7 +128,7 @@ class Settings(BaseSettings):
     followup_daily_cap: int = 20
     followup_min_reply_rate: float = 0.15
     followup_min_sample: int = 40
-    ai_max_message_chars: int = 600
+    ai_max_message_chars: int = 1000
     ai_maps_plans_per_day: int = 5
 
     # Workers — en producción la API no arranca workers (procesos separados).

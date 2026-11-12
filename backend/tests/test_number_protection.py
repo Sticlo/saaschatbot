@@ -20,17 +20,17 @@ def _sent(*_args, **_kwargs) -> dict:
 
 READ = "app.application.whatsapp.whatsapp_service.gateway_mark_read"
 LONG = (
-    ("Te cuento del paquete baby shower: incluye arco de globos, mesa principal y letrero. " * 5).strip()
+    ("Te cuento del paquete baby shower: incluye arco de globos, mesa principal y letrero. " * 8).strip()
     + "\n\n"
-    + ("Para separar la fecha pedimos el 50% de anticipo y el resto el día del evento. " * 5).strip()
+    + ("Para separar la fecha pedimos el 50% de anticipo y el resto el día del evento. " * 8).strip()
 )
 
 
 def test_long_text_is_split_by_paragraphs_without_losing_words():
     assert split_for_whatsapp("Hola, ¿qué fecha es tu evento?") == ["Hola, ¿qué fecha es tu evento?"]
-    parts = split_for_whatsapp(LONG, limit=600)
+    parts = split_for_whatsapp(LONG, limit=1000)
     assert len(parts) == 2
-    assert all(len(p) <= 600 for p in parts)
+    assert all(len(p) <= 1000 for p in parts)
     assert parts[0].startswith("Te cuento") and parts[1].startswith("Para separar")
     assert " ".join(parts).split() == LONG.split()
 
@@ -68,7 +68,7 @@ def test_ai_reads_first_and_sends_long_replies_in_parts(chat):  # noqa: F811
         with patch(SEND, side_effect=_sent) as send, patch(READ) as read:
             last = send_text_message(db, text=LONG, source="bot", **kw)
         texts = [c.args[2] for c in send.call_args_list]
-        assert len(texts) == 2 and all(len(t) <= 600 for t in texts)
+        assert len(texts) == 2 and all(len(t) <= 1000 for t in texts)
         assert all(c.kwargs["typing_ms"] > 0 for c in send.call_args_list)
         assert last.body == texts[-1]
         read.assert_called_once_with(session.instance_name, "573001234567@s.whatsapp.net", ["ORIG-CORTE"])
