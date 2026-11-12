@@ -240,27 +240,17 @@ def list_conversations(
     preview_map: dict = {}
     if visible:
         conv_ids = [r.id for r in visible]
-        mx_rows = (
-            db.query(Message.conversation_id, func.max(Message.created_at))
-            .filter(Message.conversation_id.in_(conv_ids))
-            .group_by(Message.conversation_id)
+        last_rows = (
+            db.query(Message.conversation_id, Message.created_at, Message.body)
+            .filter(Message.tenant_id == current.tenant_id, Message.conversation_id.in_(conv_ids))
+            .distinct(Message.conversation_id)
+            .order_by(Message.conversation_id, Message.created_at.desc())
             .all()
         )
-        mx_map = {cid: mx for cid, mx in mx_rows}
-
-        from sqlalchemy import desc as sa_desc
-
-        for conv_id in conv_ids:
-            if conv_id not in mx_map:
-                continue
-            last_msg = (
-                db.query(Message.body)
-                .filter(Message.conversation_id == conv_id)
-                .order_by(sa_desc(Message.created_at))
-                .first()
-            )
-            if last_msg and last_msg[0]:
-                preview_map[conv_id] = str(last_msg[0])[:80]
+        for cid, created_at, body in last_rows:
+            mx_map[cid] = created_at
+            if body:
+                preview_map[cid] = str(body)[:80]
 
         # Ocultar fantasmas @lid sin mensajes (chats.set vacíos).
         visible = [
