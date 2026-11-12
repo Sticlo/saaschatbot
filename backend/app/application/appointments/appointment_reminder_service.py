@@ -14,6 +14,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.application.appointments.appointment_service import BOGOTA
+from app.config import settings
 from app.domain.entities import Appointment, Conversation, Tenant, TenantProfile
 from app.domain.entities.enums import ConversationStatus, MessageSource, WhatsAppStatus
 from app.infrastructure.cache.redis_client import get_redis
@@ -144,6 +145,8 @@ def _tenants_with_reminders(db: Session) -> list[Tenant]:
 
 
 def sweep_once(now: Optional[datetime] = None, *, gap=SEND_GAP_SECONDS) -> int:
+    if not settings.whatsapp_proactive_messages:
+        return 0
     now = now or datetime.now(timezone.utc)
     if not within_reminder_hours(now):
         return 0

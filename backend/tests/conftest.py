@@ -36,6 +36,8 @@ settings.wompi_api_base_url = ""
 # La IA contesta apenas se procesa el job: las pruebas de la espera por ráfagas la encienden.
 settings.ai_burst_quiet_seconds = 0
 settings.ai_burst_max_wait_seconds = 0
+# Seguimientos, recordatorios y avisos tienen sus propias pruebas; las de apagado lo apagan.
+settings.whatsapp_proactive_messages = True
 
 
 def _prepare_test_database() -> bool:

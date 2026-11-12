@@ -7,7 +7,9 @@ restringirlo.
   el último mensaje del cliente.
 - Pasadas las 24 horas solo salen avisos de algo que el cliente pidió (su cita, su pedido), que en la
   API oficial serían plantillas de utilidad.
-- Los avisos al dueño y al equipo también salen del número del negocio: solo a quien ya le escribió."""
+- Los avisos al dueño y al equipo también salen del número del negocio: solo a quien ya le escribió.
+- Con whatsapp_proactive_messages apagado nada sale por iniciativa propia: los avisos de utilidad
+  también exigen las 24 horas y no salen avisos al dueño ni al equipo por WhatsApp."""
 
 from __future__ import annotations
 
@@ -41,6 +43,11 @@ WINDOW_CLOSED = (
 TEAM_NEVER_WROTE = (
     "Ese número nunca le ha escrito al WhatsApp del negocio y escribirle primero puede hacer que "
     "bloqueen el número. Desde ese teléfono, mándale un «hola» al WhatsApp del negocio y vuelve a probar."
+)
+
+TEAM_ALERTS_OFF = (
+    "Los avisos por WhatsApp están apagados para cuidar el número del negocio: escribirle a alguien "
+    "que no acaba de escribir puede hacer que lo bloqueen. Los avisos te aparecen en el panel."
 )
 
 
@@ -95,6 +102,8 @@ def ensure_can_alert(tenant_id, phone: str) -> None:
     """Avisos al dueño/equipo: no tienen conversación propia, así que se busca por número."""
     if not settings.whatsapp_official_rules:
         return
+    if not settings.whatsapp_proactive_messages:
+        raise MessagingPolicyError(TEAM_ALERTS_OFF)
     from app.infrastructure.persistence.database import SessionLocal
 
     db = SessionLocal()
@@ -117,7 +126,7 @@ def ensure_can_message(
     last_in = last_customer_message_at(db, conversation.id)
     if last_in is None:
         raise MessagingPolicyError(NEVER_WROTE)
-    if kind == KIND_UTILITY:
+    if kind == KIND_UTILITY and settings.whatsapp_proactive_messages:
         return
     now = now or datetime.now(timezone.utc)
     if now - last_in > CUSTOMER_SERVICE_WINDOW:

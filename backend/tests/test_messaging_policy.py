@@ -128,6 +128,34 @@ def test_alert_to_a_phone_that_never_wrote_never_reaches_whatsapp(monkeypatch):
 
 
 @requires_db
+def test_reply_only_mode_sends_nothing_on_its_own(monkeypatch):
+    from app.application.ai import ai_followup_service
+    from app.application.appointments import appointment_reminder_service
+    from app.application.whatsapp.messaging_policy import (
+        KIND_UTILITY,
+        MessagingPolicyError,
+        ensure_can_alert,
+        ensure_can_message,
+    )
+    from app.config import settings
+    from app.infrastructure.persistence.database import SessionLocal
+
+    monkeypatch.setattr(settings, "whatsapp_proactive_messages", False)
+    assert ai_followup_service.sweep_once(NOW, gap=None) == 0
+    assert appointment_reminder_service.sweep_once(NOW, gap=None) == 0
+    with pytest.raises(MessagingPolicyError):
+        ensure_can_alert(uuid.uuid4(), "+573001112233")
+    with SessionLocal() as db:
+        tenant = _setup(db)
+        fresh = _chat(db, tenant, "Escribió hace 2 h", history=("contact",), silent_hours=2)
+        stale = _chat(db, tenant, "Escribió hace 2 días", history=("contact",), silent_hours=48)
+        ensure_can_message(db, fresh, kind=KIND_UTILITY, now=NOW)
+        with pytest.raises(MessagingPolicyError):
+            ensure_can_message(db, stale, kind=KIND_UTILITY, now=NOW)
+        db.rollback()
+
+
+@requires_db
 def test_followup_is_not_due_when_the_window_is_about_to_close():
     from app.application.ai.ai_followup_service import due_followups
     from app.infrastructure.persistence.database import SessionLocal

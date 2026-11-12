@@ -289,6 +289,8 @@ def _tenants_with_followup(db: Session) -> list[Tenant]:
 
 
 def sweep_once(now: Optional[datetime] = None, *, gap=SEND_GAP_SECONDS) -> int:
+    if not settings.whatsapp_proactive_messages:
+        return 0
     now = now or datetime.now(timezone.utc)
     sent = 0
     db = SessionLocal()

@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.shared.core.deps import RequireOwner, RequireViewer
 from app.infrastructure.persistence.database import get_db
 from app.domain.entities import Tenant, TenantProfile, WhatsAppSession
@@ -237,9 +238,11 @@ def test_interest_alert(current: RequireOwner, db: Session = Depends(get_db)):
         alert_recipients,
         send_alert,
     )
-    from app.application.whatsapp.messaging_policy import MessagingPolicyError
+    from app.application.whatsapp.messaging_policy import TEAM_ALERTS_OFF, MessagingPolicyError
     from app.application.whatsapp.whatsapp_status import can_send_whatsapp
 
+    if not settings.whatsapp_proactive_messages:
+        raise HTTPException(status_code=400, detail=TEAM_ALERTS_OFF)
     tenant = db.query(Tenant).filter(Tenant.id == current.tenant_id).first()
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
