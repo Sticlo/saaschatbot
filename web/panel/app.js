@@ -15,6 +15,7 @@
   const LEGACY_STORAGE_KEY = "saaschatbot_token";
   const THEME_STORAGE_KEY = "omitel_panel_theme";
   const MAX_ALERT_RECIPIENTS = 5;
+  const CONV_FULL_REFRESH_LIVE_MS = 60000;
 
   const state = {
     token: null,
@@ -1002,6 +1003,9 @@
     }, 4000);
     convPollTimer = setInterval(async () => {
       if (!state.user || state.wa.status !== "connected") return;
+      // Con el websocket abierto los cambios llegan solos: la lista completa es solo un repaso.
+      const live = state.ws && state.ws.readyState === WebSocket.OPEN;
+      if (live && Date.now() - (state.convFetchedAt || 0) < CONV_FULL_REFRESH_LIVE_MS) return;
       try {
         const rows = await fetchConversations();
         if (rows.length) {
@@ -2511,9 +2515,19 @@
     return true;
   }
 
+  // Un negocio grande tiene miles de chats: bajar la lista entera en cada mensaje tumbaba la API.
+  function upsertCachedConversation(conv) {
+    if (!state.convCache) return;
+    const rest = state.convCache.filter((c) => c.id !== conv.id);
+    const prev = state.convCache.find((c) => c.id === conv.id);
+    state.convCache = conv.is_archived ? rest : sortConversations([{ ...prev, ...conv }, ...rest]);
+    recalculateInterestedCount(state.convCache);
+  }
+
   async function fetchConversations() {
     const rows = sortConversations(await api("/conversations?archived=false"));
     state.convCache = rows;
+    state.convFetchedAt = Date.now();
     if (state.chatListTab === "all") return rows;
     return rows.filter((c) => matchesInterestTab(c, state.chatListTab));
   }
@@ -7003,6 +7017,7 @@
         try {
           const all = sortConversations(await api("/conversations?archived=false", {}, 30000));
           state.convCache = all;
+          state.convFetchedAt = Date.now();
           recalculateInterestedCount(all);
           const filtered =
             state.chatListTab === "all"
@@ -7234,12 +7249,7 @@
           if (!wasInterested && nowInterested) {
             pulseInterestedTab();
           }
-          api("/conversations?archived=false", {}, 15000)
-            .then((rows) => {
-              state.convCache = sortConversations(rows);
-              recalculateInterestedCount(state.convCache);
-            })
-            .catch(() => {});
+          upsertCachedConversation(event.conversation);
           renderOnboarding();
         }
         break;
