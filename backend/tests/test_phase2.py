@@ -114,7 +114,7 @@ def test_webhook_processor_connection_update(client: TestClient):
     tenant_id = auth.json()["tenant_id"]
 
     from app.infrastructure.persistence.database import SessionLocal
-    from app.domain.entities import WhatsAppSession
+    from app.domain.entities import Tenant, WhatsAppSession
 
     with SessionLocal() as db:
         session = WhatsAppSession(
@@ -123,6 +123,8 @@ def test_webhook_processor_connection_update(client: TestClient):
             status=WhatsAppStatus.CONNECTING.value,
         )
         db.add(session)
+        # Un "open" solo se acepta mientras el dueño está vinculando (QR o código).
+        db.get(Tenant, uuid.UUID(tenant_id)).whatsapp_status = WhatsAppStatus.CONNECTING.value
         db.commit()
 
     process_evolution_webhook(

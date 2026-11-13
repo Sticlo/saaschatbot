@@ -167,7 +167,8 @@ def test_reply_too_long_for_a_caption_goes_first_as_text(monkeypatch):
 def test_catalog_can_be_resent_after_guard_window(monkeypatch):
     sent = _fake_reply_env(monkeypatch)
     conv = SimpleNamespace(id=uuid.uuid4())
-    old = time.time() - ai_shortcut_service.SHORTCUT_RESEND_GUARD_SECONDS - 5
+    # Un PDF o una foto no se repite en una semana; los atajos de texto, en media hora.
+    old = time.time() - ai_shortcut_service.SHORTCUT_SENT_TTL_SECONDS - 5
     monkeypatch.setattr(ai_shortcut_service, "shortcut_sent_at", lambda cid, sid: old)
 
     ai_shortcut_service.send_reply_with_shortcut(

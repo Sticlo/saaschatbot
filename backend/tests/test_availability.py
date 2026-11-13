@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import socket
 import uuid
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -65,7 +65,15 @@ def test_busy_days_and_format_group_consecutive_nights():
     assert svc.format_days([date(2026, 10, 31), date(2026, 11, 1)]) == "31 oct – 1 nov"
 
 
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(TODAY.year, TODAY.month, TODAY.day, 9, 0, tzinfo=tz)
+
+
 def test_block_lists_each_calendar_and_rules(monkeypatch):
+    # busy_ranges descarta lo ya pasado con el reloj real: sin congelarlo, el ICS de octubre quedaría vacío.
+    monkeypatch.setattr(svc, "datetime", _FrozenDatetime)
     monkeypatch.setattr(svc, "_download", lambda url: ICS if "cabana" in url else "BEGIN:VCALENDAR\nEND:VCALENDAR")
     profile = SimpleNamespace(availability_calendars=[
         {"id": "1", "name": "Cabaña del lago", "url": "https://example.com/cabana.ics"},
