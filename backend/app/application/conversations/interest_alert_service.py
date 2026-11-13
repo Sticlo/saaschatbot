@@ -198,6 +198,8 @@ def _alert_key(tenant_id: uuid.UUID) -> str:
 def check_interest_backlog(db: Session, tenant: Tenant) -> bool:
     """Un aviso al cruzar el umbral; se repite cada 24 h mientras siga el atraso.
     Si el atraso baja del umbral, el próximo cruce vuelve a avisar. True = aviso enviado."""
+    if not settings.whatsapp_proactive_messages:
+        return False
     profile = tenant.profile
     phones = alert_phones(profile)
     if not phones:
