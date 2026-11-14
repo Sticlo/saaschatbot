@@ -1865,6 +1865,30 @@ def _recent_texts(db: Session, conversation_id: uuid.UUID, limit: int = 8) -> tu
     return tuple(t for t in (text_for_ai(m).strip() for m in rows) if t)
 
 
+_TEAM_STYLE_DAYS = 30
+_TEAM_STYLE_MIN_CHARS = 60
+
+
+def _team_style(db: Session, tenant_id: uuid.UUID) -> str:
+    from app.application.ai.ai_human_service import team_style_block
+
+    since = datetime.now(timezone.utc) - timedelta(days=_TEAM_STYLE_DAYS)
+    rows = (
+        db.query(Message.body)
+        .filter(
+            Message.tenant_id == tenant_id,
+            Message.created_at >= since,
+            Message.direction == MessageDirection.OUT.value,
+            Message.source == MessageSource.AGENT.value,
+            func.length(Message.body) >= _TEAM_STYLE_MIN_CHARS,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(40)
+        .all()
+    )
+    return team_style_block([body for (body,) in rows if body and not body.startswith("[")])
+
+
 def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
     return (
         db.query(Message)
@@ -2070,7 +2094,8 @@ def _process_qualify(
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
             + returning_block(history)
-            + (WIN_BACK_BLOCK if win_back else ""),
+            + (WIN_BACK_BLOCK if win_back else "")
+            + _team_style(db, tenant.id),
             flows=flows,
         )
     except DeepSeekError as exc:
@@ -2171,7 +2196,8 @@ def _process_full_reply(
             + orders_prompt_block(db, conversation.id)
             + notes_prompt_block(conversation)
             + returning_block(history)
-            + (WIN_BACK_BLOCK if win_back else ""),
+            + (WIN_BACK_BLOCK if win_back else "")
+            + _team_style(db, tenant.id),
             flows=flows,
         )
     except DeepSeekError as exc:

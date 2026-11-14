@@ -34,6 +34,17 @@ def test_style_correction_asks_for_a_rewrite_only_when_needed():
     assert "misma pregunta" in style_correction("Vale $300.000. ¿Para qué fecha sería el evento?", previous)
 
 
+def test_team_style_uses_a_few_distinct_real_messages():
+    from app.application.ai.ai_human_service import TEAM_STYLE_SAMPLES, team_style_block
+
+    welcome = "¡Hola! 👋 Bienvenido(a) a Hotel Cannes Medellín 🏨 ¡Claro que sí! Con gusto te ayudamos 😊"
+    block = team_style_block([welcome, welcome, "", *[f"Mensaje del equipo número {i} 😊" for i in range(9)]])
+    assert block.count(welcome) == 1
+    assert block.count("«") == TEAM_STYLE_SAMPLES
+    assert "nunca des por confirmada" in block
+    assert team_style_block([]) == ""
+
+
 def test_last_resort_cleanup_keeps_the_useful_part():
     text = "Entiendo perfectamente. El paquete vale $300.000. ¿Te lo separo?"
     assert without_robot_phrases(text) == "El paquete vale $300.000. ¿Te lo separo?"

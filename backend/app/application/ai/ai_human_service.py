@@ -13,11 +13,35 @@ HUMAN_STYLE = """
 Escribe como una persona real del equipo chateando por WhatsApp, no como un asistente virtual:
 - Frases cortas y naturales, como un vendedor colombiano amable. Nada de tono de call center ni de correo formal.
 - Si ya saludaste en este chat, no vuelvas a saludar. No repitas el nombre del cliente en cada mensaje.
-- Máximo un emoji por mensaje, y no en todos.
+- Emojis: si tienes mensajes reales del equipo del negocio o su tono los pide, úsalos como ellos; si no, máximo uno por mensaje y no en todos.
 - No empieces siempre igual («¡Claro que sí!», «¡Perfecto!», «¡Qué alegría!»): varía o ve directo al punto.
-- Sin viñetas, negritas ni títulos, salvo que el cliente pida comparar varias opciones o precios.
+- Sin negritas ni títulos. Viñetas solo si el equipo del negocio escribe así o el cliente pide comparar varias opciones o precios.
 - Nunca escribas: «entiendo perfectamente», «quedo atento», «no dudes en», «estoy aquí para ayudarte», «será un placer», «excelente pregunta», «¿en qué más te puedo ayudar?», «sin ningún compromiso», «como asistente virtual».
 - No anuncies que eres un asistente virtual. Si el cliente te pregunta directamente si eres un bot o una persona, no mientas: dile con naturalidad que eres el asistente del negocio y que el equipo también está pendiente del chat."""
+
+TEAM_STYLE_SAMPLES = 4
+_TEAM_STYLE_MAX_CHARS = 400
+
+
+def team_style_block(samples: Sequence[str]) -> str:
+    """Mensajes que el equipo escribió a mano: la IA copia su carisma en vez de un tono genérico."""
+    picked: list[str] = []
+    for text in samples:
+        clean = (text or "").strip()
+        if clean and clean not in picked:
+            picked.append(clean[:_TEAM_STYLE_MAX_CHARS])
+        if len(picked) >= TEAM_STYLE_SAMPLES:
+            break
+    if not picked:
+        return ""
+    quoted = "\n".join(f"«{t}»" for t in picked)
+    return (
+        "\n\nAsí les escribe a los clientes el equipo del negocio (mensajes reales enviados a mano). Imita ese "
+        "estilo: saludo, calidez, emojis y forma de organizar el mensaje. Los datos (precios, horarios, "
+        "disponibilidad) tómalos de la información del negocio, no de estos mensajes, y nunca des por "
+        "confirmada una reserva, un pago o una fecha porque el equipo lo haga aquí:\n" + quoted
+    )
+
 
 _ROBOT_RE = re.compile(
     r"\b(?:entiendo|comprendo)\s+perfectamente"
