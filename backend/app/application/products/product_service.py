@@ -306,7 +306,8 @@ def products_prompt_block(products: list[Product], *, selling: bool, query: str 
             "- Fotos: si piden fotos o ver un producto marcado con 📷, pon su ref en photo_ref y escribe algo breve "
             "(«¡Claro! Mira 👇»): las fotos salen aparte con el nombre y el precio. Si piden «fotos» sin decir de "
             "cuál, son del producto del que vienen hablando; si no hablaban de ninguno, pregunta de cuál. "
-            "Si ya las enviaste en este chat, no las repitas salvo que las pidan de nuevo."
+            "Si pide ver todas las fotos o todas las opciones, pon photo_ref \"todas\" y salen las de cada "
+            "producto con 📷. Si ya las enviaste en este chat, no las repitas salvo que las pidan de nuevo."
         )
     rules.append(
         "- Si piden fotos de algo sin 📷 y ningún atajo las tiene, no prometas enviarlas: descríbelo con lo que "

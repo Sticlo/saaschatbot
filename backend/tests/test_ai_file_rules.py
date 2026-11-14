@@ -202,6 +202,39 @@ def test_photo_picked_after_asking_which_one_is_attached():
     assert fixed.photo_ref == product_ref(single)
 
 
+def test_asking_for_all_photos_sends_every_product():
+    import uuid
+    from types import SimpleNamespace
+
+    from app.application.ai.ai_shortcut_service import PHOTOS_ALL, attach_promised_media, parse_ai_reply
+
+    single = SimpleNamespace(id=uuid.uuid4(), name="Habitación Sencilla", photos=["a.jpg"])
+    family = SimpleNamespace(id=uuid.uuid4(), name="Habitación Familiar", photos=["b.jpg"])
+    fixed = attach_promised_media(
+        _reply("¡Claro! Mira 👇"),
+        client_text="Muéstrame todas las fotos de habitación en general",
+        products=[single, family],
+        shortcuts=[],
+    )
+    assert fixed.photo_ref == PHOTOS_ALL
+
+    parsed = parse_ai_reply(
+        '{"message":"¡Claro! Mira 👇","photo_ref":"todas"}', valid_ids=frozenset(), valid_photo_refs=frozenset({"x"})
+    )
+    assert parsed.photo_ref == PHOTOS_ALL
+    assert parse_ai_reply('{"message":"Hola","photo_ref":"todas"}', valid_ids=frozenset()).photo_ref is None
+
+
+def test_all_photos_go_out_again_when_asked_but_not_on_a_retry(monkeypatch):
+    from app.application.ai import ai_shortcut_service as svc
+
+    reply = svc.AiGeneratedReply(message="Mira 👇", photo_ref=svc.PHOTOS_ALL)
+    monkeypatch.setattr(svc, "photos_sent_at", lambda conv, ref: None)
+    assert svc.wants_photos_again("muéstrame todas las fotos", reply, conversation_id="c", asked_at=100.0)
+    monkeypatch.setattr(svc, "photos_sent_at", lambda conv, ref: 150.0)
+    assert not svc.wants_photos_again("muéstrame todas las fotos", reply, conversation_id="c", asked_at=100.0)
+
+
 def test_a_written_price_is_not_mistaken_for_a_file():
     from app.application.ai.ai_shortcut_service import attach_promised_media
 

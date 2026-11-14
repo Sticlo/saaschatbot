@@ -122,7 +122,10 @@ def reply_format_instruction(
     if not has_shortcuts:
         rules.append("- shortcut_id siempre null (no hay atajos).")
     if has_photos:
-        rules.append("- photo_ref = ref de un producto con 📷 cuando el cliente quiere verlo; si no, null.")
+        rules.append(
+            f'- photo_ref = ref de un producto con 📷 cuando el cliente quiere verlo, "{PHOTOS_ALL}" si pide ver '
+            "todas las fotos u opciones; si no, null."
+        )
     if not booking_enabled:
         rules.append(
             "- book_slot siempre null. Si piden una cita o reserva, no la confirmes tú: es stage \"cierre\"."
@@ -435,6 +438,11 @@ def file_choice_message(message: str, choices: list[dict]) -> str:
     return " ".join([*kept, f"¿Cuál te envío: {listed}?"]).strip()
 
 
+PHOTOS_ALL = "todas"
+_ALL_WORDS = frozenset({PHOTOS_ALL, "todos", "all"})
+MAX_PRODUCTS_PER_PHOTO_REPLY = 6
+_ALL_RE = re.compile(r"\btod[ao]s\b")
+
 _ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\b")
 _SHOWS_RE = re.compile(r"\bmira\b|\baqui\s+(?:estan|esta|las|la)\b|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b")
 
@@ -479,6 +487,8 @@ def infer_photo_ref(
     with_photos = [p for p in products if p.photos]
     if not with_photos:
         return None
+    if len(with_photos) > 1 and _ALL_RE.search(_plain(client_text)):
+        return PHOTOS_ALL
     named = _ref_in_text(message, with_photos) or _best_product(f"{client_text} {message}", with_photos)
     if named is None:
         for text in recent:
@@ -565,6 +575,9 @@ def wants_photos_again(client_text: str, reply: "AiGeneratedReply", *, conversat
     if not (reply.photo_ref and _ASKS_PHOTO_RE.search(_plain(client_text))):
         return False
     sent_at = photos_sent_at(conversation_id, reply.photo_ref)
+    if reply.photo_ref == PHOTOS_ALL:
+        # Pidió verlas todas: también las que ya vio sueltas, salvo que esto sea un reintento.
+        return sent_at is None or sent_at < asked_at
     return sent_at is not None and sent_at < asked_at
 
 
@@ -648,6 +661,8 @@ def _chosen(raw: Any) -> str:
 
 def _photo_ref(raw: Any, valid: frozenset[str]) -> Optional[str]:
     ref = str(raw or "").strip().lower().removeprefix("ref=")
+    if ref in _ALL_WORDS and valid:
+        return PHOTOS_ALL
     return ref if ref in valid else None
 
 
@@ -804,7 +819,11 @@ def send_reply_with_shortcut(
         )
         if shortcut is not None:
             _send_reply_shortcut(db, tenant=tenant, session=session, conversation=conversation, shortcut=shortcut)
-    if reply.photo_ref:
+    if reply.photo_ref == PHOTOS_ALL:
+        send_all_product_photos(
+            db, tenant=tenant, session=session, conversation=conversation, allow_resend=allow_resend
+        )
+    elif reply.photo_ref:
         send_product_photos(
             db,
             tenant=tenant,
@@ -813,6 +832,37 @@ def send_reply_with_shortcut(
             ref=reply.photo_ref,
             allow_resend=allow_resend,
         )
+
+
+def send_all_product_photos(
+    db: Session,
+    *,
+    tenant: Tenant,
+    session: WhatsAppSession,
+    conversation: Conversation,
+    allow_resend: bool = False,
+) -> int:
+    """«Muéstrame todas»: las fotos de cada producto con fotos, cada uno con su nombre y precio."""
+    with_photos = [p for p in list_products(db, tenant.id) if p.photos][:MAX_PRODUCTS_PER_PHOTO_REPLY]
+    sent = sum(
+        send_product_photos(
+            db,
+            tenant=tenant,
+            session=session,
+            conversation=conversation,
+            ref=product_ref(product),
+            allow_resend=allow_resend,
+        )
+        for product in with_photos
+    )
+    if sent:
+        try:
+            get_redis().set(
+                _photos_sent_key(conversation.id, PHOTOS_ALL), str(time.time()), ex=SHORTCUT_RESEND_GUARD_SECONDS
+            )
+        except Exception:
+            pass
+    return sent
 
 
 def _photos_sent_key(conversation_id, ref: str) -> str:
