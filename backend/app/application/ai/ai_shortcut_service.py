@@ -439,11 +439,16 @@ _ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\
 _SHOWS_RE = re.compile(r"\bmira\b|\baqui\s+(?:estan|esta|las|la)\b|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b")
 
 
-def shows_photos(message: str, client_text: str) -> bool:
-    """El cliente pidió fotos (o reclama las que no le llegaron) y la respuesta dice que ahí van."""
+def shows_photos(message: str, client_text: str, recent: tuple[str, ...] = ()) -> bool:
+    """El cliente pidió fotos (o reclama las que no le llegaron) y la respuesta dice que ahí van.
+    `recent`: «¿De cuál quieres fotos?» → «la sencilla»: el pedido de fotos quedó un par de mensajes atrás."""
     reply = _plain(message)
     asked = _plain(client_text)
-    wants = _ASKS_PHOTO_RE.search(asked) or (asks_to_resend(client_text) and _ASKS_PHOTO_RE.search(reply))
+    wants = (
+        _ASKS_PHOTO_RE.search(asked)
+        or (asks_to_resend(client_text) and _ASKS_PHOTO_RE.search(reply))
+        or any(_ASKS_PHOTO_RE.search(_plain(t)) for t in recent[:4])
+    )
     return bool(wants and (_SHOWS_RE.search(reply) or _PROMISE_RE.search(reply)))
 
 
@@ -469,7 +474,7 @@ def infer_photo_ref(
     """«¡Claro! Mira 👇» sin photo_ref: el cliente se queda sin las fotos que pidió.
     `recent`: lo último que se habló, del más nuevo al más viejo. Un «fotos» a secas es del
     producto del que se venía hablando."""
-    if not shows_photos(message, client_text):
+    if not shows_photos(message, client_text, recent):
         return None
     with_photos = [p for p in products if p.photos]
     if not with_photos:
@@ -527,7 +532,7 @@ def attach_promised_media(
     recent: tuple[str, ...] = (),
 ) -> "AiGeneratedReply":
     """«Mira 👇» o «te lo envío» sin adjunto: se adjunta lo prometido o se pregunta cuál."""
-    if reply.photo_ref is None and reply.shortcut_id is None and shows_photos(reply.message, client_text):
+    if reply.photo_ref is None and reply.shortcut_id is None and shows_photos(reply.message, client_text, recent):
         shown = infer_photo_ref(reply.message, client_text, products, recent)
         if shown:
             log.info("IA dijo que mostraba fotos sin photo_ref; se adjuntan")

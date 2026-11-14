@@ -179,6 +179,29 @@ def test_a_promised_pdf_without_knowing_which_asks_instead_of_lying():
     assert fixed.message == "¡Con gusto! ¿Cuál te envío: Baby Shower, Infantil o Bodas?"
 
 
+def test_photo_picked_after_asking_which_one_is_attached():
+    import uuid
+    from types import SimpleNamespace
+
+    from app.application.ai.ai_shortcut_service import attach_promised_media
+    from app.application.products.product_service import product_ref
+
+    single = SimpleNamespace(id=uuid.uuid4(), name="Habitación Sencilla", photos=["a.jpg"])
+    family = SimpleNamespace(id=uuid.uuid4(), name="Habitación Familiar", photos=["b.jpg"])
+    fixed = attach_promised_media(
+        _reply("¡Listo! Mira la Sencilla 👇 Son $45.000 la noche para 1 persona."),
+        client_text="De una sencilla es para mi solo",
+        products=[single, family],
+        shortcuts=[],
+        recent=(
+            "De una sencilla es para mi solo",
+            "¡Claro! ¿De cuál quieres ver fotos: Habitación Sencilla o Habitación Familiar? 📸",
+            "Puedes enviarme fotos?",
+        ),
+    )
+    assert fixed.photo_ref == product_ref(single)
+
+
 def test_a_written_price_is_not_mistaken_for_a_file():
     from app.application.ai.ai_shortcut_service import attach_promised_media
 
