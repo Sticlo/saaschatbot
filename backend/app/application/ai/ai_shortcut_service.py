@@ -593,7 +593,10 @@ def parse_ai_reply(
     data = _load_reply_json(_strip_json_fence(text))
     if data is None:
         # JSON roto: nunca mandarle llaves y comillas al cliente, solo el texto del mensaje.
-        return AiGeneratedReply(message=_salvage_message(text) or text)
+        salvaged = _salvage_message(text)
+        if salvaged is None and _looks_like_json(text):
+            return AiGeneratedReply(message="")
+        return AiGeneratedReply(message=salvaged or text)
 
     message = str(data.get("message") or data.get("reply") or "").strip()
     flow_id = str(data.get("flow_id") or "").strip()
@@ -643,14 +646,28 @@ def _photo_ref(raw: Any, valid: frozenset[str]) -> Optional[str]:
     return ref if ref in valid else None
 
 
+# El modelo a veces escribe «\S» donde quería «\n\nS»: JSON inválido que tumbaba toda la respuesta.
+_INVALID_ESCAPE_RE = re.compile(r'\\(?=[^"\\/bfnrtu])')
+
+
+def _repair_escapes(text: str) -> str:
+    return _INVALID_ESCAPE_RE.sub(r"\\n", text)
+
+
+def _looks_like_json(text: str) -> bool:
+    stripped = _strip_json_fence(text)
+    return stripped.startswith("{") or '"message"' in stripped
+
+
 def _load_reply_json(candidate: str) -> Optional[dict]:
     attempts = [candidate]
     start, end = candidate.find("{"), candidate.rfind("}")
     if 0 <= start < end:
         attempts.append(candidate[start : end + 1])
+    attempts += [_repair_escapes(a) for a in attempts]
     for attempt in attempts:
         try:
-            data = json.loads(attempt)
+            data = json.loads(attempt, strict=False)
         except json.JSONDecodeError:
             continue
         if isinstance(data, dict):
@@ -662,10 +679,12 @@ def _salvage_message(text: str) -> Optional[str]:
     match = re.search(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
     if not match:
         return None
-    try:
-        return json.loads(f'"{match.group(1)}"').strip() or None
-    except json.JSONDecodeError:
-        return None
+    for body in (match.group(1), _repair_escapes(match.group(1))):
+        try:
+            return json.loads(f'"{body}"', strict=False).strip() or None
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def send_shortcut_content(

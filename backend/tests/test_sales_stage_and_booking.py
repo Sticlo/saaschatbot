@@ -100,6 +100,21 @@ def test_broken_json_never_reaches_the_customer():
     assert parse_ai_reply(raw, valid_ids=frozenset()).message == "Claro, te cuento 😊"
 
 
+def test_invalid_escape_from_the_model_still_reads_the_message():
+    raw = (
+        r'{"message":"Llegas fácil por Palacé.\Sobre parqueadero: no hay propio.\n\n¿Para qué fechas?",'
+        r'"shortcut_id":null,"stage":"interesado","notes":"Pregunta por parqueadero."}'
+    )
+    reply = parse_ai_reply(raw, valid_ids=frozenset())
+    assert reply.message == "Llegas fácil por Palacé.\nSobre parqueadero: no hay propio.\n\n¿Para qué fechas?"
+    assert reply.stage == "interesado"
+
+
+def test_unreadable_json_is_not_sent_as_text():
+    raw = '{"message": 12, "stage": '
+    assert parse_ai_reply(raw, valid_ids=frozenset()).message == ""
+
+
 def test_interest_and_closing_signals():
     assert detect_interest_signal("¿Me pasas el catálogo?") is True
     assert detect_interest_signal("Voy para Cartagena") is False
