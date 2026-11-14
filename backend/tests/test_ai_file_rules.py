@@ -235,6 +235,19 @@ def test_all_photos_go_out_again_when_asked_but_not_on_a_retry(monkeypatch):
     assert not svc.wants_photos_again("muéstrame todas las fotos", reply, conversation_id="c", asked_at=100.0)
 
 
+def test_promising_rates_does_not_attach_the_payment_image():
+    from app.application.ai.ai_shortcut_service import infer_promised_shortcut
+
+    nequi = [{
+        "id": "pay", "label": "Pago Nequi", "type": "image", "image_path": "t/nequi.jpg",
+        "content": "Imagen para pagar la reserva por Nequi al 316 921 0372",
+        "send_when": "Cuando el cliente ya quiere separar o pregunta cómo pagar.",
+    }]
+    message = "Cuéntame qué fechas tienes en mente y cuántas personas serían. Con eso te paso las tarifas."
+    assert infer_promised_shortcut(message, "Hola, me gustaría saber si pudiste evaluar la propuesta", nequi) is None
+    assert infer_promised_shortcut("Listo, te paso los datos para pagar 👇", "¿cómo te pago?", nequi) == "pay"
+
+
 def test_a_written_price_is_not_mistaken_for_a_file():
     from app.application.ai.ai_shortcut_service import attach_promised_media
 

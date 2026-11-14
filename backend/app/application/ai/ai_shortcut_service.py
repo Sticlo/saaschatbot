@@ -410,9 +410,20 @@ def infer_promised_shortcut(message: str, client_text: str, shortcuts: list[dict
     if labeled:
         return None
     files = [s for s in shortcuts if s.get("id") and s.get("type") in ("image", "document")]
-    if len(files) == 1 and any(w in text for w in _FILE_WORDS):
+    if len(files) == 1 and _single_file_matches(files[0], text):
         return str(files[0]["id"])
     return None
+
+
+_PAYMENT_RE = re.compile(r"\bpag|nequi|daviplata|transfer|consign|bancolombia|\bllave\b|numero de cuenta")
+
+
+def _single_file_matches(shortcut: dict, text: str) -> bool:
+    """«Te paso las tarifas» con un solo archivo, que es el de pagar por Nequi: no es eso lo prometido."""
+    about = _plain(" ".join(str(shortcut.get(k) or "") for k in ("label", "content", "send_when")))
+    if _PAYMENT_RE.search(about) and not _PAYMENT_RE.search(text):
+        return False
+    return any(w in text for w in _FILE_WORDS)
 
 
 def unfulfilled_file_choices(message: str, client_text: str, shortcuts: list[dict]) -> list[dict]:
