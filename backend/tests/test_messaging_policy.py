@@ -96,6 +96,37 @@ def test_blocked_message_never_reaches_whatsapp(monkeypatch):
 
 
 @requires_db
+def test_ai_reply_echo_saved_first_by_webhook_stays_a_bot_message(monkeypatch):
+    from app.application.whatsapp import whatsapp_service
+    from app.domain.entities import Message
+    from app.infrastructure.persistence.database import SessionLocal
+
+    wa_id = f"ECHO-{uuid.uuid4().hex[:12]}"
+    monkeypatch.setattr(whatsapp_service, "gateway_send_text", lambda *a, **k: {"key": {"id": wa_id}})
+    monkeypatch.setattr(whatsapp_service, "wait_for_bot_send_slot", lambda *_a, **_k: None)
+    monkeypatch.setattr(whatsapp_service, "ensure_can_message", lambda *_a, **_k: None)
+    with SessionLocal() as db:
+        tenant = _setup(db)
+        chat = _chat(db, tenant, "Escribió hace 1 h", history=("contact",), silent_hours=1)
+        # El webhook gana la carrera: guarda el eco como si lo hubiera escrito el dueño.
+        db.add(Message(
+            tenant_id=tenant.id, conversation_id=chat.id, direction="out", source="agent",
+            body="Hola 👋", status="sent", evolution_message_id=wa_id,
+        ))
+        db.flush()
+
+        saved = whatsapp_service.send_text_message(
+            db, tenant=tenant, session=tenant.whatsapp_session, conversation=chat, text="Hola 👋", source="bot"
+        )
+
+        rows = db.query(Message).filter(Message.tenant_id == tenant.id, Message.evolution_message_id == wa_id).all()
+        assert len(rows) == 1
+        assert saved.id == rows[0].id
+        assert rows[0].source == "bot"
+        db.rollback()
+
+
+@requires_db
 def test_team_phone_counts_as_written_only_after_it_writes():
     from app.application.whatsapp.messaging_policy import phone_has_written
     from app.infrastructure.persistence.database import SessionLocal

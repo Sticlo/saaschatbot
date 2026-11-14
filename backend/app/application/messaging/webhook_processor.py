@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
+
 from app.infrastructure.persistence.database import SessionLocal
 from app.domain.entities import Tenant, WhatsAppSession
 from app.application.messaging.message_service import (
@@ -648,6 +650,10 @@ def process_evolution_webhook(tenant_id: uuid.UUID, payload: dict) -> None:
                             )
                             if event_type == "message.in":
                                 pending_ai_jobs.append((tenant.id, msg.conversation_id, msg.id))
+                    except IntegrityError:
+                        # Eco de lo que la IA o el panel acaban de enviar: ellos ya lo guardaron.
+                        db.rollback()
+                        log.info("Mensaje ya guardado por quien lo envió tenant=%s id=%s", tenant_id, msg_id)
                     except Exception:
                         log.exception(
                             "Error guardando mensaje tenant=%s id=%s",

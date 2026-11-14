@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -1196,10 +1197,35 @@ def send_text_message(
             quoted_body=(quoted_body or None) if first else None,
         )
         conversation.last_message_at = datetime.now(timezone.utc)
-        db.add(message)
-        db.flush()
+        message = _save_outbound(db, message)
         publish_message_event(tenant, conversation, message, event_type="message.out")
     return message
+
+
+def _save_outbound(db: Session, message: Message) -> Message:
+    """El eco del envío llega por webhook casi a la vez y puede guardarlo primero como si lo hubiera
+    escrito el dueño desde el celular: aquí se adopta esa fila con el origen real (IA o panel)."""
+    try:
+        with db.begin_nested():
+            db.add(message)
+            db.flush()
+        return message
+    except IntegrityError:
+        if not message.evolution_message_id:
+            raise
+    existing = (
+        db.query(Message)
+        .filter(
+            Message.tenant_id == message.tenant_id,
+            Message.evolution_message_id == message.evolution_message_id,
+        )
+        .one()
+    )
+    existing.source = message.source
+    existing.quoted_evolution_id = existing.quoted_evolution_id or message.quoted_evolution_id
+    existing.quoted_body = existing.quoted_body or message.quoted_body
+    db.flush()
+    return existing
 
 
 def send_image_message(
@@ -1440,7 +1466,6 @@ def _record_outbound_message(
         evolution_message_id=evolution_id,
     )
     conversation.last_message_at = datetime.now(timezone.utc)
-    db.add(message)
-    db.flush()
+    message = _save_outbound(db, message)
     publish_message_event(tenant, conversation, message, event_type="message.out")
     return message
