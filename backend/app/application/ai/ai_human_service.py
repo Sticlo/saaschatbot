@@ -19,8 +19,8 @@ Escribe como una persona real del equipo chateando por WhatsApp, no como un asis
 - Nunca escribas: «entiendo perfectamente», «quedo atento», «no dudes en», «estoy aquí para ayudarte», «será un placer», «excelente pregunta», «¿en qué más te puedo ayudar?», «sin ningún compromiso», «como asistente virtual».
 - No anuncies que eres un asistente virtual. Si el cliente te pregunta directamente si eres un bot o una persona, no mientas: dile con naturalidad que eres el asistente del negocio y que el equipo también está pendiente del chat."""
 
-TEAM_STYLE_SAMPLES = 4
-_TEAM_STYLE_MAX_CHARS = 400
+TEAM_STYLE_SAMPLES = 5
+_TEAM_STYLE_MAX_CHARS = 900
 
 
 def team_style_block(samples: Sequence[str]) -> str:
@@ -37,7 +37,9 @@ def team_style_block(samples: Sequence[str]) -> str:
     quoted = "\n".join(f"«{t}»" for t in picked)
     return (
         "\n\nAsí les escribe a los clientes el equipo del negocio (mensajes reales enviados a mano). Imita ese "
-        "estilo: saludo, calidez, emojis y forma de organizar el mensaje. Los datos (precios, horarios, "
+        "estilo: saludo, calidez, emojis y forma de organizar el mensaje. Si el equipo pone la información en "
+        "líneas que empiezan con un emoji (📌 Dirección, 🚇 Metro, 1 persona: $…), hazlo igual aunque el mensaje "
+        "quede un poco más largo: así lo reconocen sus clientes. Los datos (precios, horarios, "
         "disponibilidad) tómalos de la información del negocio, no de estos mensajes, y nunca des por "
         "confirmada una reserva, un pago o una fecha porque el equipo lo haga aquí:\n" + quoted
     )
