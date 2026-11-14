@@ -9,7 +9,7 @@ from app.application.ai.ai_flow_service import FlowPlan
 from app.application.ai.ai_intent_router import route_flow
 from app.application.ai.ai_human_service import HUMAN_STYLE, style_correction, without_robot_phrases
 from app.application.appointments.appointment_service import BOGOTA
-from app.application.availability.availability_service import availability_block
+from app.application.availability.availability_service import availability_block, calendars_of
 from app.application.availability.site_connector import UNAVAILABLE_TEXT, ai_tools, run_ai_tool, site_tools_block
 from app.application.ai.ai_appointment_service import (
     BookingContext,
@@ -240,8 +240,27 @@ def promotions_and_season_block(profile: Optional[TenantProfile]) -> str:
     return block
 
 
+UNKNOWN_AVAILABILITY_RULE = (
+    "\n\nFechas y cupos: no tienes la agenda ni la ocupación del negocio. Nunca digas que una fecha, noche, "
+    "horario o cupo está libre o disponible, ni que no se cruza con otro cliente. Toma las fechas y lo que "
+    "necesita, y dile que el equipo le confirma la disponibilidad."
+)
+
+
+def unknown_availability_block(profile: Optional[TenantProfile], site_tools: Optional[list[dict]] = None) -> str:
+    """Sin calendario, agenda ni sitio conectado la IA inventaba «esa fecha la tengo libre»."""
+    if calendars_of(profile) or getattr(profile, "ai_booking_enabled", False) or site_tools:
+        return ""
+    return UNKNOWN_AVAILABILITY_RULE
+
+
 def business_rules_block(profile: Optional[TenantProfile], site_tools: Optional[list[dict]] = None) -> str:
-    return promotions_and_season_block(profile) + availability_block(profile) + site_tools_block(site_tools or [])
+    return (
+        promotions_and_season_block(profile)
+        + availability_block(profile)
+        + unknown_availability_block(profile, site_tools)
+        + site_tools_block(site_tools or [])
+    )
 
 
 def _site_tool_runner(tenant: Tenant) -> Callable[[str, dict], str]:

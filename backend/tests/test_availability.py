@@ -86,6 +86,22 @@ def test_block_lists_each_calendar_and_rules(monkeypatch):
     assert "No digas que la fecha quedó reservada" in block
 
 
+def test_without_calendar_or_agenda_the_ai_never_says_a_date_is_free():
+    from app.application.ai.ai_conversation_service import unknown_availability_block
+
+    bare = SimpleNamespace(availability_calendars=None, ai_booking_enabled=False)
+    assert "Nunca digas que una fecha" in unknown_availability_block(bare)
+    assert "Nunca digas que una fecha" in unknown_availability_block(None)
+
+    with_calendar = SimpleNamespace(
+        availability_calendars=[{"id": "1", "name": "Domo", "url": "https://example.com/d.ics"}],
+        ai_booking_enabled=False,
+    )
+    assert unknown_availability_block(with_calendar) == ""
+    assert unknown_availability_block(SimpleNamespace(availability_calendars=None, ai_booking_enabled=True)) == ""
+    assert unknown_availability_block(bare, site_tools=[{"name": "disponibilidad"}]) == ""
+
+
 def test_block_never_promises_dates_of_a_broken_calendar(monkeypatch):
     def fail(_url):
         raise svc.CalendarError("caído")
