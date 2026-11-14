@@ -137,6 +137,21 @@ def test_ai_stays_on_the_business_and_does_not_assume_facts():
     assert "no lo supongas" in SAFETY_RULES
 
 
+def test_memory_reset_survives_as_a_marker(monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.application.ai import ai_service
+
+    store: dict[str, str] = {}
+    fake = SimpleNamespace(set=lambda k, v: store.__setitem__(k, v), get=lambda k: store.get(k))
+    monkeypatch.setattr(ai_service, "get_redis", lambda: fake)
+    conv_id = uuid.uuid4()
+    assert ai_service._memory_from(conv_id) is None
+    at = datetime(2026, 11, 14, 4, 30, tzinfo=timezone.utc)
+    ai_service.reset_ai_memory(conv_id, at)
+    assert ai_service._memory_from(conv_id) == at
+
+
 def test_owner_alert_carries_what_the_ai_knows():
     from app.application.ai.ai_service import _notes_line
 

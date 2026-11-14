@@ -1855,13 +1855,11 @@ def _client_is_waiting_on_us(db: Session, conversation_id: uuid.UUID, message: M
 
 
 def _recent_texts(db: Session, conversation_id: uuid.UUID, limit: int = 8) -> tuple[str, ...]:
-    rows = (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    query = db.query(Message).filter(Message.conversation_id == conversation_id)
+    since = _memory_from(conversation_id)
+    if since is not None:
+        query = query.filter(Message.created_at > since)
+    rows = query.order_by(Message.created_at.desc()).limit(limit).all()
     return tuple(t for t in (text_for_ai(m).strip() for m in rows) if t)
 
 
@@ -1889,13 +1887,37 @@ def _team_style(db: Session, tenant_id: uuid.UUID) -> str:
     return team_style_block([body for (body,) in rows if body and not body.startswith("[")])
 
 
+def _memory_key(conversation_id: uuid.UUID) -> str:
+    return f"ai:memory_from:{conversation_id}"
+
+
+def reset_ai_memory(conversation_id: uuid.UUID, at: Optional[datetime] = None) -> datetime:
+    """La IA arranca de cero en este chat: lo anterior sigue guardado, pero ya no lo lee.
+    Borrar mensajes no sirve: la sincronización con WhatsApp los vuelve a traer."""
+    at = at or datetime.now(timezone.utc)
+    get_redis().set(_memory_key(conversation_id), at.isoformat())
+    return at
+
+
+def _memory_from(conversation_id: uuid.UUID) -> Optional[datetime]:
+    try:
+        raw = get_redis().get(_memory_key(conversation_id))
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.decode() if isinstance(raw, bytes) else raw)
+    except ValueError:
+        return None
+
+
 def _load_history(db: Session, conversation_id: uuid.UUID) -> list[Message]:
-    return (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
-        .all()
-    )
+    query = db.query(Message).filter(Message.conversation_id == conversation_id)
+    since = _memory_from(conversation_id)
+    if since is not None:
+        query = query.filter(Message.created_at > since)
+    return query.order_by(Message.created_at.asc()).all()
 
 
 def _publish_quota_error(tenant: Tenant, conversation_id: uuid.UUID, err: str) -> None:
