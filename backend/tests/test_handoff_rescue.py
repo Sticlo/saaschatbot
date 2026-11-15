@@ -175,7 +175,8 @@ def test_owner_writes_after_the_alert_so_the_ai_steps_aside(_sleep, mock_generat
     mock_generate.assert_not_called()
     mock_send.assert_not_called()
     assert conv.mode == "manual" and conv.ai_active is False
-    assert _awaiting_human_since(conv.id) is None
+    # Si el dueño se metió y luego no responde, el rescate sigue armado.
+    assert _awaiting_human_since(conv.id) is not None
 
 
 @requires_db
@@ -264,4 +265,52 @@ def test_owner_decision_in_the_panel_cancels_the_rescue(mock_schedule):
         assert enqueue_ai_reply_ids(tenant.id, conv.id, latest.id, db=db) is False
 
     mock_schedule.assert_not_called()
+
+
+@requires_db
+@patch("app.application.ai.ai_queue_service.schedule_ai_retry")
+def test_owner_takeover_schedules_rescue_so_client_is_not_left_hanging(mock_schedule):
+    """Si el celular se mete al chat y luego nadie responde, la IA retoma a los 5 min."""
+    from app.application.ai.ai_service import _awaiting_human_since, _owner_took_over
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _seed
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="¿Tienen habitación para mañana?")
+        conv.ai_active = True
+        conv.mode = "auto"
+        bot_at = _now() - timedelta(minutes=2)
+        _add(db, conv, direction="out", source="bot", body="¡Claro! ¿Para cuántas personas?", at=bot_at)
+        _add(
+            db, conv, direction="out", source="agent",
+            body="Listo, yo te atiendo desde acá",
+            at=bot_at + timedelta(seconds=30),
+        )
+        db.commit()
+        assert _owner_took_over(db, tenant=tenant, conversation=conv) is True
+        assert conv.ai_active is False and conv.mode == "manual"
+        assert _awaiting_human_since(conv.id) is not None
+        db.commit()
+
+    assert mock_schedule.call_args.kwargs["kind"] == "rescue"
+    assert mock_schedule.call_args.kwargs["delay_seconds"] == 300
+
+
+@requires_db
+def test_short_phone_echo_does_not_count_as_owner_takeover():
+    """Un «H» del celular justo después de la IA no aparta el chat."""
+    from app.application.ai.ai_service import _owner_took_over
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _seed
+
+    with SessionLocal() as db:
+        tenant, conv, _ = _seed(db, body="H")
+        conv.ai_active = True
+        conv.mode = "auto"
+        bot_at = _now() - timedelta(seconds=5)
+        _add(db, conv, direction="out", source="bot", body="¡Hola! Bienvenida al hotel 🏨", at=bot_at)
+        _add(db, conv, direction="out", source="agent", body="H", at=bot_at + timedelta(seconds=1))
+        db.commit()
+        assert _owner_took_over(db, tenant=tenant, conversation=conv) is False
+        assert conv.ai_active is True and conv.mode == "auto"
 

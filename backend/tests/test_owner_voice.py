@@ -176,7 +176,7 @@ def test_ai_does_not_switch_itself_on_where_the_owner_writes(mock_classify):
         tenant, conv, _ = _seed(db, body="¿Qué más primo, cuánto le costó eso?")
         conv.ai_active = False
         conv.bait_sent = False
-        _add(db, conv, direction="out", source="agent", body="Quiubo primo", at=_now() - timedelta(days=2))
+        _add(db, conv, direction="out", source="agent", body="Quiubo primo", at=_now() - timedelta(minutes=20))
         db.commit()
         assert maybe_auto_enable_ai_for_inbound(
             tenant=tenant, conversation=conv, body="¿Qué más primo, cuánto le costó eso?", db=db
@@ -184,6 +184,33 @@ def test_ai_does_not_switch_itself_on_where_the_owner_writes(mock_classify):
 
     mock_classify.assert_not_called()
     assert conv.ai_active is False
+
+
+@requires_db
+@patch("app.application.ai.ai_auto_enable_service.classify_inbound_message")
+def test_old_phone_greeting_does_not_block_ai_on_a_new_question(mock_classify):
+    """Saludo automático del celular hace horas: la consulta nueva sí la puede tomar la IA."""
+    from app.application.ai.ai_auto_enable_service import maybe_auto_enable_ai_for_inbound
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _seed
+
+    mock_classify.return_value = {"category": "duda"}
+    with SessionLocal() as db:
+        tenant, conv, _ = _seed(db, body="¿Cuánto vale la habitación?")
+        conv.ai_active = False
+        conv.bait_sent = False
+        conv.imported_legacy = False
+        _add(
+            db, conv, direction="out", source="agent",
+            body="¡Hola! 👋 Bienvenido(a) a Hotel Cannes",
+            at=_now() - timedelta(hours=12),
+        )
+        db.commit()
+        assert maybe_auto_enable_ai_for_inbound(
+            tenant=tenant, conversation=conv, body="¿Cuánto vale la habitación?", db=db
+        ) is True
+
+    assert conv.ai_active is True
 
 
 def _meanwhile(change):

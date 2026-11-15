@@ -312,11 +312,17 @@ def _ai_enabled_by_owner_at(conversation_id: uuid.UUID) -> Optional[datetime]:
         return None
 
 
+def _meaningful_owner_messages(db: Session, conversation_id: uuid.UUID):
+    """Lo que el dueño escribió de verdad. Un «H» o «ok» suelto (eco del celular al abrir el
+    chat) no cuenta: si contara, la IA se aparta y el cliente se queda colgado."""
+    return owner_messages(db, conversation_id).filter(func.length(func.trim(Message.body)) > 3)
+
+
 def _owner_is_talking(db: Session, conversation: Conversation) -> bool:
     """El dueño escribió en el chat y la IA no ha hablado desde entonces (ni él la prendió después)."""
     since = _awaiting_human_since(conversation.id)
     if since is not None and db.query(
-        owner_messages(db, conversation.id).filter(Message.created_at >= since).exists()
+        _meaningful_owner_messages(db, conversation.id).filter(Message.created_at >= since).exists()
     ).scalar():
         return True
     last_bot = (
@@ -332,7 +338,7 @@ def _owner_is_talking(db: Session, conversation: Conversation) -> bool:
         (t for t in (last_bot, _ai_enabled_by_owner_at(conversation.id)) if t is not None),
         default=None,
     )
-    query = owner_messages(db, conversation.id)
+    query = _meaningful_owner_messages(db, conversation.id)
     if floor is not None:
         query = query.filter(Message.created_at > floor)
     return db.query(query.exists()).scalar()
@@ -340,14 +346,27 @@ def _owner_is_talking(db: Session, conversation: Conversation) -> bool:
 
 def _owner_took_over(db: Session, *, tenant: Tenant, conversation: Conversation) -> bool:
     """El dueño le está escribiendo al cliente (panel o celular): el chat es suyo y la IA no
-    habla por él, ni en chats de clientes que atiende él ni en los personales."""
+    habla por él, ni en chats de clientes que atiende él ni en los personales.
+    Si se metió y luego no responde, a los 5 min la IA retoma para que el cliente no quede colgado."""
     if not conversation.ai_active or conversation.mode != ConversationMode.AUTO.value:
         return False
     if not _owner_is_talking(db, conversation):
         return False
     conversation.ai_active = False
     conversation.mode = ConversationMode.MANUAL.value
-    clear_awaiting_human(conversation.id)
+    latest_in = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.direction == MessageDirection.IN.value,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    if latest_in is not None:
+        _await_human(tenant.id, conversation.id, latest_in.id)
+    else:
+        clear_awaiting_human(conversation.id)
     db.flush()
     publish_conversation_updated(tenant.id, conversation)
     log.info("El dueño tomó el chat: la IA se aparta conv=%s", conversation.id)

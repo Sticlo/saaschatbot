@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import exists
@@ -16,6 +17,9 @@ from app.application.messaging.message_service import (
 from app.infrastructure.ai import gemini_client
 from app.domain.entities import Conversation, Message, Tenant
 from app.domain.entities.enums import ConversationMode, MessageDirection, MessageSource
+
+# Si el celular mandó el saludo automático hace horas, no bloquea la IA en la consulta nueva.
+OWNER_HANDLING_WINDOW = timedelta(hours=4)
 
 
 def owner_messages(db: Session, conversation_id: uuid.UUID) -> Query:
@@ -38,6 +42,15 @@ def owner_wrote_in_chat(db: Session, conversation_id: uuid.UUID) -> bool:
     return db.query(owner_messages(db, conversation_id).exists()).scalar()
 
 
+def owner_is_handling_chat(db: Session, conversation_id: uuid.UUID) -> bool:
+    """El dueño atendió este chat hace poco (panel o celular). Un saludo viejo del WhatsApp
+    Business no cuenta: si contara, la IA nunca entraría en ese número."""
+    cutoff = datetime.now(timezone.utc) - OWNER_HANDLING_WINDOW
+    return db.query(
+        owner_messages(db, conversation_id).filter(Message.created_at >= cutoff).exists()
+    ).scalar()
+
+
 def maybe_auto_enable_ai_for_inbound(
     *,
     tenant: Tenant,
@@ -50,7 +63,7 @@ def maybe_auto_enable_ai_for_inbound(
     - Carnada enviada → siempre al responder.
     - Contacto nuevo (no importado) → si el mensaje parece consulta de negocio.
     - Chat importado (amigos/agenda) → nunca, salvo carnada.
-    - Chat donde el dueño ya escribe (familia, amigos, clientes que atiende él) → nunca.
+    - Chat donde el dueño está atendiendo ahora (familia, amigos, clientes suyos) → nunca.
     - Nunca si el agente ya decidió la IA de este chat o está en modo manual.
     - Nunca en el chat del número que recibe las alertas (el propio dueño).
     """
@@ -70,7 +83,7 @@ def maybe_auto_enable_ai_for_inbound(
     if conversation.imported_legacy:
         return False
 
-    if db is not None and conversation.id is not None and owner_wrote_in_chat(db, conversation.id):
+    if db is not None and conversation.id is not None and owner_is_handling_chat(db, conversation.id):
         return False
 
     # Un contacto nuevo que manda audio o foto casi siempre está consultando; el texto llega al procesarlo.
