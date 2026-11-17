@@ -123,8 +123,10 @@ def reply_format_instruction(
         rules.append("- shortcut_id siempre null (no hay atajos).")
     if has_photos:
         rules.append(
-            f'- photo_ref = ref de un producto con 📷 cuando el cliente quiere verlo, "{PHOTOS_ALL}" si pide ver '
-            "todas las fotos u opciones; si no, null."
+            f'- photo_ref = ref de un producto con 📷 cuando el cliente quiere verlo (también si dice '
+            f'«mostrar», «cómo es», «ver la habitación» o pide video), "{PHOTOS_ALL}" si pide ver todas, '
+            "ambas o las habitaciones en general. Si dices «Mira 👇» o que le pasas fotos, photo_ref "
+            "OBLIGATORIO: sin eso el cliente no recibe nada. Si no toca mostrar, null."
         )
     if not booking_enabled:
         rules.append(
@@ -452,23 +454,52 @@ def file_choice_message(message: str, choices: list[dict]) -> str:
 PHOTOS_ALL = "todas"
 _ALL_WORDS = frozenset({PHOTOS_ALL, "todos", "all"})
 MAX_PRODUCTS_PER_PHOTO_REPLY = 6
-_ALL_RE = re.compile(r"\btod[ao]s\b")
+_ALL_RE = re.compile(r"\btod[ao]s\b|\bamb[ao]s\b|\blas\s+dos\b|\blos\s+dos\b|\ben\s+general\b")
 
-_ASKS_PHOTO_RE = re.compile(r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\b")
-_SHOWS_RE = re.compile(r"\bmira\b|\baqui\s+(?:estan|esta|las|la)\b|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b")
+# No solo «foto»: «mostrar la habitación», «cómo es», «ver ambas», «mándame un video».
+_ASKS_PHOTO_RE = re.compile(
+    r"\bfotos?\b|\bfoticos?\b|\bimagen(?:es)?\b|\bpics?\b|\bvideos?\b"
+    r"|\b(?:me\s+)?(?:puedes?\s+)?(?:mostrar|muestrame|muéstrame|muestra)\b"
+    r"|\b(?:como|cómo)\s+(?:es|son|se\s+ve(?:n)?)\b"
+    r"|\b(?:quiero|puedo|dejame|déjame|para)\s+ver\b"
+    r"|\bver\s+(?:la\s+|las\s+|el\s+|los\s+)?(?:habitacion|habitaciones|fotos?|ambas|las\s+dos)"
+)
+_SHOWS_RE = re.compile(
+    r"\bmira\b|\baqui\s+(?:estan|esta|las|la|van|te\s+va)\b"
+    r"|\bte\s+(?:las?|los?)\s+(?:paso|mando|envio|comparto)\b"
+)
+_OFFERS_PHOTO_RE = re.compile(
+    r"\b(?:te\s+)?(?:comparto|mando|envio|paso|muestro)\s+(?:las?\s+)?fotos?\b"
+    r"|\bfotos?\s+de\s+la\s+habitacion\b"
+)
+_PRODUCT_SHOW_RE = re.compile(
+    r"\bhabitacion|\bsencilla\b|\bfamiliar\b|\bdoble\b|\bfotos?\b|\b📷"
+)
 
 
 def shows_photos(message: str, client_text: str, recent: tuple[str, ...] = ()) -> bool:
-    """El cliente pidió fotos (o reclama las que no le llegaron) y la respuesta dice que ahí van.
-    `recent`: «¿De cuál quieres fotos?» → «la sencilla»: el pedido de fotos quedó un par de mensajes atrás."""
+    """El cliente pidió ver el producto (o reclama lo que no le llegó) y la respuesta dice que ahí va.
+    `recent`: «¿De cuál quieres fotos?» → «la sencilla»: el pedido quedó un par de mensajes atrás.
+    Ojo: un «👇» de pago/Nequi no cuenta salvo que hable de habitación o fotos."""
     reply = _plain(message)
     asked = _plain(client_text)
+    showing = bool(
+        _SHOWS_RE.search(reply)
+        or _PROMISE_RE.search(reply)
+        or "👇" in (message or "")
+        or _OFFERS_PHOTO_RE.search(reply)
+    )
+    if not showing:
+        return False
     wants = (
         _ASKS_PHOTO_RE.search(asked)
-        or (asks_to_resend(client_text) and _ASKS_PHOTO_RE.search(reply))
+        or (asks_to_resend(client_text) and (_ASKS_PHOTO_RE.search(reply) or showing))
         or any(_ASKS_PHOTO_RE.search(_plain(t)) for t in recent[:4])
     )
-    return bool(wants and (_SHOWS_RE.search(reply) or _PROMISE_RE.search(reply)))
+    if wants:
+        return True
+    # «¡Claro! Mira 👇 La Sencilla tiene…» sin que el cliente diga la palabra «foto».
+    return bool(_PRODUCT_SHOW_RE.search(reply) or _OFFERS_PHOTO_RE.search(reply))
 
 
 def _best_product(text: str, products: list):
@@ -498,7 +529,10 @@ def infer_photo_ref(
     with_photos = [p for p in products if p.photos]
     if not with_photos:
         return None
-    if len(with_photos) > 1 and _ALL_RE.search(_plain(client_text)):
+    asked = _plain(client_text)
+    if len(with_photos) > 1 and (
+        _ALL_RE.search(asked) or _ALL_RE.search(_plain(message))
+    ):
         return PHOTOS_ALL
     named = _ref_in_text(message, with_photos) or _best_product(f"{client_text} {message}", with_photos)
     if named is None:
@@ -508,6 +542,9 @@ def infer_photo_ref(
                 break
     if named is None and len(with_photos) == 1:
         named = with_photos[0]
+    if named is None and len(with_photos) > 1 and _ASKS_PHOTO_RE.search(asked):
+        # «Muéstrame las habitaciones» / «ver ambas» sin nombrar una: mandar todas, no mentir con 👇 vacío.
+        return PHOTOS_ALL
     return product_ref(named) if named is not None else None
 
 

@@ -202,6 +202,68 @@ def test_photo_picked_after_asking_which_one_is_attached():
     assert fixed.photo_ref == product_ref(single)
 
 
+def test_show_room_without_saying_foto_still_attaches():
+    """«Cómo es / mostrar / ver ambas» sin la palabra foto: igual hay que mandar las imágenes."""
+    import uuid
+    from types import SimpleNamespace
+
+    from app.application.ai.ai_shortcut_service import PHOTOS_ALL, attach_promised_media
+    from app.application.products.product_service import product_ref
+
+    single = SimpleNamespace(id=uuid.uuid4(), name="Habitación Sencilla", photos=["a.jpg"])
+    family = SimpleNamespace(id=uuid.uuid4(), name="Habitación Familiar", photos=["b.jpg"])
+    rooms = [single, family]
+
+    how = attach_promised_media(
+        _reply("¡Claro! Mira 👇  La Sencilla tiene cama y colchón nuevos, baño privado."),
+        client_text="Como es la habitación porfa",
+        products=rooms,
+        shortcuts=[],
+    )
+    assert how.photo_ref == product_ref(single)
+
+    show = attach_promised_media(
+        _reply("¡Claro que sí! Mira 👇  ¿Para qué fechas la necesitarías?"),
+        client_text="Me puedes mostrar la habitación",
+        products=rooms,
+        shortcuts=[],
+    )
+    assert show.photo_ref == PHOTOS_ALL
+
+    both = attach_promised_media(
+        _reply("¡Claro! Mira 👇"),
+        client_text="Puedo ver ambas por favor?",
+        products=rooms,
+        shortcuts=[],
+    )
+    assert both.photo_ref == PHOTOS_ALL
+
+    video = attach_promised_media(
+        _reply("No manejo video por aquí, pero si quieres te comparto fotos de la habitación para que la veas."),
+        client_text="Me puedes enviar un video porfa",
+        products=rooms,
+        shortcuts=[],
+        recent=("Para salir 21 bien temprano", "¡Listo! Te recomiendo la Habitación Sencilla"),
+    )
+    assert video.photo_ref == product_ref(single)
+
+
+def test_payment_arrow_does_not_attach_room_photos():
+    import uuid
+    from types import SimpleNamespace
+
+    from app.application.ai.ai_shortcut_service import attach_promised_media
+
+    single = SimpleNamespace(id=uuid.uuid4(), name="Habitación Sencilla", photos=["a.jpg"])
+    fixed = attach_promised_media(
+        _reply("¡Perfecto! Aquí te va 👇  Cuando hagas el pago, mándanos el comprobante."),
+        client_text="Listo quiero separar",
+        products=[single],
+        shortcuts=[],
+    )
+    assert fixed.photo_ref is None
+
+
 def test_asking_for_all_photos_sends_every_product():
     import uuid
     from types import SimpleNamespace
