@@ -189,7 +189,9 @@ def enqueue_ai_reply_ids(
             log.info("IA no encolada conv=%s: %s", conversation_id, reason)
             from app.application.ai.ai_service import schedule_rescue_if_awaiting
 
-            schedule_rescue_if_awaiting(tenant_id, conversation_id, message_id)
+            schedule_rescue_if_awaiting(
+                tenant_id, conversation_id, message_id, conversation=conversation
+            )
             return False
         if not allow_stale:
             from app.domain.entities import Message

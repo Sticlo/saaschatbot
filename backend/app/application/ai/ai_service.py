@@ -546,13 +546,32 @@ def clear_awaiting_human(conversation_id: uuid.UUID) -> None:
 
 
 def schedule_rescue_if_awaiting(
-    tenant_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    *,
+    conversation: Optional[Conversation] = None,
 ) -> bool:
-    """El cliente volvió a escribir en un chat que la IA pasó a una persona."""
-    if _awaiting_human_since(conversation_id) is None:
-        return False
-    _schedule_rescue(tenant_id, conversation_id, message_id)
-    return True
+    """El cliente volvió a escribir en un chat que una persona debía atender.
+    También arma el rescate si el celular se metió, contestó algo y se fue: sin esto el
+    cliente pide fotos u otra cosa y se queda colgado pensando que la IA «cerró» el chat."""
+    if _awaiting_human_since(conversation_id) is not None:
+        _schedule_rescue(tenant_id, conversation_id, message_id)
+        return True
+    if conversation is not None and _silent_owner_takeover(conversation):
+        _await_human(tenant_id, conversation_id, message_id)
+        return True
+    return False
+
+
+def _silent_owner_takeover(conversation: Conversation) -> bool:
+    """El dueño tomó el chat desde el celular/panel sin apagar la IA a propósito (ai_set_by_agent)."""
+    return (
+        not conversation.ai_active
+        and conversation.mode == ConversationMode.MANUAL.value
+        and not conversation.ai_set_by_agent
+        and conversation.status != ConversationStatus.EXCLUDED.value
+    )
 
 
 def _remind_owner_of_waiting_client(tenant: Tenant, conversation: Conversation, *, resumed: bool) -> None:

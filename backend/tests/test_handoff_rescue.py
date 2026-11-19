@@ -261,10 +261,31 @@ def test_owner_decision_in_the_panel_cancels_the_rescue(mock_schedule):
 
     with SessionLocal() as db:
         tenant, conv, latest, _ = _handed_off_chat(db, client_wrote_again=True)
+        conv.ai_set_by_agent = True  # la apagó a propósito en el panel
         clear_awaiting_human(conv.id)
+        db.commit()
         assert enqueue_ai_reply_ids(tenant.id, conv.id, latest.id, db=db) is False
 
     mock_schedule.assert_not_called()
+
+
+@requires_db
+@patch("app.application.ai.ai_queue_service.schedule_ai_retry")
+def test_client_writing_again_after_phone_takeover_rearms_rescue(mock_schedule):
+    """Celular contestó, se fue, cliente pide fotos: a los 5 min la IA retoma."""
+    from app.application.ai.ai_queue_service import enqueue_ai_reply_ids
+    from app.application.ai.ai_service import _awaiting_human_since, clear_awaiting_human
+    from app.infrastructure.persistence.database import SessionLocal
+
+    with SessionLocal() as db:
+        tenant, conv, latest, _ = _handed_off_chat(db, client_wrote_again=True)
+        conv.ai_set_by_agent = False
+        clear_awaiting_human(conv.id)
+        db.commit()
+        assert enqueue_ai_reply_ids(tenant.id, conv.id, latest.id, db=db) is False
+        assert _awaiting_human_since(conv.id) is not None
+
+    assert mock_schedule.call_args.kwargs["kind"] == "rescue"
 
 
 @requires_db
