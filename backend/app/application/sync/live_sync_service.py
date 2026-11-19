@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.domain.entities import Conversation, Message, Tenant, WhatsAppSession
@@ -16,6 +17,13 @@ from app.application.sync.chat_sync_service import _import_messages, _load_messa
 from app.application.realtime.realtime_service import publish_conversation_updated
 
 log = logging.getLogger(__name__)
+
+
+def _is_deadlock(exc: BaseException) -> bool:
+    if isinstance(exc, OperationalError) and "deadlock" in str(exc).lower():
+        return True
+    cause = getattr(exc, "orig", None) or getattr(exc, "__cause__", None)
+    return cause is not None and "deadlock" in str(cause).lower()
 
 
 def _finalize_inbound_ai(
@@ -63,6 +71,7 @@ def _finalize_inbound_ai(
             log.info("IA encolada tras sync conv=%s", conversation.id)
     except Exception:
         log.exception("finalize inbound AI conv=%s", conversation.id)
+        db.rollback()
     return scheduled
 
 
@@ -116,34 +125,44 @@ def pull_live_conversation_messages(
     ]
 
     imported = 0
-    seen_ids: set[str] = set()
-    try:
-        for jid, records in records_by_jid:
-            if not records:
+    for attempt in range(2):
+        seen_ids: set[str] = set()
+        imported = 0
+        try:
+            for jid, records in records_by_jid:
+                if not records:
+                    continue
+                imported += _import_messages(
+                    db,
+                    tenant=tenant,
+                    conversation=conversation,
+                    records=records,
+                    expected_phone=conversation.contact_phone,
+                    expected_jid=conversation.contact_jid or "",
+                    seen_evolution_ids=seen_ids,
+                )
+
+            if imported:
+                db.flush()
+                publish_conversation_updated(tenant.id, conversation)
+
+            _finalize_inbound_ai(db, tenant=tenant, conversation=conversation)
+            db.commit()
+            break
+        except Exception as exc:
+            db.rollback()
+            if attempt == 0 and _is_deadlock(exc):
+                log.warning(
+                    "deadlock en sync-live conv=%s; se reintenta una vez",
+                    conversation.id,
+                )
                 continue
-            imported += _import_messages(
-                db,
-                tenant=tenant,
-                conversation=conversation,
-                records=records,
-                expected_phone=conversation.contact_phone,
-                expected_jid=conversation.contact_jid or "",
-                seen_evolution_ids=seen_ids,
+            log.exception(
+                "pull_live falló conv=%s jids=%s — devolviendo mensajes de BD",
+                conversation.id,
+                jids,
             )
-
-        if imported:
-            db.flush()
-            publish_conversation_updated(tenant.id, conversation)
-
-        _finalize_inbound_ai(db, tenant=tenant, conversation=conversation)
-        db.commit()
-    except Exception:
-        log.exception(
-            "pull_live falló conv=%s jids=%s — devolviendo mensajes de BD",
-            conversation.id,
-            jids,
-        )
-        db.rollback()
+            break
 
     messages = (
         db.query(Message)
