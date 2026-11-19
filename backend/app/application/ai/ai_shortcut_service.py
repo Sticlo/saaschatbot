@@ -542,8 +542,10 @@ def infer_photo_ref(
                 break
     if named is None and len(with_photos) == 1:
         named = with_photos[0]
-    if named is None and len(with_photos) > 1 and _ASKS_PHOTO_RE.search(asked):
-        # «Muéstrame las habitaciones» / «ver ambas» sin nombrar una: mandar todas, no mentir con 👇 vacío.
+    if named is None and len(with_photos) > 1 and (
+        _ALL_RE.search(asked) or re.search(r"\bhabitaciones\b|\blas\s+(?:fotos|imagenes)\b", asked)
+    ):
+        # «Ver ambas / todas / las habitaciones»: mandar todas. «¿Tienes fotos?» a secas → preguntar cuál.
         return PHOTOS_ALL
     return product_ref(named) if named is not None else None
 

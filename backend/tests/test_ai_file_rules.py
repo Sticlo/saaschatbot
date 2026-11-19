@@ -224,7 +224,7 @@ def test_show_room_without_saying_foto_still_attaches():
 
     show = attach_promised_media(
         _reply("¡Claro que sí! Mira 👇  ¿Para qué fechas la necesitarías?"),
-        client_text="Me puedes mostrar la habitación",
+        client_text="Me puedes mostrar las habitaciones",
         products=rooms,
         shortcuts=[],
     )
@@ -237,6 +237,16 @@ def test_show_room_without_saying_foto_still_attaches():
         shortcuts=[],
     )
     assert both.photo_ref == PHOTOS_ALL
+
+    # «¿Tienes fotos?» / «mostrar la habitación» sin decir cuál: preguntar, no mandar todo el catálogo.
+    unclear = attach_promised_media(
+        _reply("¡Claro! Mira 👇"),
+        client_text="¿Tienes fotos?",
+        products=rooms,
+        shortcuts=[],
+    )
+    assert unclear.photo_ref is None
+    assert "¿De cuál quieres ver fotos" in unclear.message
 
     video = attach_promised_media(
         _reply("No manejo video por aquí, pero si quieres te comparto fotos de la habitación para que la veas."),
