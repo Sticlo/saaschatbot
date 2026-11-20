@@ -337,6 +337,28 @@ def test_short_phone_echo_does_not_count_as_owner_takeover():
 
 
 @requires_db
+def test_whatsapp_business_auto_greeting_does_not_take_over_from_ai():
+    """La respuesta automática del WhatsApp Business no puede apagar la IA."""
+    from app.application.ai.ai_service import _owner_took_over
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _seed
+
+    canned = (
+        "¡Hola! 👋 Bienvenido(a) a Hotel Cannes Medellín 🏨\n\n"
+        "¡Claro que sí! Con gusto te ayudamos con tu reserva 😊\n\n"
+        "Para confirmar disponibilidad, cuéntanos: 📅 ¿Qué fecha de ingreso y salida necesitas?"
+    )
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="Hola buenos días Me podrías dar información")
+        conv.ai_active = True
+        conv.mode = "auto"
+        _add(db, conv, direction="out", source="agent", body=canned, at=_now())
+        db.commit()
+        assert _owner_took_over(db, tenant=tenant, conversation=conv) is False
+        assert conv.ai_active is True and conv.mode == "auto"
+
+
+@requires_db
 @patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
 @patch("app.application.ai.ai_service.send_reply_with_shortcut")
 @patch("app.application.ai.ai_service.generate_qualify_reply")

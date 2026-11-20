@@ -314,7 +314,8 @@ def _ai_enabled_by_owner_at(conversation_id: uuid.UUID) -> Optional[datetime]:
 
 def _meaningful_owner_messages(db: Session, conversation_id: uuid.UUID):
     """Lo que el dueño escribió de verdad. Un «H» o «ok» suelto (eco del celular al abrir el
-    chat) no cuenta: si contara, la IA se aparta y el cliente se queda colgado."""
+    chat) no cuenta: si contara, la IA se aparta y el cliente se queda colgado.
+    El saludo automático de WhatsApp Business ya se descarta en owner_messages."""
     return owner_messages(db, conversation_id).filter(func.length(func.trim(Message.body)) > 3)
 
 

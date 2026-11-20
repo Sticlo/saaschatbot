@@ -24,12 +24,18 @@ OWNER_HANDLING_WINDOW = timedelta(hours=4)
 
 def owner_messages(db: Session, conversation_id: uuid.UUID) -> Query:
     """Lo que el dueño escribió él mismo (panel o celular). El eco de un envío de la IA puede
-    guardarse como del dueño: se descarta si la IA mandó ese mismo texto en el chat."""
+    guardarse como del dueño: se descarta si la IA mandó ese mismo texto en el chat.
+    El saludo automático de WhatsApp Business tampoco cuenta: si contara, apaga la IA en cada
+    chat nuevo y el cliente se queda colgado después de contestar."""
+    from sqlalchemy import func
+
     bot = aliased(Message)
     return db.query(Message).filter(
         Message.conversation_id == conversation_id,
         Message.direction == MessageDirection.OUT.value,
         Message.source == MessageSource.AGENT.value,
+        ~func.lower(Message.body).like("%para confirmar disponibilidad%cuéntanos%"),
+        ~func.lower(Message.body).like("%para confirmar disponibilidad%cuentanos%"),
         ~exists().where(
             bot.conversation_id == Message.conversation_id,
             bot.source.in_((MessageSource.BOT.value, MessageSource.BAIT.value)),
