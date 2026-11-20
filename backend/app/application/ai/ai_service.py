@@ -487,7 +487,20 @@ def _step_aside_from_bot(db: Session, *, tenant: Tenant, conversation: Conversat
 
     conversation.ai_active = False
     conversation.mode = ConversationMode.MANUAL.value
-    clear_awaiting_human(conversation.id)
+    latest_in = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.direction == MessageDirection.IN.value,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    # Un tope de mensajes no puede dejar al cliente colgado: si nadie retoma, la IA vuelve.
+    if latest_in is not None:
+        _await_human(tenant.id, conversation.id, latest_in.id)
+    else:
+        clear_awaiting_human(conversation.id)
     db.flush()
     publish_conversation_updated(tenant.id, conversation)
     label = _contact_label(conversation)

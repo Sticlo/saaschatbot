@@ -223,7 +223,9 @@ def other_side_bot_reason(turns: Sequence[Turn]) -> Optional[str]:
 
 # --- Topes por chat ----------------------------------------------------------------------------
 
-CHAT_REPLY_CAPS = ((timedelta(minutes=10), 8), (timedelta(hours=1), 20), (timedelta(days=1), 50))
+# Hotel/ventas: el cliente suelta muchas preguntas cortas (precio, dirección, check-in…).
+# 8 en 10 min apagaba la IA a mitad de la cotización y el cliente creía que «dejó de responder».
+CHAT_REPLY_CAPS = ((timedelta(minutes=10), 18), (timedelta(hours=1), 40), (timedelta(days=1), 90))
 _SAME_REPLY_GAP = timedelta(seconds=20)
 
 

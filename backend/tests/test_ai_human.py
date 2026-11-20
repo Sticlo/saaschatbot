@@ -114,5 +114,8 @@ def test_robotic_reply_is_rewritten_once(monkeypatch):
 def test_chat_caps_count_replies_not_message_parts():
     parts = [T0 + timedelta(seconds=s) for s in (0, 2, 4, 6, 8)]
     assert chat_cap_reason(parts, now=T0 + timedelta(minutes=1)) is None
+    # 8 respuestas en 10 min ya no bastan para apartarse (antes sí; cortaba cotizaciones del hotel).
     replies = [T0 + timedelta(minutes=m) for m in range(8)]
+    assert chat_cap_reason(replies, now=T0 + timedelta(minutes=9)) is None
+    replies = [T0 + timedelta(seconds=30 * i) for i in range(18)]
     assert chat_cap_reason(replies, now=T0 + timedelta(minutes=9))
