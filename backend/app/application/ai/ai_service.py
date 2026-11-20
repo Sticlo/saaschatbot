@@ -707,6 +707,9 @@ def rescue_unanswered_handoff(
     conversation.ai_active = True
     conversation.mode = ConversationMode.AUTO.value
     clear_awaiting_human(conversation_id)
+    # Sin esto, el mensaje viejo del celular (recibo, «dame un momento») vuelve a apartar
+    # la IA en el mismo process_ai_reply y el chat entra en un bucle rescue ↔ takeover.
+    mark_ai_enabled_by_owner(conversation_id)
     db.commit()
     publish_conversation_updated(tenant.id, conversation)
     log.info("Nadie respondió al cliente: la IA retoma el chat conv=%s", conversation_id)

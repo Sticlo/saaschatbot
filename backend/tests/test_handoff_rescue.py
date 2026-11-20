@@ -335,3 +335,48 @@ def test_short_phone_echo_does_not_count_as_owner_takeover():
         assert _owner_took_over(db, tenant=tenant, conversation=conv) is False
         assert conv.ai_active is True and conv.mode == "auto"
 
+
+@requires_db
+@patch("app.application.conversations.interest_alert_service.send_alert", return_value=True)
+@patch("app.application.ai.ai_service.send_reply_with_shortcut")
+@patch("app.application.ai.ai_service.generate_qualify_reply")
+@patch("app.application.ai.ai_service.time.sleep", return_value=None)
+def test_rescue_after_owner_phone_reply_does_not_loop_back_to_manual(
+    _sleep, mock_generate, mock_send, _alert
+):
+    """El celular mandó el recibo y se fue: al rescatar, ese mensaje viejo no puede volver a apagar la IA."""
+    from app.application.ai.ai_service import _awaiting_human_since, _owner_took_over
+    from app.infrastructure.persistence.database import SessionLocal
+    from tests.test_sales_stage_and_booking import _seed
+
+    mock_generate.return_value = AiGeneratedReply(
+        message="Claro, la dirección es Carrera 50. ¿Algo más?", stage="cierre"
+    )
+    mock_send.return_value = True
+
+    with SessionLocal() as db:
+        tenant, conv, msg = _seed(db, body="¿Me pasas la dirección?")
+        conv.ai_active = True
+        conv.mode = "auto"
+        bot_at = _now() - timedelta(minutes=20)
+        _add(db, conv, direction="out", source="bot", body="¡Claro! Te confirmo en un momento", at=bot_at)
+        _add(
+            db, conv, direction="out", source="agent",
+            body="¡Listo! Te compartimos el recibo de tu reserva",
+            at=bot_at + timedelta(minutes=2),
+        )
+        pending = _add(
+            db, conv, direction="in", source="contact", body="Y la dirección porfa",
+            at=bot_at + timedelta(minutes=5),
+        )
+        db.commit()
+        assert _owner_took_over(db, tenant=tenant, conversation=conv) is True
+        db.commit()
+
+        assert _rescue(db, tenant, conv, pending) is True
+        assert conv.ai_active is True and conv.mode == "auto"
+        # El mensaje viejo del celular ya no la aparta; si quedó en awaiting es por el
+        # cierre («el negocio te confirma»), no por otro takeover.
+        assert mock_send.called
+        assert _owner_took_over(db, tenant=tenant, conversation=conv) is False
+
